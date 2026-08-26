@@ -131,18 +131,16 @@ both extra installs on Termux. Drawing our own TUI makes the plugin a single
 self-contained binary on every platform — which is why the language has to be a
 compiled one.
 
-**Rust + ratatui**, settled by building a prototype in each (#4) and then
-measuring the build route that decision turned on (#5). Both languages produce
-the Android-ABI binary Termux requires, from CI, on a stock runner — so the
-axis that first picked Go is void, and the choice fell to the remaining scores
-plus preference. Rust is smaller (0.59 MB vs 4.98 MB, measured on-device) and
-starts faster (~19 ms vs ~26 ms), neither of which is load-bearing at this
-scale.
+**Rust + ratatui**, settled by prototype (#4) and by measuring the build route
+that decision turned on (#5); §14.5 is the decision record. Both languages
+reach the Android-ABI binary Termux requires from a stock CI runner, so the
+axis that first picked Go is void and nothing else was load-bearing.
 
 **On Termux the binary must target `aarch64-linux-android`, not a static
 generic-Linux build** — a platform property that holds whichever language wins
-(§2). Reaching that target needs the Android NDK, which `ubuntu-latest` ships
-preinstalled; §12 states what that costs the release workflow.
+(§2). Cross-compiling to it from a non-Android host needs the Android NDK,
+which `ubuntu-latest` ships preinstalled; §12 states what that costs the
+release workflow.
 
 ## 3. Execution model — the TTY constraint shapes everything
 
@@ -532,9 +530,13 @@ sets a few obligations the design has to carry rather than bolt on afterwards:
   preinstalled on `ubuntu-latest` (`ANDROID_NDK_ROOT`), so the cost is a
   `rustup target add aarch64-linux-android` and pointing
   `CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER` at the NDK's
-  `aarch64-linux-android24-clang` — measured at 22 s for a cold build (#5). No
-  NDK installation step is required; pinning the NDK version is worth doing
-  anyway, since the runner image carries several and rotates them.
+  `aarch64-linux-android24-clang` — measured at 22 s for a cold build (#5). The
+  `24` is the minimum Android API level the binary targets, and matches what #5
+  built and ran against on the device. No NDK installation step is required,
+  but **pin the NDK by writing its version into the path**
+  (`$ANDROID_SDK_ROOT/ndk/<version>`) rather than following `ANDROID_NDK_ROOT`:
+  the runner image carries several versions and rotates which one that variable
+  points at, so an unpinned workflow changes toolchain under you.
 
 ## 13. Development loop
 
@@ -577,13 +579,19 @@ build entry ran.
    it: Termux is itself a Bionic environment, so an on-device `cargo build`
    succeeds unaided (49.6 s, first attempt); and `ubuntu-latest` ships the NDK
    preinstalled, so CI reaches the target in 22 s with a `rustup target add`
-   and a linker variable. The artefact carries the right interpreter
-   (`/system/bin/linker64`), and DNS and `getpwuid_r` — the two things a static
-   generic-Linux build loses (§2) — both work.
+   and a linker variable. Both artefacts carry the right interpreter
+   (`/system/bin/linker64`). DNS and `getpwuid_r` — the two things a static
+   generic-Linux build loses (§2) — were exercised by a probe crate built the
+   same way on-device, calling `getpwuid_r` directly rather than through
+   `std::env::home_dir`, which would have read `$HOME` and proved nothing.
+   Neither prototype binary nor the CI artefact was itself run for those two:
+   the CI artefact was inspected, not executed, so its runtime behaviour is
+   inferred from the shared target triple. Running as a plugin pane entrypoint
+   is likewise still unverified — no herdr server was up.
 
    With that axis void the two are level on anything load-bearing: Rust is
-   smaller (0.59 MB vs 4.98 MB on-device) and ~7 ms faster to start, and
-   neither margin is perceptible on a keypress. The deciding input was
-   preference, which the selection framework admits as a tiebreak once the
-   scores are level — not as an overrule of evidence, which is why #5 tested
-   the capability instead of arguing past it.
+   smaller (0.59 MB vs 4.98 MB, both measured on-device) and started ~7 ms
+   faster in #4's macOS run, which was not re-measured here. Neither margin is
+   perceptible on a keypress. The deciding input was preference, admissible as
+   a tiebreak once the scores are level — it did not overrule evidence, which
+   is what #5 existed to establish.

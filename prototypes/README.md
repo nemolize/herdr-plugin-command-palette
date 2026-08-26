@@ -32,20 +32,19 @@ From macOS arm64, no extra system packages (#4):
 | Builds to green | 2 | 1 |
 | Cross-compiles to `aarch64-linux-android` | yes | **no — wants the NDK** |
 
-That last row decided #4 for Go, because Termux needs an Android-ABI binary and
-not a static Linux one (#3). **#5 measured it and it does not hold**: Termux is
-itself a Bionic environment, so an on-device `cargo build` succeeds unaided
-(49.6 s, first attempt, no C toolchain); and `ubuntu-latest` ships the NDK
-preinstalled, so CI reaches the target in 22 s. Both artefacts carry
-`interpreter /system/bin/linker64`, and DNS and `getpwuid_r` — the pair a static
-Linux build loses — both work.
+That last row decided #4 for Go. The row is still true as written — **but #5
+measured it as a deciding axis and it does not hold there**, because Rust
+reaches the target by two routes that do not cross-compile from macOS.
 
-On-device, stripped, both toolchains from `pkg`:
+On-device (Termux, both toolchains from `pkg`), stripped:
 
 | | Go | Rust |
 |---|---|---|
 | Binary | 4.98 MB | 0.59 MB |
+| Cold `--release` build | — | 49.6 s, first attempt |
 
-With the capability gap gone the two are level on anything that matters at this
-scale, and the choice went to **Rust** (#4, #5). The 7 ms and the 4.4 MB are
-real and neither is perceptible on a keypress.
+CI (`ubuntu-latest`, NDK preinstalled) built the same target in 22 s. Both Rust
+artefacts carry `interpreter /system/bin/linker64`.
+
+**The language is Rust; `docs/design.md` §14.5 is the decision record** and
+carries what was and was not verified.
