@@ -1,8 +1,8 @@
 # Prototypes
 
 Two implementations of the same minimal palette, built to decide the
-implementation language (#4). Kept as the evidence behind that decision, and —
-for whichever language wins — as the starting point for the real thing.
+implementation language (#4, revisited in #5). Kept as the evidence behind that
+decision; `rs/` is the starting point for the real thing.
 
 Both do the same work, deliberately: an input line, a fuzzy-filtered candidate
 list, keyboard navigation (up/down/enter/esc), and `herdr pane list` shelled out
@@ -32,6 +32,20 @@ From macOS arm64, no extra system packages (#4):
 | Builds to green | 2 | 1 |
 | Cross-compiles to `aarch64-linux-android` | yes | **no — wants the NDK** |
 
-That last row decided it, because Termux needs an Android-ABI binary and not a
-static Linux one (#3). Whether Rust can produce that artefact some other way —
-built on the device itself — is open in #5.
+That last row decided #4 for Go, because Termux needs an Android-ABI binary and
+not a static Linux one (#3). **#5 measured it and it does not hold**: Termux is
+itself a Bionic environment, so an on-device `cargo build` succeeds unaided
+(49.6 s, first attempt, no C toolchain); and `ubuntu-latest` ships the NDK
+preinstalled, so CI reaches the target in 22 s. Both artefacts carry
+`interpreter /system/bin/linker64`, and DNS and `getpwuid_r` — the pair a static
+Linux build loses — both work.
+
+On-device, stripped, both toolchains from `pkg`:
+
+| | Go | Rust |
+|---|---|---|
+| Binary | 4.98 MB | 0.59 MB |
+
+With the capability gap gone the two are level on anything that matters at this
+scale, and the choice went to **Rust** (#4, #5). The 7 ms and the 4.4 MB are
+real and neither is perceptible on a keypress.
