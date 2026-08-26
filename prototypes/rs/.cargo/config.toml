@@ -1,0 +1,12 @@
+# Cross-compiling to Linux from macOS: the default `cc` gets handed GNU linker
+# flags that macOS's ld rejects, so point those targets at the bundled rust-lld.
+#
+# aarch64-linux-android is deliberately NOT listed. It fails here for a different
+# reason (no Bionic sysroot without the NDK), and forcing rust-lld would also
+# override the working linker when building on Termux itself — which is what #5
+# is measuring.
+[target.aarch64-unknown-linux-musl]
+linker = "rust-lld"
+
+[target.x86_64-unknown-linux-musl]
+linker = "rust-lld"

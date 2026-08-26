@@ -1,0 +1,6 @@
+# Prototype build artefacts (#4). Sources are tracked; outputs are not.
+prototypes/.target/
+prototypes/.gocache/
+prototypes/.gomod/
+prototypes/.cargo/
+prototypes/go/palette-go*
