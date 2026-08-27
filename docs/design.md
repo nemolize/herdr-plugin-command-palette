@@ -3,11 +3,12 @@
 A Herdr plugin that opens a fuzzy-searchable palette over the session and runs
 Herdr operations from it.
 
-Status: design settled. The implementation language is **Go + Bubble Tea**,
-decided by prototype (#4); platform behaviour, popup sizing, and collision
-handling were closed against a live Termux device (#1, #2, #3). What remains
-before coding is choosing the catalog's first twenty entries, which is a reading
-task rather than an open question.
+Status: design settled. The implementation language is **Rust + ratatui**,
+decided by prototype (#4) and confirmed against a measured build route (#5);
+platform behaviour, popup sizing, and collision handling were closed against a
+live Termux device (#1, #2, #3). What remains before coding is choosing the
+catalog's first twenty entries, which is a reading task rather than an open
+question.
 
 Measured figures throughout come from **one device in one configuration**. The
 shape of each conclusion is what generalises — the numbers are not a range to
@@ -130,14 +131,16 @@ both extra installs on Termux. Drawing our own TUI makes the plugin a single
 self-contained binary on every platform — which is why the language has to be a
 compiled one.
 
-**Go + Bubble Tea**, settled by building a prototype in each (#4). The deciding
-axis was the one §2 describes below: Go cross-compiles the Android-ABI binary
-Termux requires from any machine with no toolchain beyond Go, and Rust cannot
-without the Android NDK. Rust won on size (0.53 MB vs 3.74 MB) and startup
-(~19 ms vs ~26 ms), neither of which is load-bearing at this scale.
+**Rust + ratatui**, settled by prototype (#4) and by measuring the build route
+that decision turned on (#5); §14.5 is the decision record. Both languages
+reach the Android-ABI binary Termux requires from a stock CI runner, so the
+axis that first picked Go is void and nothing else was load-bearing.
 
-**On Termux the binary must be `GOOS=android`, not a static generic-Linux
-build** — a platform property that would have held whichever language won (§2).
+**On Termux the binary must target `aarch64-linux-android`, not a static
+generic-Linux build** — a platform property that holds whichever language wins
+(§2). Cross-compiling to it from a non-Android host needs the Android NDK,
+which `ubuntu-latest` ships preinstalled; §12 states what that costs the
+release workflow.
 
 ## 3. Execution model — the TTY constraint shapes everything
 
@@ -428,8 +431,9 @@ platforms = ["linux", "macos"]
 description = "Fuzzy-search and run Herdr's own commands, plugin actions, and session targets."
 
 # Fetches the prebuilt binary for this host from the matching GitHub Release.
-# Selects the musl build on Termux, gnu elsewhere — the manifest cannot express
-# that split, so the script detects the host itself (see docs/design.md §2).
+# Selects the Android-ABI build on Termux, the ordinary Linux one elsewhere —
+# the manifest cannot express that split, so the script detects the host itself
+# (see docs/design.md §2).
 # Skipped by `herdr plugin link`; build locally with cargo when developing.
 [[build]]
 command = ["sh", "herdr/install.sh"]
@@ -493,8 +497,8 @@ CI builds **five** assets:
 
 Termux is a separate asset from ARM Linux, not a shared one. An earlier draft had
 them sharing a static build; a device run (#3) showed that artefact silently
-loses DNS and user lookup on Termux (§2). The exact target triple depends on the
-language, which is still open (§14) — the split does not.
+loses DNS and user lookup on Termux (§2). Termux takes
+`aarch64-linux-android`; other Linux hosts take the ordinary Linux triple.
 
 Two requirements on the install script, both from that finding:
 
@@ -516,7 +520,23 @@ sets a few obligations the design has to carry rather than bolt on afterwards:
   it the plugin cannot be launched at all.
 - Configuration is keyed to no one's machine: popup dimensions, placement, and
   the catalog are all user-overridable through `$HERDR_PLUGIN_CONFIG_DIR`.
-- A LICENSE, and CI that both tests and cuts releases for the four targets.
+- A LICENSE, and CI that both tests and cuts releases for the five assets (§11).
+- **Dependencies are pinned**, not floated: `ratatui` 0.30, `crossterm` 0.29,
+  with `Cargo.lock` committed. A TUI library's API is exactly the surface an
+  agent writes against from recall, and 0.x crates break it on minor bumps; the
+  prototype's first build was green against these versions and that is the
+  contract to hold.
+- **The release workflow needs the Android NDK for the Termux asset.** It is
+  preinstalled on `ubuntu-latest` (`ANDROID_NDK_ROOT`), so the cost is a
+  `rustup target add aarch64-linux-android` and pointing
+  `CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER` at the NDK's
+  `aarch64-linux-android24-clang` — measured at 22 s for a cold build (#5). The
+  `24` is the minimum Android API level the binary targets, and matches what #5
+  built and ran against on the device. No NDK installation step is required,
+  but **pin the NDK by writing its version into the path**
+  (`$ANDROID_SDK_ROOT/ndk/<version>`) rather than following `ANDROID_NDK_ROOT`:
+  the runner image carries several versions and rotates which one that variable
+  points at, so an unpinned workflow changes toolchain under you.
 
 ## 13. Development loop
 
@@ -551,12 +571,27 @@ build entry ran.
 4. ~~**Popup collision**~~ — **settled**, see §6. Re-pressing toggles our own
    popup via the `pane_id` returned at open; another plugin's popup is reported
    and left alone, because no API attributes an existing popup to its owner.
-5. ~~**Implementation language**~~ — **settled: Go + Bubble Tea**, by building a
-   prototype in each (#4). Rust cannot cross-compile the `aarch64-linux-android`
-   binary Termux needs without the NDK (`rust-lld: unable to find library -ldl`
-   / `-llog` / `-lc`); Go produces it with `CGO_ENABLED=0 GOOS=android` and
-   nothing else. Rust won on binary size and startup — 0.53 MB vs 3.74 MB, ~19 ms
-   vs ~26 ms — and neither margin matters on a keypress. The Bubble Tea v2 recall
-   effect showed up exactly once (v1's `Init` signature) and the compiler printed
-   the fix, costing one build; that is why the version pin in §12 is not
-   optional.
+5. ~~**Implementation language**~~ — **settled: Rust + ratatui**, by building a
+   prototype in each (#4) and then testing the one axis that decision rested on
+   (#5). #4 picked Go because Rust could not cross-compile the
+   `aarch64-linux-android` binary from macOS without the NDK (`rust-lld: unable
+   to find library -ldl` / `-llog` / `-lc`). #5 measured two routes that clear
+   it: Termux is itself a Bionic environment, so an on-device `cargo build`
+   succeeds unaided (49.6 s, first attempt); and `ubuntu-latest` ships the NDK
+   preinstalled, so CI reaches the target in 22 s with a `rustup target add`
+   and a linker variable. Both artefacts carry the right interpreter
+   (`/system/bin/linker64`). DNS and `getpwuid_r` — the two things a static
+   generic-Linux build loses (§2) — were exercised by a probe crate built the
+   same way on-device, calling `getpwuid_r` directly rather than through
+   `std::env::home_dir`, which would have read `$HOME` and proved nothing.
+   Neither prototype binary nor the CI artefact was itself run for those two:
+   the CI artefact was inspected, not executed, so its runtime behaviour is
+   inferred from the shared target triple. Running as a plugin pane entrypoint
+   is likewise still unverified — no herdr server was up.
+
+   With that axis void the two are level on anything load-bearing: Rust is
+   smaller (0.59 MB vs 4.98 MB, both measured on-device) and started ~7 ms
+   faster in #4's macOS run, which was not re-measured here. Neither margin is
+   perceptible on a keypress. The deciding input was preference, admissible as
+   a tiebreak once the scores are level — it did not overrule evidence, which
+   is what #5 existed to establish.

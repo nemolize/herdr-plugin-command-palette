@@ -1,8 +1,8 @@
 # Prototypes
 
 Two implementations of the same minimal palette, built to decide the
-implementation language (#4). Kept as the evidence behind that decision, and —
-for whichever language wins — as the starting point for the real thing.
+implementation language (#4, revisited in #5). Kept as the evidence behind that
+decision; `rs/` is the starting point for the real thing.
 
 Both do the same work, deliberately: an input line, a fuzzy-filtered candidate
 list, keyboard navigation (up/down/enter/esc), and `herdr pane list` shelled out
@@ -32,6 +32,19 @@ From macOS arm64, no extra system packages (#4):
 | Builds to green | 2 | 1 |
 | Cross-compiles to `aarch64-linux-android` | yes | **no — wants the NDK** |
 
-That last row decided it, because Termux needs an Android-ABI binary and not a
-static Linux one (#3). Whether Rust can produce that artefact some other way —
-built on the device itself — is open in #5.
+That last row decided #4 for Go. The row is still true as written — **but #5
+measured it as a deciding axis and it does not hold there**, because Rust
+reaches the target by two routes that do not cross-compile from macOS.
+
+On-device (Termux, both toolchains from `pkg`), stripped:
+
+| | Go | Rust |
+|---|---|---|
+| Binary | 4.98 MB | 0.59 MB |
+| Cold `--release` build | — | 49.6 s, first attempt |
+
+CI (`ubuntu-latest`, NDK preinstalled) built the same target in 22 s. Both Rust
+artefacts carry `interpreter /system/bin/linker64`.
+
+**The language is Rust; `docs/design.md` §14.5 is the decision record** and
+carries what was and was not verified.

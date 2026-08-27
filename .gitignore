@@ -3,4 +3,5 @@ prototypes/.target/
 prototypes/.gocache/
 prototypes/.gomod/
 prototypes/.cargo/
+prototypes/rs/target/
 prototypes/go/palette-go*
