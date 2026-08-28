@@ -22,10 +22,14 @@ json_str() {
 # — so the body is what distinguishes a collision from any other failure. The
 # exit status alone cannot: it is 1 for an API error and 1 for a missing binary
 # too, and only the body says which.
+# `--placement` is deliberately not passed: the manifest's [[panes]] entry
+# already declares `popup`, and it governs when the flag is omitted (verified —
+# a second open still collides with `popup already open`). Omitting it keeps the
+# runtime path off `popup`, the one placement value the CLI accepts but does not
+# document, so a future release tightening its parser cannot break the hop.
 response=$("$HERDR_BIN_PATH" plugin pane open \
   --plugin "$HERDR_PLUGIN_ID" \
   --entrypoint "$ENTRYPOINT" \
-  --placement popup \
   --focus 2>&1) && status=0 || status=$?
 
 error_message=$(printf '%s' "$response" | json_str message)
@@ -56,7 +60,7 @@ case "$error_message" in
 esac
 
 # A popup is up, and this is where §6's toggle was to go. It cannot be built on
-# herdr 0.8.2:
+# herdr 0.8.2 (tracked as #12):
 #
 #   - `plugin.pane.close` and `plugin.pane.focus` both REQUIRE a pane_id.
 #   - `plugin.pane.open` returns only {"type":"ok"} — the PluginPaneInfo the

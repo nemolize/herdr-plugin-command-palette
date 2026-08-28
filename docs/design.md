@@ -216,8 +216,10 @@ The risk is honest and worth stating plainly: **this catalog drifts when Herdr
 changes its CLI.** Nothing detects the drift automatically. Two mitigations,
 neither complete:
 
-- Pin `min_herdr_version` and bump it deliberately when the catalog is
-  re-checked against a new release.
+- Pin the catalog's `checked_against` and bump it deliberately when the catalog
+  is re-checked against a new release. It is deliberately not called
+  `min_herdr_version`: the manifest's key of that name is a hard install gate,
+  while this one is a soft baseline the palette only warns about.
 - Have the palette surface a failed dispatch as a visible error naming the
   command id, so a drifted entry reports itself the first time it is used
   instead of silently doing nothing.
@@ -410,8 +412,9 @@ told apart. It is the safe direction the table already argued for: the worst
 outcome is one redundant message, where the alternative risks closing someone
 else's window.
 
-**Toggling is deferred, not dropped.** It needs `plugin.pane.open` to return the
-pane id it already declares in the schema. When a herdr release ships that, the
+**Toggling is deferred, not dropped** — tracked as #12, so the condition has a
+home outside this prose. It needs `plugin.pane.open` to return the pane id it
+already declares in the schema. When a herdr release ships that, the
 id is recorded in `$HERDR_PLUGIN_STATE_DIR` (it must survive between the two
 separate processes an invocation spans, §3), and case 1 becomes buildable
 exactly as first written.
@@ -514,7 +517,7 @@ for any other location; `reviewr` is laid out the same way.
 id = "nemolize.command-palette"
 name = "Command Palette"
 version = "0.1.0"
-min_herdr_version = "0.8.0"
+min_herdr_version = "0.8.2"   # the only release anything was verified on
 platforms = ["linux", "macos"]
 description = "Fuzzy-search and run Herdr's own commands, plugin actions, and session targets."
 

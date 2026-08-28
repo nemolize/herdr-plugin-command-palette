@@ -4,11 +4,13 @@
 # carries (docs/design.md §4). It is TOML next to the binary rather than
 # compiled in, so an entry can be corrected without a rebuild.
 #
-# Checked against herdr 0.8.2. When Herdr changes its CLI this file drifts and
-# nothing detects that automatically — bump min_herdr_version deliberately when
-# it is re-checked, and read a failed dispatch naming a command id as the report
-# of a drifted entry.
-min_herdr_version = "0.8.2"
+# The herdr release these entries were last checked against. Distinct from the
+# manifest's `min_herdr_version`, which is a hard install gate: this one is a
+# soft baseline, and the palette only warns when the running herdr is older.
+# When Herdr changes its CLI this file drifts and nothing detects that
+# automatically — bump this deliberately on each re-check, and read a failed
+# dispatch naming a command id as the report of a drifted entry.
+checked_against = "0.8.2"
 
 # `args` is appended to $HERDR_BIN_PATH and run as-is.
 #

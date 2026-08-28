@@ -49,7 +49,7 @@ fn run() -> Result<(), String> {
     let context = Context::from_env();
     let scope = context.scope();
 
-    let min_herdr_version = catalog.min_herdr_version.clone();
+    let checked_against = catalog.checked_against.clone();
 
     let mut candidates: Vec<Candidate> = catalog
         .commands
@@ -96,7 +96,7 @@ fn run() -> Result<(), String> {
     // automatically (§4). A running Herdr older than the version the catalog was
     // checked against is the one case that IS detectable, so it is surfaced —
     // as a footer note rather than a refusal, because most entries still work.
-    if let (Some(required), Some(actual)) = (min_herdr_version.as_deref(), herdr.version()) {
+    if let (Some(required), Some(actual)) = (checked_against.as_deref(), herdr.version()) {
         if catalog::is_older(&actual, required) == Some(true) {
             app.status = Some(format!(
                 "herdr {actual} is older than the catalog's {required} — some entries may fail"
