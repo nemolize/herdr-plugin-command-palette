@@ -1,0 +1,174 @@
+# Command catalog for the palette.
+#
+# No API enumerates Herdr's built-in operations, so this list is data the plugin
+# carries (docs/design.md §4). It is TOML next to the binary rather than
+# compiled in, so an entry can be corrected without a rebuild.
+#
+# Checked against herdr 0.8.2. When Herdr changes its CLI this file drifts and
+# nothing detects that automatically — bump min_herdr_version deliberately when
+# it is re-checked, and read a failed dispatch naming a command id as the report
+# of a drifted entry.
+min_herdr_version = "0.8.2"
+
+# `args` is appended to $HERDR_BIN_PATH and run as-is.
+#
+# `resolve` marks an entry that cannot name its target until open time. Its
+# value is the list API whose rows become the candidates; the chosen row's id is
+# substituted for the {} placeholder in `args`. Entries with no `resolve` key
+# run exactly as written.
+#
+# `contexts` uses the manifest's vocabulary: global | workspace | tab | pane.
+
+
+# ─── Panes: splitting ────────────────────────────────────────────────────────
+# `pane split --direction` accepts right and down only. There is no left or up,
+# so the palette offers the two that exist rather than four that read evenly.
+
+[[command]]
+id = "pane.split.right"
+title = "Split pane: right"
+args = ["pane", "split", "--current", "--direction", "right"]
+contexts = ["pane"]
+
+[[command]]
+id = "pane.split.down"
+title = "Split pane: down"
+args = ["pane", "split", "--current", "--direction", "down"]
+contexts = ["pane"]
+
+
+# ─── Panes: moving focus ─────────────────────────────────────────────────────
+# `pane focus --direction` does take all four.
+
+[[command]]
+id = "pane.focus.left"
+title = "Focus pane: left"
+args = ["pane", "focus", "--current", "--direction", "left"]
+contexts = ["pane"]
+
+[[command]]
+id = "pane.focus.right"
+title = "Focus pane: right"
+args = ["pane", "focus", "--current", "--direction", "right"]
+contexts = ["pane"]
+
+[[command]]
+id = "pane.focus.up"
+title = "Focus pane: up"
+args = ["pane", "focus", "--current", "--direction", "up"]
+contexts = ["pane"]
+
+[[command]]
+id = "pane.focus.down"
+title = "Focus pane: down"
+args = ["pane", "focus", "--current", "--direction", "down"]
+contexts = ["pane"]
+
+
+# ─── Panes: arranging ────────────────────────────────────────────────────────
+
+[[command]]
+id = "pane.zoom.toggle"
+title = "Zoom pane: toggle"
+args = ["pane", "zoom", "--current", "--toggle"]
+contexts = ["pane"]
+
+[[command]]
+id = "pane.swap.left"
+title = "Swap pane: left"
+args = ["pane", "swap", "--current", "--direction", "left"]
+contexts = ["pane"]
+
+[[command]]
+id = "pane.swap.right"
+title = "Swap pane: right"
+args = ["pane", "swap", "--current", "--direction", "right"]
+contexts = ["pane"]
+
+# `pane close` takes a positional pane id and has no --current, unlike its
+# siblings above. $HERDR_PANE_ID is injected into every plugin process (§8), so
+# this resolves from the environment rather than from a candidate list.
+[[command]]
+id = "pane.close"
+title = "Close pane"
+args = ["pane", "close", "$HERDR_PANE_ID"]
+contexts = ["pane"]
+
+# Moving a pane needs a destination the user picks.
+[[command]]
+id = "pane.move.tab"
+title = "Move pane to tab…"
+args = ["pane", "move", "$HERDR_PANE_ID", "--tab", "{}"]
+resolve = "tab list"
+contexts = ["pane"]
+
+[[command]]
+id = "pane.move.new-tab"
+title = "Move pane to a new tab"
+args = ["pane", "move", "$HERDR_PANE_ID", "--new-tab"]
+contexts = ["pane"]
+
+
+# ─── Tabs ────────────────────────────────────────────────────────────────────
+
+[[command]]
+id = "tab.create"
+title = "New tab"
+args = ["tab", "create", "--focus"]
+contexts = ["global", "workspace", "tab", "pane"]
+
+[[command]]
+id = "tab.focus"
+title = "Switch to tab…"
+args = ["tab", "focus", "{}"]
+resolve = "tab list"
+contexts = ["global", "workspace", "tab", "pane"]
+
+[[command]]
+id = "tab.close"
+title = "Close tab…"
+args = ["tab", "close", "{}"]
+resolve = "tab list"
+contexts = ["global", "workspace", "tab", "pane"]
+
+[[command]]
+id = "tab.rename"
+title = "Rename tab…"
+args = ["tab", "rename", "{}"]
+resolve = "tab list"
+contexts = ["global", "workspace", "tab", "pane"]
+
+
+# ─── Workspaces ──────────────────────────────────────────────────────────────
+
+[[command]]
+id = "workspace.create"
+title = "New workspace"
+args = ["workspace", "create", "--focus"]
+contexts = ["global", "workspace", "tab", "pane"]
+
+[[command]]
+id = "workspace.focus"
+title = "Switch to workspace…"
+args = ["workspace", "focus", "{}"]
+resolve = "workspace list"
+contexts = ["global", "workspace", "tab", "pane"]
+
+[[command]]
+id = "workspace.close"
+title = "Close workspace…"
+args = ["workspace", "close", "{}"]
+resolve = "workspace list"
+contexts = ["global", "workspace", "tab", "pane"]
+
+
+# ─── Session ─────────────────────────────────────────────────────────────────
+# Not daily, but the recovery path after editing config.toml by hand — which
+# this plugin's own keybinding requires (§10), so a user who needs it once needs
+# it before anything else works.
+
+[[command]]
+id = "server.reload-config"
+title = "Reload config"
+args = ["server", "reload-config"]
+contexts = ["global", "workspace", "tab", "pane"]

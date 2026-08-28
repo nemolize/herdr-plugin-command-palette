@@ -6,9 +6,8 @@ Herdr operations from it.
 Status: design settled. The implementation language is **Rust + ratatui**,
 decided by prototype (#4) and confirmed against a measured build route (#5);
 platform behaviour, popup sizing, and collision handling were closed against a
-live Termux device (#1, #2, #3). What remains before coding is choosing the
-catalog's first twenty entries, which is a reading task rather than an open
-question.
+live Termux device (#1, #2, #3). The catalog's first twenty entries are chosen
+and checked against the CLI (§4). Nothing is left open before coding.
 
 Measured figures throughout come from **one device in one configuration**. The
 shape of each conclusion is what generalises — the numbers are not a range to
@@ -215,9 +214,40 @@ neither complete:
   command id, so a drifted entry reports itself the first time it is used
   instead of silently doing nothing.
 
-Entries requiring an argument the user must choose (a target workspace, a layout
-name) resolve their candidates at open time from `herdr workspace list` /
-`herdr tab list` / `herdr pane list`, which do have APIs.
+Entries requiring an argument the user must choose resolve their candidates at
+open time from `herdr workspace list` / `herdr tab list` / `herdr pane list`,
+which do have APIs. All three return `label` and `focused` alongside the id, so
+a candidate row has something readable to show. Such an entry carries a
+`resolve` key naming that list, and a `{}` in its `args` where the chosen id is
+substituted:
+
+```toml
+[[command]]
+id = "tab.focus"
+title = "Switch to tab…"
+args = ["tab", "focus", "{}"]
+resolve = "tab list"
+contexts = ["global", "workspace", "tab", "pane"]
+```
+
+An entry with no `resolve` key runs exactly as written.
+
+Reading the CLI to fill the catalog corrected two assumptions this section had
+made about the entries, both of which change what can be offered:
+
+**Which operations are dynamic is decided by the CLI's own inconsistency, not by
+whether the argument is conceptually a choice.** `split`, `zoom`, `focus`,
+`resize` and `swap` all accept `--current`; `pane close`, `tab close`,
+`tab focus`, `workspace close` and `workspace focus` take a positional id and
+have no `--current`. So the *close* family is dynamic — which the earlier guess
+("a target workspace, a layout name") did not anticipate. Closing the current
+pane is the exception that escapes it: `$HERDR_PANE_ID` is injected into every
+plugin process (§8), so it resolves from the environment rather than a picker.
+
+**`--direction` is not one vocabulary.** `pane split` accepts `right` and `down`
+only, while `pane focus`, `swap` and `resize` take all four. A "split left" entry
+cannot exist, so the catalog offers two split directions against four focus
+directions rather than making the two families look alike.
 
 Plugin actions from `herdr plugin action list` merge into the same list, so one
 search covers both built-ins and other plugins.
@@ -566,8 +596,10 @@ build entry ran.
    with floors. The first measurement had its keyboard labels reversed; the
    re-measurement corrected the direction and the numbers were re-derived from
    it.
-3. **Catalog contents** — the first cut is ~20 entries (§4); which twenty is
-   settled by reading the CLI, not by open question.
+3. ~~**Catalog contents**~~ — **settled**, see §4 and `herdr/catalog.toml`.
+   Twenty entries, every flag checked against `herdr 0.8.2`'s own help rather
+   than recalled. Reading the CLI corrected two assumptions §4 had made about
+   what the entries would look like.
 4. ~~**Popup collision**~~ — **settled**, see §6. Re-pressing toggles our own
    popup via the `pane_id` returned at open; another plugin's popup is reported
    and left alone, because no API attributes an existing popup to its owner.
