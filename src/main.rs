@@ -38,6 +38,7 @@ fn run() -> Result<(), String> {
     let state_dir = env_path("HERDR_PLUGIN_STATE_DIR");
     let config_dir = env_path("HERDR_PLUGIN_CONFIG_DIR");
 
+    let plugin_id = std::env::var("HERDR_PLUGIN_ID").ok();
     let herdr = Herdr::new(bin);
 
     let catalog_path = catalog::locate(&plugin_root, config_dir.as_deref());
@@ -63,9 +64,14 @@ fn run() -> Result<(), String> {
     // Plugin actions merge into the same list (§4). Their absence is not fatal:
     // a palette of built-ins is still a working palette.
     if let Ok(actions) = herdr.plugin_actions() {
+        let platform = herdr::current_platform();
         candidates.extend(
             actions
                 .into_iter()
+                // Our own `open` is what launched this palette; offering it
+                // inside itself only reaches `popup already open`.
+                .filter(|a| Some(&a.plugin_id) != plugin_id.as_ref())
+                .filter(|a| a.runs_on(platform))
                 .filter(|a| a.contexts.is_empty() || a.contexts.iter().any(|c| c == scope))
                 .map(Candidate::from_action),
         );

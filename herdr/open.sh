@@ -18,17 +18,31 @@ json_str() {
   sed -n 's/.*"'"$1"'"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p'
 }
 
-# The CLI reports API failures in its JSON body and still exits 0, so the
-# response is what has to be read — not $?.
+# The CLI reports an API failure in its JSON body — `{"error":{"message":...}}`
+# — so the body is what distinguishes a collision from any other failure. The
+# exit status alone cannot: it is 1 for an API error and 1 for a missing binary
+# too, and only the body says which.
 response=$("$HERDR_BIN_PATH" plugin pane open \
   --plugin "$HERDR_PLUGIN_ID" \
   --entrypoint "$ENTRYPOINT" \
   --placement popup \
-  --focus 2>&1) || true
+  --focus 2>&1) && status=0 || status=$?
 
 error_message=$(printf '%s' "$response" | json_str message)
 
-[ -n "$error_message" ] || exit 0
+# Success is asserted positively, never inferred from the absence of an error
+# message. A missing binary, a clap usage error from a future release, or any
+# output that is not JSON all produce no `message` — and treating those as
+# success is the §11 failure exactly: the plugin stays registered and the
+# keybinding silently does nothing.
+if [ -z "$error_message" ]; then
+  case "$status:$response" in
+    0:*'"result"'*) exit 0 ;;
+  esac
+  printf 'command palette: could not open the palette (exit %s): %s\n' \
+    "$status" "${response:-no output}" >&2
+  exit 1
+fi
 
 # The collision is named in the message, not the code — the code is the generic
 # `plugin_pane_open_failed`, which also covers failures that must not be read as

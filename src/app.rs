@@ -101,6 +101,19 @@ impl App {
         self.refilter();
     }
 
+    /// Backs out of target-picking to the command list. Returns false when
+    /// already at the command list, which is where Esc means "close".
+    pub fn leave_targets(&mut self) -> bool {
+        if matches!(self.stage, Stage::Commands) {
+            return false;
+        }
+        self.stage = Stage::Commands;
+        self.query.clear();
+        self.status = None;
+        self.refilter();
+        true
+    }
+
     pub fn rows(&self) -> Vec<&str> {
         self.filtered.iter().map(|&i| self.row_title(i)).collect()
     }
@@ -345,6 +358,33 @@ mod tests {
         assert_eq!(app.state.selected(), Some(0));
         app.move_selection(5);
         assert_eq!(app.state.selected(), Some(1));
+    }
+
+    #[test]
+    fn esc_backs_out_of_targets_before_it_closes_the_palette() {
+        let command = cmd(
+            "tab.focus",
+            "Switch to tab",
+            &["tab", "focus", "{}"],
+            Some("tab list"),
+        );
+        let mut app = app_with(vec![command.clone()]);
+        // At the command list there is nothing to back out of.
+        assert!(!app.leave_targets());
+
+        app.enter_targets(
+            command,
+            vec![Target {
+                id: "w3Y:t1".into(),
+                label: "herdr".into(),
+            }],
+        );
+        assert_eq!(app.rows(), vec!["herdr"]);
+        assert!(app.leave_targets());
+        // Back at the commands, with the target query discarded.
+        assert_eq!(app.rows(), vec!["Switch to tab"]);
+        assert!(app.query.is_empty());
+        assert!(!app.leave_targets());
     }
 
     #[test]

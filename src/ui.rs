@@ -43,11 +43,19 @@ impl Drop for Screen {
     }
 }
 
-/// Dismissal is Esc, the toggle key, or picking an entry — there is no
-/// click-outside-to-dismiss, because no mouse events reach a plugin at all (§6).
+/// Dismissal is Esc or picking an entry — there is no click-outside-to-dismiss,
+/// because no mouse events reach a plugin at all, and the palette's own binding
+/// cannot close it on 0.8.2 (§6).
 pub fn next_step(app: &mut App) -> Result<Step, String> {
     loop {
-        let Event::Key(key) = event::read().map_err(|e| e.to_string())? else {
+        let event = event::read().map_err(|e| e.to_string())?;
+        // A resize has to redraw immediately rather than wait for a keypress:
+        // on Termux the popup resizes exactly when the software keyboard is
+        // raised, which is the moment the palette is being used (§5).
+        if matches!(event, Event::Resize(_, _)) {
+            return Ok(Step::Continue);
+        }
+        let Event::Key(key) = event else {
             continue;
         };
         if key.kind != KeyEventKind::Press {
@@ -59,7 +67,16 @@ pub fn next_step(app: &mut App) -> Result<Step, String> {
             return Ok(Step::Cancel);
         }
         return Ok(match key.code {
-            KeyCode::Esc => Step::Cancel,
+            // From the target list Esc backs out to the commands rather than
+            // closing: picking a dynamic entry would otherwise be a one-way
+            // door out of the palette.
+            KeyCode::Esc => {
+                if app.leave_targets() {
+                    Step::Continue
+                } else {
+                    Step::Cancel
+                }
+            }
             KeyCode::Up => {
                 app.move_selection(-1);
                 Step::Continue
@@ -73,7 +90,10 @@ pub fn next_step(app: &mut App) -> Result<Step, String> {
                 app.pop();
                 Step::Continue
             }
-            KeyCode::Char(c) => {
+            // Modifiers are excluded so a chord (Ctrl-A, Alt-f) is not typed
+            // into the query as its bare letter. SHIFT is what produces capitals
+            // and belongs in the text.
+            KeyCode::Char(c) if (key.modifiers - KeyModifiers::SHIFT).is_empty() => {
                 app.push(c);
                 Step::Continue
             }
@@ -117,7 +137,13 @@ fn render(f: &mut Frame, app: &mut App) {
 
     let footer = match &app.status {
         Some(msg) => msg.clone(),
-        None => format!("{}/{} · esc to close", app.shown(), app.total()),
+        None => {
+            let esc = match app.stage {
+                Stage::Commands => "esc to close",
+                Stage::Targets { .. } => "esc to go back",
+            };
+            format!("{}/{} · {esc}", app.shown(), app.total())
+        }
     };
     f.render_widget(Paragraph::new(footer).dim(), chunks[2]);
 }

@@ -127,17 +127,13 @@ args = ["tab", "focus", "{}"]
 resolve = "tab list"
 contexts = ["global", "workspace", "tab", "pane"]
 
+# `tab rename` is deliberately absent: it takes `<TAB_ID> <LABEL>...` with the
+# label a REQUIRED positional, and the palette has no free-text input stage to
+# supply one. It belongs here once such a stage exists.
 [[command]]
 id = "tab.close"
 title = "Close tab…"
 args = ["tab", "close", "{}"]
-resolve = "tab list"
-contexts = ["global", "workspace", "tab", "pane"]
-
-[[command]]
-id = "tab.rename"
-title = "Rename tab…"
-args = ["tab", "rename", "{}"]
 resolve = "tab list"
 contexts = ["global", "workspace", "tab", "pane"]
 

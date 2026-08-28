@@ -358,16 +358,19 @@ A live resize mid-render (43 ↔ 27 rows, raising and lowering the keyboard) red
 cleanly — no tearing, corruption, or hang. The TUI needs no special handling for
 it beyond respecting `min_height`.
 
-## 6. Popup collision — re-press toggles, a stranger's popup is left alone
+## 6. Popup collision — report it and touch nothing
 
 Herdr allows one popup per session, so pressing the palette key while a popup is
 up gets `popup already open`. Two different situations hide behind that one
 error, and they want opposite responses:
 
-| What is open | Response |
+| What is open | Response the design wanted |
 |---|---|
 | Our own palette | Close it — the keypress reads as a toggle |
 | Another plugin's popup | Report it, change nothing |
+
+Only the second row is reachable on 0.8.2, for the reason the next section
+gives; the first is what a later release would restore.
 
 ### The API forbids both, on 0.8.2 — the toggle is not buildable
 
@@ -414,8 +417,8 @@ separate processes an invocation spans, §3), and case 1 becomes buildable
 exactly as first written.
 
 Note what this costs: the palette's binding opens but does not close it, so
-dismissal is `Esc` alone. The claim below that "the palette's own binding
-already toggles it" does not hold on this version.
+dismissal is `Esc` alone — which is what the click-outside section below now
+records.
 
 The collision is matched on the error **message**, not the code: the code is the
 generic `plugin_pane_open_failed`, which also covers failures that must not be
@@ -451,9 +454,9 @@ pane and exit when focus leaves.
 Not worth a timer: `Esc` closes the palette, and that is the dismissal a
 keyboard-driven tool is reached for with anyway. On the platform this plugin
 targets there is no mouse to click outside with, and the palette's own binding
-already toggles it (above).
+does not close it on this version (above).
 
-Dismissal is `Esc`, the toggle key, or picking an entry.
+Dismissal is `Esc` or picking an entry.
 
 ## 7. Ranking
 
@@ -655,9 +658,14 @@ build entry ran.
    Twenty entries, every flag checked against `herdr 0.8.2`'s own help rather
    than recalled. Reading the CLI corrected two assumptions §4 had made about
    what the entries would look like.
-4. ~~**Popup collision**~~ — **settled**, see §6. Re-pressing toggles our own
-   popup via the `pane_id` returned at open; another plugin's popup is reported
-   and left alone, because no API attributes an existing popup to its owner.
+4. ~~**Popup collision**~~ — **settled, but not as first written**, see §6. A
+   second press reports that a popup is open and changes nothing. The toggle
+   this section originally recorded is **not buildable on 0.8.2**: building it
+   (#9) found that `plugin.pane.open` returns no pane id, `plugin.pane.close`
+   requires one, the plugin pane is absent from `pane.list`, and the pane
+   process receives no id of its own — so our own popup cannot be named, and the
+   only primitive that would close it is parameterless `popup.close`, which
+   would dismiss another plugin's UI. Deferred until a release returns the id.
 5. ~~**Implementation language**~~ — **settled: Rust + ratatui**, by building a
    prototype in each (#4) and then testing the one axis that decision rested on
    (#5). #4 picked Go because Rust could not cross-compile the

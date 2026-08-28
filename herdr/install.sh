@@ -86,14 +86,41 @@ assert_platform() {
       case "$described" in
         *Android*|*"/system/bin/linker64"*)
           die "fetched an Android binary for a generic Linux host ($described)" ;;
-        *ELF*) return 0 ;;
+        *ELF*) ;;
         *) die "fetched asset is not an ELF binary ($described)" ;;
       esac
+      assert_arch "$described" "$want"
       ;;
     *-apple-darwin)
       case "$described" in
-        *Mach-O*) return 0 ;;
+        *Mach-O*) ;;
         *) die "fetched asset is not a Mach-O binary ($described)" ;;
+      esac
+      assert_arch "$described" "$want"
+      ;;
+  esac
+}
+
+# The format check above only proves the asset is the right KIND of binary. A
+# release mispublished under the wrong asset name is still the wrong machine
+# code, and it fails at exec rather than at install — which is the same silent
+# shape §11 exists to prevent.
+assert_arch() {
+  described=$1
+  want=$2
+  case "$want" in
+    *aarch64-*|*arm64-*)
+      case "$described" in
+        *aarch64*|*arm64*) ;;
+        *x86_64*|*x86-64*|*i386*)
+          die "fetched an x86 binary for an ARM host ($described)" ;;
+      esac
+      ;;
+    *x86_64-*)
+      case "$described" in
+        *x86_64*|*x86-64*) ;;
+        *aarch64*|*arm64*)
+          die "fetched an ARM binary for an x86_64 host ($described)" ;;
       esac
       ;;
   esac
