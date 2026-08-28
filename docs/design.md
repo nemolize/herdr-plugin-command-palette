@@ -166,6 +166,14 @@ placement is popup`) and always fills the tab. A palette that sizes itself must
 use **`popup`**, which is also the right shape on its own terms — session-modal,
 floating over the current view, leaving the tiled layout alone.
 
+Two traps in the CLI surface, both found while building this (#9). **`herdr
+plugin pane open --help` lists only `overlay, split, tab, zoomed`** — `popup` is
+absent from the help while being accepted by the parser and present in the API
+schema's `PluginPanePlacement`. And that subcommand has **no `--width` /
+`--height` flags at all**, though the API takes both. So the size lives in the
+manifest's `[[panes]]` entry and the action hop cannot pass one — which is
+where §5's numbers have to go.
+
 Two constraints measured on a live device (#2), both worth knowing before
 writing the pane logic:
 
@@ -231,6 +239,12 @@ contexts = ["global", "workspace", "tab", "pane"]
 ```
 
 An entry with no `resolve` key runs exactly as written.
+
+A second, simpler substitution covers the ids the invocation already knows:
+`{pane}`, `{tab}` and `{workspace}` resolve from `HERDR_PLUGIN_CONTEXT_JSON`
+(§8). That is how `pane.close` names the current pane without a picker. An entry
+naming an id the invocation lacks is not offered at all, rather than failing when
+it is picked.
 
 Reading the CLI to fill the catalog corrected two assumptions this section had
 made about the entries, both of which change what can be offered:
@@ -355,13 +369,22 @@ error, and they want opposite responses:
 | Our own palette | Close it — the keypress reads as a toggle |
 | Another plugin's popup | Report it, change nothing |
 
-### The API allows the first and forbids the second
+### The API forbids both, on 0.8.2 — the toggle is not buildable
 
-`plugin.pane.open` returns a `PluginPaneInfo` carrying `plugin_id`, `entrypoint`,
-and the `pane_id`. **Recording that `pane_id` is what makes a toggle possible** —
-`plugin.pane.close <pane_id>` then acts on our pane specifically, and
-`plugin.pane.focus <pane_id>` is available if we would rather raise it than
-dismiss it.
+This section was written from the API schema and is **wrong about what the
+running server does**. Building the plugin (#9) established the following
+against herdr 0.8.2, over both the CLI and the raw socket:
+
+- `plugin.pane.open` returns `{"type":"ok"}` — **not** the `plugin_pane_opened`
+  response carrying `PluginPaneInfo` that the schema defines. No pane id comes
+  back.
+- `plugin.pane.close` and `plugin.pane.focus` both take a **required** `pane_id`.
+- The plugin pane does not appear in `pane.list`.
+- The pane process receives no `HERDR_PANE_ID` of its own (§8).
+
+So our own popup cannot be named through any route, and the toggle below cannot
+be built. The mechanism the schema implies is real; the server on this version
+does not implement its half.
 
 Identifying someone else's popup is not possible. `PluginPaneInfo` is returned
 **only** by `plugin_pane_opened`; the pane listings return `PaneInfo`, which
@@ -376,19 +399,27 @@ palette dismiss another plugin's UI as a side effect of a keypress meant for us.
 
 ### Behaviour
 
-On `popup already open`:
+On `popup already open`: report it and exit without touching anything.
 
-1. Our recorded `pane_id` still names a live pane → close it. The palette
-   toggles, which is what a second press of a palette key should do.
-2. Otherwise → report that a popup is already open and exit without touching it.
-
-Case 2 covers both a stranger's popup and a stale id (our pane closed by other
-means). Treating a stale id as "not ours" is the safe direction: the worst
+That is case 2 of the table, applied to both rows — not because a stranger's
+popup and ours deserve the same response, but because on 0.8.2 they cannot be
+told apart. It is the safe direction the table already argued for: the worst
 outcome is one redundant message, where the alternative risks closing someone
 else's window.
 
-The recorded id lives in `$HERDR_PLUGIN_STATE_DIR` alongside the frecency data —
-it must survive between the two separate processes an invocation spans (§3).
+**Toggling is deferred, not dropped.** It needs `plugin.pane.open` to return the
+pane id it already declares in the schema. When a herdr release ships that, the
+id is recorded in `$HERDR_PLUGIN_STATE_DIR` (it must survive between the two
+separate processes an invocation spans, §3), and case 1 becomes buildable
+exactly as first written.
+
+Note what this costs: the palette's binding opens but does not close it, so
+dismissal is `Esc` alone. The claim below that "the palette's own binding
+already toggles it" does not hold on this version.
+
+The collision is matched on the error **message**, not the code: the code is the
+generic `plugin_pane_open_failed`, which also covers failures that must not be
+read as a collision.
 
 ### Click-outside-to-dismiss is not available
 
@@ -446,11 +477,35 @@ Herdr injects, for every plugin process: `HERDR_SOCKET_PATH`, `HERDR_BIN_PATH`,
 `HERDR_PLUGIN_CONTEXT_JSON`; and conditionally `HERDR_WORKSPACE_ID`,
 `HERDR_TAB_ID`, `HERDR_PANE_ID`, `HERDR_PLUGIN_ACTION_ID`.
 
+**The conditional ids are not among what a plugin *pane* receives.** Dumping the
+pane process's own environment (#9) returned exactly nine variables — the
+unconditional list above plus `HERDR_PLUGIN_ENTRYPOINT_ID` — and no
+`HERDR_PANE_ID`, `HERDR_TAB_ID` or `HERDR_WORKSPACE_ID`. Those reach the
+*action* hop, which is a different process.
+
+So `HERDR_PLUGIN_CONTEXT_JSON` is the pane's only route to the ids, and it
+carries them under different names:
+
+```json
+{"workspace_id": "w46", "tab_id": "w46:t1", "focused_pane_id": "w46:p1",
+ "workspace_label": "wevox-mono-web", "invocation_source": "api"}
+```
+
+`focused_pane_id` is the pane the user was in when they opened the palette,
+which is the one an entry should act on — the palette's own pane is not in it.
+This is what the catalog's `{pane}` / `{tab}` / `{workspace}` placeholders
+resolve against (§4), and what decides which `contexts` the palette is running
+under.
+
 The pane's working directory is **not** the plugin root, so the binary is
 launched by absolute path under `$HERDR_PLUGIN_ROOT` — the same reason `reviewr`
 does it that way.
 
 ## 9. Manifest
+
+`herdr-plugin.toml`, at the **repo root** — not under `herdr/`, which holds the
+scripts it points at. `herdr plugin link` reports `plugin_manifest_not_found`
+for any other location; `reviewr` is laid out the same way.
 
 ```toml
 id = "nemolize.command-palette"

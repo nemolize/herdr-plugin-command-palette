@@ -17,6 +17,9 @@ min_herdr_version = "0.8.2"
 # substituted for the {} placeholder in `args`. Entries with no `resolve` key
 # run exactly as written.
 #
+# {pane}, {tab} and {workspace} are the ids of what the user was looking at when
+# the palette opened. An entry naming one the invocation lacks is not offered.
+#
 # `contexts` uses the manifest's vocabulary: global | workspace | tab | pane.
 
 
@@ -86,26 +89,26 @@ args = ["pane", "swap", "--current", "--direction", "right"]
 contexts = ["pane"]
 
 # `pane close` takes a positional pane id and has no --current, unlike its
-# siblings above. $HERDR_PANE_ID is injected into every plugin process (§8), so
-# this resolves from the environment rather than from a candidate list.
+# siblings above. {pane} is the pane the user was in when the palette opened,
+# read from HERDR_PLUGIN_CONTEXT_JSON (§8) — so this needs no candidate list.
 [[command]]
 id = "pane.close"
 title = "Close pane"
-args = ["pane", "close", "$HERDR_PANE_ID"]
+args = ["pane", "close", "{pane}"]
 contexts = ["pane"]
 
 # Moving a pane needs a destination the user picks.
 [[command]]
 id = "pane.move.tab"
 title = "Move pane to tab…"
-args = ["pane", "move", "$HERDR_PANE_ID", "--tab", "{}"]
+args = ["pane", "move", "{pane}", "--tab", "{}"]
 resolve = "tab list"
 contexts = ["pane"]
 
 [[command]]
 id = "pane.move.new-tab"
 title = "Move pane to a new tab"
-args = ["pane", "move", "$HERDR_PANE_ID", "--new-tab"]
+args = ["pane", "move", "{pane}", "--new-tab"]
 contexts = ["pane"]
 
 
