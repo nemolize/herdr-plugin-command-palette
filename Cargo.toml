@@ -1,0 +1,22 @@
+[package]
+name = "herdr-command-palette"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Fuzzy-search and run Herdr's own commands, plugin actions, and session targets."
+repository = "https://github.com/nemolize/herdr-plugin-command-palette"
+
+# Pinned rather than floated: a TUI library's API is exactly the surface an agent
+# writes against from recall, and 0.x crates break it on minor bumps
+# (docs/design.md §12).
+[dependencies]
+ratatui = "0.30"
+crossterm = "0.29"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.9"
+
+[profile.release]
+strip = true
+opt-level = "z"
+lto = true

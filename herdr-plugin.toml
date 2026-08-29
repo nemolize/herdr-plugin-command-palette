@@ -1,0 +1,36 @@
+id = "nemolize.command-palette"
+name = "Command Palette"
+version = "0.1.0"
+# 0.8.2, not 0.8.0: the popup mechanism this plugin is built on is only
+# verified there. `--placement popup` is accepted by the parser but absent from
+# `herdr plugin pane open --help`, so whether 0.8.0/0.8.1 accept it is unknown —
+# and a floor that guesses low fails at first keypress with no diagnostic, where
+# one that guesses high only refuses an install that might have worked.
+min_herdr_version = "0.8.2"
+platforms = ["linux", "macos"]
+description = "Fuzzy-search and run Herdr's own commands, plugin actions, and session targets."
+
+# Fetches the prebuilt binary for this host from the matching GitHub Release.
+# Selects the Android-ABI build on Termux, the ordinary Linux one elsewhere —
+# `PluginPlatform` has no android value, so the script detects the host itself
+# (docs/design.md §2).
+# Skipped by `herdr plugin link`; build locally with cargo when developing.
+[[build]]
+command = ["sh", "herdr/install.sh"]
+
+# popup is the only placement that accepts width/height (docs/design.md §5), and
+# these are the only place they can be set — `herdr plugin pane open` has no
+# --width/--height flags, so the action hop cannot pass a size.
+[[panes]]
+id = "palette"
+title = "Command Palette"
+placement = "popup"
+width = 60
+height = "45%"
+command = ["sh", "-c", "exec \"$HERDR_PLUGIN_ROOT/bin/herdr-command-palette\""]
+
+[[actions]]
+id = "open"
+title = "Command palette"
+contexts = ["global", "workspace", "tab", "pane"]
+command = ["sh", "herdr/open.sh"]

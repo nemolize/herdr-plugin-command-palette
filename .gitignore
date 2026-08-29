@@ -5,3 +5,8 @@ prototypes/.gomod/
 prototypes/.cargo/
 prototypes/rs/target/
 prototypes/go/palette-go*
+
+# Plugin build artefacts. The binary is fetched from a Release by
+# herdr/install.sh, or built locally into bin/ for the `plugin link` loop.
+/target/
+/bin/
