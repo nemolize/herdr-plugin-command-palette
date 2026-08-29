@@ -514,7 +514,7 @@ scripts it points at. `herdr plugin link` reports `plugin_manifest_not_found`
 for any other location; `reviewr` is laid out the same way.
 
 ```toml
-id = "nemolize.command-palette"
+id = "command-palette"
 name = "Command Palette"
 version = "0.1.0"
 min_herdr_version = "0.8.2"   # the only release anything was verified on
@@ -552,13 +552,17 @@ manifest. The user edits `config.toml`:
 
 ```toml
 [[keys.command]]
-key = "prefix+p"
+key = "prefix+ctrl+p"
 type = "plugin_action"
-command = "nemolize.command-palette.open"
+command = "command-palette.open"
 description = "Command palette"
 ```
 
 then runs `herdr server reload-config` (or `prefix+shift+r`).
+
+`prefix+ctrl+p` rather than `prefix+p`: the latter is a natural fit but is
+commonly already bound — `mr04vv/herdr-pane-navigator` takes it, and it is the
+key this author's own config had assigned to it.
 
 Note that `type = "plugin_action"` is **absent from `herdr --default-config`** —
 it exists in the binary and shipped plugins use it, but a user reading the

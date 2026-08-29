@@ -1,4 +1,4 @@
-id = "nemolize.command-palette"
+id = "command-palette"
 name = "Command Palette"
 version = "0.1.0"
 # 0.8.2, not 0.8.0: the popup mechanism this plugin is built on is only
