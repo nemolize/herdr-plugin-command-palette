@@ -1,0 +1,67 @@
+name: audit
+
+# Advisories fire on events outside this repo, so the schedule is what watches
+# them; licenses and sources reject a bad lockfile on the change that caused it.
+on:
+  push:
+    branches: [main]
+    paths: [Cargo.toml, Cargo.lock, deny.toml, justfile, .github/workflows/audit.yml]
+  pull_request:
+    paths: [Cargo.toml, Cargo.lock, deny.toml, justfile, .github/workflows/audit.yml]
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+jobs:
+  cargo-deny:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
+        with:
+          rustflags: ""
+          cache-key: audit
+
+      - uses: taiki-e/install-action@742a3317eac7bd62f91cd888b4eead5e784ba833 # v2.87.1
+        with:
+          tool: just@1.58.0, cargo-deny@0.20.2
+
+      - run: just deny
+
+      # GitHub disables a public repo's schedules after 60 days of inactivity,
+      # so Dependabot alerts — not this step — are the durable backstop.
+      - if: failure() && github.event_name == 'schedule'
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const title = 'cargo-deny: scheduled audit failed';
+            const url = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const body = `The weekly \`just deny\` run failed: ${url}`;
+            // Dedup on the title: a label filter would key on something
+            // issues.create may or may not attach, leaving nothing to match.
+            const open = await github.paginate(github.rest.issues.listForRepo, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+            });
+            const existing = open.find((i) => i.title === title);
+            if (existing) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: existing.number,
+                body,
+              });
+            } else {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title,
+                body,
+              });
+            }
