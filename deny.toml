@@ -4,7 +4,6 @@ all-features = true
 [advisories]
 version = 2
 yanked = "deny"
-ignore = []
 
 # r-efi's LGPL-2.1-or-later arm is unlisted on purpose: its permissive arms
 # satisfy the expression, so allowing the copyleft one would be wrong.

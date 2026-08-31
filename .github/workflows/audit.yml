@@ -35,13 +35,15 @@ jobs:
 
       # GitHub disables a public repo's schedules after 60 days of inactivity,
       # so Dependabot alerts — not this step — are the durable backstop.
-      - if: failure() && github.event_name == 'schedule'
+      # workflow_dispatch is included so this path can be rehearsed: gated on
+      # schedule alone it would first execute during the failure it must report.
+      - if: failure() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
           script: |
             const title = 'cargo-deny: scheduled audit failed';
             const url = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
-            const body = `The weekly \`just deny\` run failed: ${url}`;
+            const body = `A \`just deny\` run failed: ${url}`;
             // Dedup on the title: a label filter would key on something
             // issues.create may or may not attach, leaving nothing to match.
             const open = await github.paginate(github.rest.issues.listForRepo, {
@@ -49,7 +51,9 @@ jobs:
               repo: context.repo.repo,
               state: 'open',
             });
-            const existing = open.find((i) => i.title === title);
+            // listForRepo returns pull requests too, so a same-titled PR
+            // would otherwise take the comment meant for the issue.
+            const existing = open.find((i) => i.title === title && !i.pull_request);
             if (existing) {
               await github.rest.issues.createComment({
                 owner: context.repo.owner,

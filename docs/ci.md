@@ -22,7 +22,7 @@ Two facts shape every choice here:
 | `cargo fmt --all --check` | `Lint` | Zero false positives, about a second, and it keeps diffs reviewable — the scarce resource when an agent writes most of the code and reformats regions it touches. |
 | `cargo clippy --locked --all-targets -- -D warnings` | `Lint` | The default lint group is a correctness floor, and the tree already passes at `-D warnings`, so adopting it costs nothing today and catches real bug classes later. |
 | `cargo test --locked` | `Test` | The 41 existing tests, which were being run by hand until now. |
-| `cargo build --release --locked --target x86_64-unknown-linux-musl` | `Build` | `cargo test` compiles the test profile only. This is the sole check that exercises `[profile.release]` (LTO, `opt-level = "z"`, strip) and the `rust-lld` linker pin in `.cargo/config.toml` — the class of breakage that would otherwise surface for the first time at a release tag. |
+| `cargo build --release --locked` for both musl targets | `Build` | `cargo test` compiles the test profile only. This is the sole check that exercises `[profile.release]` (LTO, `opt-level = "z"`, strip) and the per-target `rust-lld` pins in `.cargo/config.toml` — breakage that would otherwise surface for the first time at a release tag. It covers the two release assets a Linux runner can build unaided; the macOS and Android assets need another host or the NDK, so they stay #10's to verify. |
 | `cargo deny --locked check` | `Audit` | See the group table below. |
 
 `Lint`, `Test` and `Build` are separate jobs rather than one `just ci` step, so a
@@ -78,7 +78,9 @@ On a scheduled failure `Audit` opens (or comments on) an issue, because a red
 cron run on a repo with one maintainer otherwise reaches nobody. That step is not
 the durable backstop: GitHub disables a public repository's schedules after 60
 days without activity, and a job that never runs cannot report on itself.
-Dependabot alerts are enabled on the repository and are what survives that.
+Dependabot alerts are enabled on the repository and are what survives that —
+for advisories. Nothing mirrors a crate *yank* into an alert, so `yanked = "deny"`
+detection stops with the schedule and does not come back on its own.
 
 `.github/dependabot.yml` opens the PRs that act on those alerts, and covers the
 one thing nothing else observes: every action is pinned by SHA, and a SHA never
@@ -101,19 +103,20 @@ per-invocation instead, where it is scoped to this crate.
 
 `justfile` holds the check definitions and each CI job runs one recipe
 (`just lint`, `just test`, `just build-musl`, `just deny`), so the commands exist
-once rather than as lists kept in sync by discipline. `just ci` runs the three
-CI jobs' recipes together for local use. Either
-one reproduces its CI failure locally with no push, given the two tools CI pins
-and installs for itself:
+once rather than as lists kept in sync by discipline. `just ci` runs the three CI
+jobs' recipes together, reproducing a CI failure locally with no push — given the
+two tools CI pins and installs for itself:
 
 ```sh
-brew install just                                   # or see casey/just
+cargo install just --version 1.58.0 --locked
 cargo install cargo-deny --version 0.20.2 --locked
 ```
 
-Both versions are pinned in the workflows; keep a local install in step with
-them, since a cargo-deny that disagrees with CI's is the "clean here, red there"
-divergence this setup exists to prevent.
+Both are installed here at the versions the workflows pin, because a local tool
+that disagrees with CI's is the "clean here, red there" divergence this setup
+exists to prevent. `brew install just` is fine for everyday use and is what most
+setups already have; it just tracks the current formula rather than 1.58.0, so
+reach for the pinned install when a CI result and a local one disagree.
 
 Every action is pinned by full commit SHA. A tag is mutable, and a repo that
 audits its Rust dependencies should hold its own workflow supply chain to the
