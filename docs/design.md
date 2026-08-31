@@ -646,6 +646,23 @@ cannot be exercised through `link`.** Testing it requires a real
 verification in #1 had to be run. A build script that works locally has not been
 tested at all until it has been installed once.
 
+Renaming the plugin id is not just a manifest edit: `link` registers under the
+new id and leaves the old registration standing, so both appear in
+`herdr plugin list` and a `config.toml` still naming the old one keeps resolving
+to the stale copy. Unlink the old id first, then link:
+
+```
+herdr plugin unlink <old-id>
+herdr plugin link .
+herdr server reload-config
+```
+
+Per-plugin config and state directories are keyed by id too
+(`~/.config/herdr/plugins/config/<id>`), so a rename orphans whatever they hold
+— frecency rankings above all. Nothing needed moving for the `command-palette`
+rename because no release carried the old id and the directories were still
+empty, but a later rename would have to carry them across by hand.
+
 `herdr plugin log` shows what a failed action printed, which is the only way to
 see stderr from the headless action process — and the way to confirm whether a
 build entry ran.

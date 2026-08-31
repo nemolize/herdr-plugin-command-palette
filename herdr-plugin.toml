@@ -1,11 +1,8 @@
 id = "command-palette"
 name = "Command Palette"
 version = "0.1.0"
-# 0.8.2, not 0.8.0: the popup mechanism this plugin is built on is only
-# verified there. `--placement popup` is accepted by the parser but absent from
-# `herdr plugin pane open --help`, so whether 0.8.0/0.8.1 accept it is unknown —
-# and a floor that guesses low fails at first keypress with no diagnostic, where
-# one that guesses high only refuses an install that might have worked.
+# Undocumented `--placement popup` leaves 0.8.0/0.8.1 support unknown; guessing
+# low fails at first keypress with no diagnostic, guessing high only over-refuses.
 min_herdr_version = "0.8.2"
 platforms = ["linux", "macos"]
 description = "Fuzzy-search and run Herdr's own commands, plugin actions, and session targets."
