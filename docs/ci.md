@@ -78,14 +78,21 @@ On a scheduled failure `Audit` opens (or comments on) an issue, because a red
 cron run on a repo with one maintainer otherwise reaches nobody. That step is not
 the durable backstop: GitHub disables a public repository's schedules after 60
 days without activity, and a job that never runs cannot report on itself.
-Dependabot alerts are enabled on the repository and are what survives that —
-for advisories. Nothing mirrors a crate *yank* into an alert, so `yanked = "deny"`
-detection stops with the schedule and does not come back on its own.
+Renovate is what survives that: it runs on its own cadence rather than this
+repo's Actions schedule, so a disabled cron does not take it with it. It covers
+the thing nothing else observes — every action is pinned by SHA, and a SHA never
+moves on its own; Renovate treats that as a digest update and rewrites the
+trailing version comment with it, so the pin survives the bump.
 
-`.github/dependabot.yml` opens the PRs that act on those alerts, and covers the
-one thing nothing else observes: every action is pinned by SHA, and a SHA never
-moves on its own. Dependabot rewrites the trailing version comment along with
-the SHA, so the pin survives the bump.
+A crate *yank* still has no watcher. Renovate proposes upgrades and GitHub's
+advisory alerts fire on vulnerabilities, but neither reports a yank, so
+`yanked = "deny"` is only enforced while the `Audit` schedule runs.
+
+`renovate.json` extends `local>nemolize/renovate-config`, the shared preset the
+other repositories here use — so cadence, automerge policy and grouping are
+settled in one place rather than per repo. Dependabot is deliberately not
+configured: two bots proposing updates for the same manifests duplicates every
+PR and splits the automerge policy across two config formats.
 
 ## Toolchain parity
 
