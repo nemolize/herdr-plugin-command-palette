@@ -514,7 +514,7 @@ scripts it points at. `herdr plugin link` reports `plugin_manifest_not_found`
 for any other location; `reviewr` is laid out the same way.
 
 ```toml
-id = "nemolize.command-palette"
+id = "command-palette"
 name = "Command Palette"
 version = "0.1.0"
 min_herdr_version = "0.8.2"   # the only release anything was verified on
@@ -552,13 +552,17 @@ manifest. The user edits `config.toml`:
 
 ```toml
 [[keys.command]]
-key = "prefix+p"
+key = "prefix+ctrl+p"
 type = "plugin_action"
-command = "nemolize.command-palette.open"
+command = "command-palette.open"
 description = "Command palette"
 ```
 
 then runs `herdr server reload-config` (or `prefix+shift+r`).
+
+`prefix+ctrl+p` rather than `prefix+p`: the latter is a natural fit but is
+commonly already bound — `mr04vv/herdr-pane-navigator` takes it, and it is the
+key this author's own config had assigned to it.
 
 Note that `type = "plugin_action"` is **absent from `herdr --default-config`** —
 it exists in the binary and shipped plugins use it, but a user reading the
@@ -641,6 +645,23 @@ cannot be exercised through `link`.** Testing it requires a real
 `herdr plugin install` from GitHub, which is how the Termux build-step
 verification in #1 had to be run. A build script that works locally has not been
 tested at all until it has been installed once.
+
+Renaming the plugin id is not just a manifest edit: `link` registers under the
+new id and leaves the old registration standing, so both appear in
+`herdr plugin list` and a `config.toml` still naming the old one keeps resolving
+to the stale copy. Unlink the old id first, then link:
+
+```
+herdr plugin unlink <old-id>
+herdr plugin link .
+herdr server reload-config
+```
+
+Per-plugin config and state directories are keyed by id too
+(`~/.config/herdr/plugins/config/<id>`), so a rename orphans whatever they hold
+— frecency rankings above all. Nothing needed moving for the `command-palette`
+rename because no release carried the old id and the directories were still
+empty, but a later rename would have to carry them across by hand.
 
 `herdr plugin log` shows what a failed action printed, which is the only way to
 see stderr from the headless action process — and the way to confirm whether a
