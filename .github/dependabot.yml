@@ -1,0 +1,17 @@
+version: 2
+updates:
+  # Dependabot rewrites the trailing `# v7.0.1` comment along with the SHA, so
+  # the pinning discipline survives the update instead of being traded for it.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+
+  # cargo-deny fails on a vulnerable lockfile; this opens the PR that fixes it.
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      cargo:
+        patterns: ["*"]
