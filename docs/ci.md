@@ -80,6 +80,11 @@ the durable backstop: GitHub disables a public repository's schedules after 60
 days without activity, and a job that never runs cannot report on itself.
 Dependabot alerts are enabled on the repository and are what survives that.
 
+`.github/dependabot.yml` opens the PRs that act on those alerts, and covers the
+one thing nothing else observes: every action is pinned by SHA, and a SHA never
+moves on its own. Dependabot rewrites the trailing version comment along with
+the SHA, so the pin survives the bump.
+
 ## Toolchain parity
 
 `rust-toolchain.toml` pins 1.97.1 and is the single definition — it governs the
