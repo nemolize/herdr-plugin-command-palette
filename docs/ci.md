@@ -19,11 +19,18 @@ Two facts shape every choice here:
 
 | Tool | Where | Why it is in |
 |---|---|---|
-| `cargo fmt --all --check` | `check` | Zero false positives, about a second, and it keeps diffs reviewable — the scarce resource when an agent writes most of the code and reformats regions it touches. |
-| `cargo clippy --locked --all-targets -- -D warnings` | `check` | The default lint group is a correctness floor, and the tree already passes at `-D warnings`, so adopting it costs nothing today and catches real bug classes later. |
-| `cargo test --locked` | `check` | The 41 existing tests, which were being run by hand until now. |
-| `cargo build --release --locked --target x86_64-unknown-linux-musl` | `check` | `cargo test` compiles the test profile only. This is the sole check that exercises `[profile.release]` (LTO, `opt-level = "z"`, strip) and the `rust-lld` linker pin in `.cargo/config.toml` — the class of breakage that would otherwise surface for the first time at a release tag. |
-| `cargo deny --locked check` | `audit` | See the group table below. |
+| `cargo fmt --all --check` | `Lint` | Zero false positives, about a second, and it keeps diffs reviewable — the scarce resource when an agent writes most of the code and reformats regions it touches. |
+| `cargo clippy --locked --all-targets -- -D warnings` | `Lint` | The default lint group is a correctness floor, and the tree already passes at `-D warnings`, so adopting it costs nothing today and catches real bug classes later. |
+| `cargo test --locked` | `Test` | The 41 existing tests, which were being run by hand until now. |
+| `cargo build --release --locked --target x86_64-unknown-linux-musl` | `Build` | `cargo test` compiles the test profile only. This is the sole check that exercises `[profile.release]` (LTO, `opt-level = "z"`, strip) and the `rust-lld` linker pin in `.cargo/config.toml` — the class of breakage that would otherwise surface for the first time at a release tag. |
+| `cargo deny --locked check` | `Audit` | See the group table below. |
+
+`Lint`, `Test` and `Build` are separate jobs rather than one `just ci` step, so a
+red X names which check failed without opening the log, and the three run
+concurrently. The shape — job ids as the displayed name, capitalised, on a pinned
+`ubuntu-24.04` — follows `nemolize/web-app-template`, which is the reference
+layout across these repositories; the language differs, the conventions should
+not.
 
 ## What does not run
 
@@ -61,13 +68,13 @@ check, so a red X reports without preventing a merge.
 `continue-on-error` appears nowhere and should not be added: it turns the commit
 status green, which hides a failure rather than making it advisory.
 
-The intended reading of a red `check` is *the diff broke something* — every
-check in that job fails only for a reason present in the change. `audit` is kept
+The intended reading of a red `Lint`, `Test` or `Build` is *the diff broke
+something* — each fails only for a reason present in the change. `Audit` is kept
 in its own workflow precisely so it cannot dilute that: it is the one job that
 can fail for reasons outside the diff, and if a required-check ruleset is ever
-added, `check` can be required and `audit` left out.
+added, the three CI jobs can be required and `Audit` left out.
 
-On a scheduled failure `audit` opens (or comments on) an issue, because a red
+On a scheduled failure `Audit` opens (or comments on) an issue, because a red
 cron run on a repo with one maintainer otherwise reaches nobody. That step is not
 the durable backstop: GitHub disables a public repository's schedules after 60
 days without activity, and a job that never runs cannot report on itself.
@@ -87,8 +94,10 @@ red on someone else's code — and it is part of cargo's fingerprint, which woul
 diverge the CI cache from every local build. Clippy's `-D warnings` is passed
 per-invocation instead, where it is scoped to this crate.
 
-`justfile` holds the check definitions and CI runs `just ci` and `just deny`, so
-the commands exist once rather than as lists kept in sync by discipline. Either
+`justfile` holds the check definitions and each CI job runs one recipe
+(`just lint`, `just test`, `just build-musl`, `just deny`), so the commands exist
+once rather than as lists kept in sync by discipline. `just ci` runs the three
+CI jobs' recipes together for local use. Either
 one reproduces its CI failure locally with no push, given the two tools CI pins
 and installs for itself:
 

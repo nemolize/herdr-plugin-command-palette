@@ -1,4 +1,4 @@
-name: audit
+name: Audit
 
 # Advisories fire on events outside this repo, so the schedule is what watches
 # them; licenses and sources reject a bad lockfile on the change that caused it.
@@ -13,8 +13,8 @@ on:
   workflow_dispatch:
 
 jobs:
-  cargo-deny:
-    runs-on: ubuntu-latest
+  Audit:
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
       contents: read

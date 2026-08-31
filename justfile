@@ -1,12 +1,16 @@
-# CI runs `just ci` and `just deny`, so these recipes are the single definition
-# of what the checks are — there is no second copy in the workflows to drift from.
+# CI calls these recipes one per job, so they are the single definition of what
+# each check is — there is no second copy in the workflows to drift from.
 
 default: ci
 
-ci: fmt-check clippy test build-musl
+# What CI's three jobs cover, in one command for local use
+ci: lint test build-musl
 
 fmt:
     cargo fmt --all
+
+# CI's Lint job
+lint: fmt-check clippy
 
 fmt-check:
     cargo fmt --all --check
@@ -14,10 +18,11 @@ fmt-check:
 clippy:
     cargo clippy --locked --all-targets -- -D warnings
 
+# CI's Test job
 test:
     cargo test --locked
 
-# Exercises [profile.release] and .cargo/config.toml's rust-lld pin, which the test profile never compiles
+# CI's Build job — the only check that compiles the release profile
 build-musl:
     rustup target add x86_64-unknown-linux-musl
     cargo build --release --locked --target x86_64-unknown-linux-musl

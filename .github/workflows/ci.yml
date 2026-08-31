@@ -5,33 +5,63 @@ on:
     branches: [main]
   pull_request:
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
-
 permissions:
   contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  # Cancelling an in-progress main run would leave that commit with no CI verdict.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  check:
-    name: just ci
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
+  Lint:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
       # `rustflags: ""` is load-bearing — the action's default is `-D warnings`,
       # which would apply to dependency builds and diverge the cache from local.
       - uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
         with:
           rustflags: ""
-          cache-key: check
-
+          cache-key: lint
       - uses: taiki-e/install-action@742a3317eac7bd62f91cd888b4eead5e784ba833 # v2.87.1
         with:
           tool: just@1.58.0
+      - run: just lint
 
-      - run: just ci
+  Test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
+        with:
+          rustflags: ""
+          cache-key: test
+      - uses: taiki-e/install-action@742a3317eac7bd62f91cd888b4eead5e784ba833 # v2.87.1
+        with:
+          tool: just@1.58.0
+      - run: just test
+
+  Build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
+        with:
+          rustflags: ""
+          cache-key: build
+      - uses: taiki-e/install-action@742a3317eac7bd62f91cd888b4eead5e784ba833 # v2.87.1
+        with:
+          tool: just@1.58.0
+      # cargo test compiles the test profile only. This is the sole check that
+      # exercises [profile.release] and .cargo/config.toml's rust-lld pin.
+      - run: just build-musl
