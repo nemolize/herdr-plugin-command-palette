@@ -159,12 +159,15 @@ not a pin.
 `workflow_dispatch` builds the matrix against a given ref and publishes nothing.
 It exists because macOS and Android compile nowhere else — `Build` covers only
 the two musl targets — so without it the first compile of three of the five
-assets would be the tag itself.
+assets would be the tag itself. `Publish` runs on a dispatch too, stopping short
+of the two steps that need a tag (the manifest assertion and the upload), so its
+five-asset check and checksum are rehearsed rather than first executing under a
+tag, where a fix would cost a new version.
 
-It cannot rehearse a change to the workflow *before* that change merges, though:
-GitHub only dispatches workflows present on the default branch, so a branch
-editing `Release` has no way to run its own version. The rehearsal is a dispatch
-on `main` after merging and before tagging.
+Registering the dispatch needs the workflow on the default branch, so *this*
+workflow could not be rehearsed before it merged. That is a one-time bootstrap
+cost, not a standing property: a dispatch runs the selected ref's version of the
+file, so a later branch editing `Release` rehearses its own version directly.
 
 ## Not covered here
 

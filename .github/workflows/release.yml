@@ -10,15 +10,14 @@ on:
   workflow_dispatch:
     inputs:
       ref:
-        description: "Ref to build — publishes nothing, exercises the matrix"
-        required: true
+        description: "Ref to build; defaults to the dispatched ref. Publishes nothing."
 
 permissions: {}
 
 concurrency:
-  # Every tag is its own ref, so keying on it would let two releases publish
-  # concurrently to the same repo; they share one group instead and queue.
-  group: ${{ github.workflow }}
+  # A group holds at most one pending run and cancels it when a third arrives,
+  # so dry runs stay out of the tags' group rather than cancelling a release.
+  group: ${{ github.workflow }}-${{ github.event_name }}
 
 env:
   CARGO_TERM_COLOR: always
@@ -76,7 +75,11 @@ jobs:
           [ -x "$clang" ] || { echo "::error::pinned NDK missing: $clang"; exit 1; }
           echo "CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=$clang" >> "$GITHUB_ENV"
 
-      - run: cargo build --release --locked --target ${{ matrix.target }}
+      - uses: taiki-e/install-action@742a3317eac7bd62f91cd888b4eead5e784ba833 # v2.87.1
+        with:
+          tool: just@1.58.0
+
+      - run: just build-release ${{ matrix.target }}
 
       # An asset published under the wrong name fails at exec rather than at
       # install (§11) — and on Termux both wrong picks still exit 0.
@@ -138,9 +141,8 @@ jobs:
           retention-days: 1
 
   Publish:
-    # workflow_dispatch builds all five without publishing, so the matrix — the
-    # NDK pin above all — can be exercised without spending a tag on it.
-    if: github.event_name == 'push'
+    # Runs on a dispatch too, so its assertions are rehearsed rather than first
+    # executing under a tag, where a fix would cost a new version.
     needs: Build
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -150,6 +152,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ inputs.ref || github.ref }}
           persist-credentials: false
 
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -159,7 +162,8 @@ jobs:
 
       # install.sh derives the tag from herdr-plugin.toml's version, so a tag
       # disagreeing with the manifest publishes assets nobody will ever request.
-      - name: Assert the tag matches the manifest version
+      - if: github.event_name == 'push'
+        name: Assert the tag matches the manifest version
         run: |
           manifest=$(sed -n 's/^version[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' herdr-plugin.toml | head -n 1)
           [ -n "$manifest" ] || { echo "::error::could not read version from herdr-plugin.toml"; exit 1; }
@@ -191,7 +195,8 @@ jobs:
       # and build provenance as still uncovered.
       - run: cd dist && sha256sum "$BIN_NAME"-* > SHA256SUMS && cat SHA256SUMS
 
-      - uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
+      - if: github.event_name == 'push'
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
           files: dist/*
           fail_on_unmatched_files: true
