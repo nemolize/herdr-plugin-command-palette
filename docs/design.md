@@ -253,12 +253,18 @@ made about the entries, both of which change what can be offered:
 
 **Which operations are dynamic is decided by the CLI's own inconsistency, not by
 whether the argument is conceptually a choice.** `split`, `zoom`, `focus`,
-`resize` and `swap` all accept `--current`; `pane close`, `tab close`,
-`tab focus`, `workspace close` and `workspace focus` take a positional id and
-have no `--current`. So the *close* family is dynamic — which the earlier guess
+`resize` and `swap` name their pane with `--pane <ID>` or `--current`;
+`pane close`, `tab close`, `tab focus`, `workspace close` and `workspace focus`
+take a positional id. So the *close* family is dynamic — which the earlier guess
 ("a target workspace, a layout name") did not anticipate. Closing the current
-pane is the exception that escapes it: `$HERDR_PANE_ID` is injected into every
-plugin process (§8), so it resolves from the environment rather than a picker.
+pane is the exception that escapes it: `{pane}` names it from the context JSON,
+so it resolves without a picker.
+
+**`--current` is unusable from this plugin, so every pane entry names `{pane}`
+instead.** It resolves against the server's focused pane, and while the palette
+popup is up that is the popup rather than the pane it was opened from — so an
+entry using it acts on the wrong pane, or on nothing. This was shipped and fixed
+once; `catalog.rs` carries a test refusing `--current` in any entry.
 
 **`--direction` is not one vocabulary.** `pane split` accepts `right` and `down`
 only, while `pane focus`, `swap` and `resize` take all four. A "split left" entry
