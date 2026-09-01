@@ -101,11 +101,13 @@ title = "Close pane"
 args = ["pane", "close", "{pane}"]
 contexts = ["pane"]
 
-# Moving a pane needs a destination the user picks.
+# Moving a pane needs a destination the user picks. `--tab` is one of three
+# mutually exclusive destination forms, and the tab form additionally requires
+# `--split`: without it the CLI prints its usage and moves nothing.
 [[command]]
 id = "pane.move.tab"
 title = "Move pane to tab…"
-args = ["pane", "move", "{pane}", "--tab", "{}"]
+args = ["pane", "move", "{pane}", "--tab", "{}", "--split", "right"]
 resolve = "tab list"
 contexts = ["pane"]
 
