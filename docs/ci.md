@@ -161,6 +161,11 @@ It exists because macOS and Android compile nowhere else — `Build` covers only
 the two musl targets — so without it the first compile of three of the five
 assets would be the tag itself.
 
+It cannot rehearse a change to the workflow *before* that change merges, though:
+GitHub only dispatches workflows present on the default branch, so a branch
+editing `Release` has no way to run its own version. The rehearsal is a dispatch
+on `main` after merging and before tagging.
+
 ## Not covered here
 
 **Release supply chain.** `Release` publishes a `SHA256SUMS` alongside the five
