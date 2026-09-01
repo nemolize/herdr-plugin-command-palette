@@ -22,6 +22,10 @@ checked_against = "0.8.2"
 # {pane}, {tab} and {workspace} are the ids of what the user was looking at when
 # the palette opened. An entry naming one the invocation lacks is not offered.
 #
+# A pane entry names its target with {pane}, never with the CLI's --current:
+# --current resolves against the server's focused pane, which while the palette
+# is up is the popup rather than the pane it was opened from.
+#
 # `contexts` uses the manifest's vocabulary: global | workspace | tab | pane.
 
 
@@ -32,13 +36,13 @@ checked_against = "0.8.2"
 [[command]]
 id = "pane.split.right"
 title = "Split pane: right"
-args = ["pane", "split", "--current", "--direction", "right"]
+args = ["pane", "split", "--pane", "{pane}", "--direction", "right"]
 contexts = ["pane"]
 
 [[command]]
 id = "pane.split.down"
 title = "Split pane: down"
-args = ["pane", "split", "--current", "--direction", "down"]
+args = ["pane", "split", "--pane", "{pane}", "--direction", "down"]
 contexts = ["pane"]
 
 
@@ -48,25 +52,25 @@ contexts = ["pane"]
 [[command]]
 id = "pane.focus.left"
 title = "Focus pane: left"
-args = ["pane", "focus", "--current", "--direction", "left"]
+args = ["pane", "focus", "--pane", "{pane}", "--direction", "left"]
 contexts = ["pane"]
 
 [[command]]
 id = "pane.focus.right"
 title = "Focus pane: right"
-args = ["pane", "focus", "--current", "--direction", "right"]
+args = ["pane", "focus", "--pane", "{pane}", "--direction", "right"]
 contexts = ["pane"]
 
 [[command]]
 id = "pane.focus.up"
 title = "Focus pane: up"
-args = ["pane", "focus", "--current", "--direction", "up"]
+args = ["pane", "focus", "--pane", "{pane}", "--direction", "up"]
 contexts = ["pane"]
 
 [[command]]
 id = "pane.focus.down"
 title = "Focus pane: down"
-args = ["pane", "focus", "--current", "--direction", "down"]
+args = ["pane", "focus", "--pane", "{pane}", "--direction", "down"]
 contexts = ["pane"]
 
 
@@ -75,24 +79,22 @@ contexts = ["pane"]
 [[command]]
 id = "pane.zoom.toggle"
 title = "Zoom pane: toggle"
-args = ["pane", "zoom", "--current", "--toggle"]
+args = ["pane", "zoom", "--pane", "{pane}", "--toggle"]
 contexts = ["pane"]
 
 [[command]]
 id = "pane.swap.left"
 title = "Swap pane: left"
-args = ["pane", "swap", "--current", "--direction", "left"]
+args = ["pane", "swap", "--pane", "{pane}", "--direction", "left"]
 contexts = ["pane"]
 
 [[command]]
 id = "pane.swap.right"
 title = "Swap pane: right"
-args = ["pane", "swap", "--current", "--direction", "right"]
+args = ["pane", "swap", "--pane", "{pane}", "--direction", "right"]
 contexts = ["pane"]
 
-# `pane close` takes a positional pane id and has no --current, unlike its
-# siblings above. {pane} is the pane the user was in when the palette opened,
-# read from HERDR_PLUGIN_CONTEXT_JSON (§8) — so this needs no candidate list.
+# `pane close` takes its pane id positionally rather than behind --pane.
 [[command]]
 id = "pane.close"
 title = "Close pane"
