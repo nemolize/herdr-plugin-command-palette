@@ -132,6 +132,29 @@ mod tests {
         }
     }
 
+    /// `--current` resolves against the SERVER's focused pane. While the palette
+    /// is up that is the popup, not the pane it was opened from, so an entry
+    /// using it acts on the wrong pane — observed as pane entries doing nothing
+    /// when picked. Every pane entry names its target with {pane} instead.
+    #[test]
+    fn no_entry_targets_a_pane_with_current() {
+        for e in &shipped().commands {
+            assert!(
+                !e.args.iter().any(|a| a == "--current"),
+                "{}: `{}` uses --current, which resolves to the palette popup",
+                e.id,
+                e.args.join(" ")
+            );
+            if e.args.first().map(String::as_str) == Some("pane") {
+                assert!(
+                    e.args.iter().any(|a| a == "{pane}"),
+                    "{}: a pane entry must name its target with {{pane}}",
+                    e.id
+                );
+            }
+        }
+    }
+
     /// The check that would have caught `tab.rename`, which supplied an id to a
     /// command whose signature is `<TAB_ID> <LABEL>...` and so could never run.
     /// Verifying flags and enum values — as the original catalog check did —
@@ -174,7 +197,7 @@ mod tests {
                 if a.starts_with("--") {
                     // Only value-taking flags consume the next token; the ones
                     // this catalog uses that do are listed here.
-                    if matches!(a.as_str(), "--direction" | "--tab" | "--label") {
+                    if matches!(a.as_str(), "--direction" | "--tab" | "--label" | "--pane") {
                         rest.next();
                     }
                 } else {
