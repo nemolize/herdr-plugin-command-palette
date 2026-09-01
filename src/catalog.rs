@@ -195,9 +195,28 @@ mod tests {
             let mut rest = e.args[prefix.len()..].iter();
             while let Some(a) = rest.next() {
                 if a.starts_with("--") {
-                    // Only value-taking flags consume the next token; the ones
-                    // this catalog uses that do are listed here.
-                    if matches!(a.as_str(), "--direction" | "--tab" | "--label" | "--pane") {
+                    // Only value-taking flags consume the next token. Listed
+                    // from the same 0.8.2 `--help` output as `required` above,
+                    // and for the same reason: a flag missing here reads its
+                    // value as a positional and fails a correct entry, while a
+                    // valueless flag wrongly listed eats a real positional and
+                    // hides a missing one.
+                    if matches!(
+                        a.as_str(),
+                        "--cwd"
+                            | "--direction"
+                            | "--env"
+                            | "--label"
+                            | "--pane"
+                            | "--ratio"
+                            | "--right-click"
+                            | "--source-pane"
+                            | "--split"
+                            | "--tab"
+                            | "--tab-label"
+                            | "--target-pane"
+                            | "--workspace"
+                    ) {
                         rest.next();
                     }
                 } else {
