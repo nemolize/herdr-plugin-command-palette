@@ -1,0 +1,203 @@
+name: Release
+
+# install.sh fetches one asset per platform by name (docs/design.md §11), so a
+# tag producing four of the five leaves one platform installing nothing.
+on:
+  push:
+    # Three digit-led parts, so a tag that merely starts with v cannot publish;
+    # globs have no repetition operator, so this is as close as it gets.
+    tags: ["v[0-9]*.[0-9]*.[0-9]*"]
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Ref to build; defaults to the dispatched ref. Publishes nothing."
+
+permissions: {}
+
+concurrency:
+  # A group holds at most one pending run and cancels it when a third arrives,
+  # so dry runs stay out of the tags' group rather than cancelling a release.
+  group: ${{ github.workflow }}-${{ github.event_name }}
+
+env:
+  CARGO_TERM_COLOR: always
+  BIN_NAME: herdr-command-palette
+
+jobs:
+  Build:
+    strategy:
+      # One broken target must not cancel the others: a partial matrix names
+      # every platform that failed, where a cancelled one names only the first.
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-musl
+            runner: ubuntu-24.04
+          - target: aarch64-unknown-linux-musl
+            runner: ubuntu-24.04
+          - target: aarch64-linux-android
+            runner: ubuntu-24.04
+          - target: aarch64-apple-darwin
+            runner: macos-15
+          - target: x86_64-apple-darwin
+            runner: macos-15
+
+    name: Build (${{ matrix.target }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+          # Keeps GITHUB_TOKEN out of .git/config, where build code could read it.
+          persist-credentials: false
+
+      # rustflags: "" for the reason docs/ci.md records — the action's default
+      # `-D warnings` would apply to dependency builds and diverge the cache.
+      - uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
+        with:
+          rustflags: ""
+          target: ${{ matrix.target }}
+          cache-key: release-${{ matrix.target }}
+
+      # ANDROID_NDK_ROOT is deliberately not followed: the image carries several
+      # NDKs and rotates which one it names (docs/design.md §12).
+      - if: matrix.target == 'aarch64-linux-android'
+        name: Point cargo at the pinned NDK's linker
+        run: |
+          ndk="$ANDROID_SDK_ROOT/ndk/27.3.13750724"
+          clang="$ndk/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android24-clang"
+          # A pin only pins if its absence stops the release, rather than
+          # falling through to whichever NDK the image happens to ship.
+          [ -x "$clang" ] || { echo "::error::pinned NDK missing: $clang"; exit 1; }
+          echo "CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=$clang" >> "$GITHUB_ENV"
+
+      - uses: taiki-e/install-action@742a3317eac7bd62f91cd888b4eead5e784ba833 # v2.87.1
+        with:
+          tool: just@1.58.0
+
+      - run: just build-release ${{ matrix.target }}
+
+      # An asset published under the wrong name fails at exec rather than at
+      # install (§11) — and on Termux both wrong picks still exit 0.
+      - name: Assert the artefact matches its asset name
+        run: |
+          described=$(file -b "target/${{ matrix.target }}/release/$BIN_NAME")
+          echo "$described"
+          case "${{ matrix.target }}" in
+            aarch64-linux-android)
+              # Android's own interpreter is why this works where a static
+              # generic-Linux build silently loses DNS and user lookup (§2).
+              case "$described" in
+                *Android*|*"/system/bin/linker64"*) ;;
+                *) echo "::error::not an Android binary: $described"; exit 1 ;;
+              esac ;;
+            *-unknown-linux-musl)
+              case "$described" in
+                *Android*|*"/system/bin/linker64"*)
+                  echo "::error::Android binary under a generic Linux name: $described"; exit 1 ;;
+                *ELF*) ;;
+                *) echo "::error::not an ELF binary: $described"; exit 1 ;;
+              esac ;;
+            *-apple-darwin)
+              case "$described" in
+                *Mach-O*) ;;
+                *) echo "::error::not a Mach-O binary: $described"; exit 1 ;;
+              esac ;;
+          esac
+          # Right kind of binary is not yet the right machine code: the two
+          # aarch64 assets differ only in platform, the rest only in arch.
+          case "${{ matrix.target }}" in
+            aarch64-*|arm64-*)
+              case "$described" in
+                *x86_64*|*x86-64*|*i386*)
+                  echo "::error::x86 binary under an ARM name: $described"; exit 1 ;;
+              esac ;;
+            x86_64-*)
+              case "$described" in
+                *aarch64*|*arm64*)
+                  echo "::error::ARM binary under an x86_64 name: $described"; exit 1 ;;
+              esac ;;
+          esac
+
+      # install.sh builds its URL from this name, so it is fixed here rather
+      # than derived at publish time from whatever files happen to exist.
+      - name: Name the asset the way install.sh requests it
+        run: |
+          mkdir -p dist
+          cp "target/${{ matrix.target }}/release/$BIN_NAME" "dist/$BIN_NAME-${{ matrix.target }}"
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ env.BIN_NAME }}-${{ matrix.target }}
+          path: dist/${{ env.BIN_NAME }}-${{ matrix.target }}
+          if-no-files-found: error
+          # Artifacts are immutable, so a re-run would otherwise fail on the name.
+          overwrite: true
+          # Publish consumes these within the same run.
+          retention-days: 1
+
+  Publish:
+    # Runs on a dispatch too, so its assertions are rehearsed rather than first
+    # executing under a tag, where a fix would cost a new version.
+    needs: Build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+          persist-credentials: false
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          path: dist
+          merge-multiple: true
+
+      # install.sh derives the tag from herdr-plugin.toml's version, so a tag
+      # disagreeing with the manifest publishes assets nobody will ever request.
+      - if: github.event_name == 'push'
+        name: Assert the tag matches the manifest version
+        run: |
+          manifest=$(sed -n 's/^version[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' herdr-plugin.toml | head -n 1)
+          [ -n "$manifest" ] || { echo "::error::could not read version from herdr-plugin.toml"; exit 1; }
+          tag=${GITHUB_REF_NAME#v}
+          [ "$manifest" = "$tag" ] || {
+            echo "::error::tag v$tag does not match herdr-plugin.toml version $manifest"
+            exit 1
+          }
+
+      # By the exact names install.sh requests. A missing one is a platform
+      # whose install fetches a 404 and registers a plugin with no binary.
+      - name: Assert all five assets are present
+        run: |
+          for target in \
+            x86_64-unknown-linux-musl \
+            aarch64-unknown-linux-musl \
+            aarch64-linux-android \
+            aarch64-apple-darwin \
+            x86_64-apple-darwin
+          do
+            [ -s "dist/$BIN_NAME-$target" ] || {
+              echo "::error::missing asset $BIN_NAME-$target"
+              exit 1
+            }
+          done
+          ls -l dist
+
+      # The only integrity signal a release carries — docs/ci.md records signing
+      # and build provenance as still uncovered.
+      - run: cd dist && sha256sum "$BIN_NAME"-* > SHA256SUMS && cat SHA256SUMS
+
+      - if: github.event_name == 'push'
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
+        with:
+          files: dist/*
+          fail_on_unmatched_files: true
+          generate_release_notes: true

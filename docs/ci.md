@@ -22,8 +22,9 @@ Two facts shape every choice here:
 | `cargo fmt --all --check` | `Lint` | Zero false positives, about a second, and it keeps diffs reviewable — the scarce resource when an agent writes most of the code and reformats regions it touches. |
 | `cargo clippy --locked --all-targets -- -D warnings` | `Lint` | The default lint group is a correctness floor, and the tree already passes at `-D warnings`, so adopting it costs nothing today and catches real bug classes later. |
 | `cargo test --locked` | `Test` | The 41 existing tests, which were being run by hand until now. |
-| `cargo build --release --locked` for both musl targets | `Build` | `cargo test` compiles the test profile only. This is the sole check that exercises `[profile.release]` (LTO, `opt-level = "z"`, strip) and the per-target `rust-lld` pins in `.cargo/config.toml` — breakage that would otherwise surface for the first time at a release tag. It covers the two release assets a Linux runner can build unaided; the macOS and Android assets need another host or the NDK, so they stay #10's to verify. |
+| `cargo build --release --locked` for both musl targets | `Build` | `cargo test` compiles the test profile only. This is the sole check that exercises `[profile.release]` (LTO, `opt-level = "z"`, strip) and the per-target `rust-lld` pins in `.cargo/config.toml` — breakage that would otherwise surface for the first time at a release tag. It covers the two release assets a Linux runner can build unaided; the macOS and Android assets need another host or the NDK, so `Release` is the only thing that compiles them. |
 | `cargo deny --locked check` | `Audit` | See the group table below. |
+| `cargo build --release --locked` for all five targets | `Release` | Cuts the release (docs/design.md §11). Adds the two assets `Build` cannot reach — macOS needs its own runner, Android the NDK — so the first time those two compile is a tag, unless the `workflow_dispatch` dry run is used first. |
 
 `Lint`, `Test` and `Build` are separate jobs rather than one `just ci` step, so a
 red X names which check failed without opening the log, and the three run
@@ -129,14 +130,57 @@ Every action is pinned by full commit SHA. A tag is mutable, and a repo that
 audits its Rust dependencies should hold its own workflow supply chain to the
 same standard.
 
+## Cutting a release
+
+A tag matching `v[0-9]*.[0-9]*.[0-9]*` builds the five assets of §11 in a
+`fail-fast: false` matrix and publishes them. Three properties are worth stating
+because each fails silently otherwise:
+
+- **The publish is all-or-nothing.** `install.sh` requests exactly one asset
+  name per platform, so a release carrying four of the five is not a partial
+  release — it is one platform whose install fetches a 404 and registers a
+  plugin with no binary. `Publish` enumerates all five by name before it runs,
+  rather than uploading whatever `dist/` happens to hold.
+- **The tag must agree with `herdr-plugin.toml`.** The install script derives
+  the download URL from the manifest's version, not from the tag, so a
+  disagreement publishes assets nobody will ever ask for. Asserted at publish.
+- **Each artefact is checked against the name it is about to be published
+  under.** A mispublished asset fails at exec on the user's machine rather than
+  at install, and on Termux both wrong picks still exit 0 (§2) — so the check
+  reads what the binary *is* via `file`, the same assertion `install.sh` makes
+  downstream, at the one point a bad artefact can still be stopped.
+
+The NDK is pinned by writing its version into the path rather than following
+`ANDROID_NDK_ROOT`: the runner image carries several and rotates which one that
+variable names. The step fails when the pinned path is absent instead of falling
+through to whichever NDK is present, since a pin that degrades to "any NDK" is
+not a pin.
+
+`workflow_dispatch` builds the matrix against a given ref and publishes nothing.
+It exists because macOS and Android compile nowhere else — `Build` covers only
+the two musl targets — so without it the first compile of three of the five
+assets would be the tag itself. `Publish` runs on a dispatch too, stopping short
+of the two steps that need a tag (the manifest assertion and the upload), so its
+five-asset check and checksum are rehearsed rather than first executing under a
+tag, where a fix would cost a new version.
+
+Registering the dispatch needs the workflow on the default branch, so *this*
+workflow could not be rehearsed before it merged. That is a one-time bootstrap
+cost, not a standing property: a dispatch runs the selected ref's version of the
+file, so a later branch editing `Release` rehearses its own version directly.
+
 ## Not covered here
 
-**Release supply chain.** Signing, checksums, and build provenance for the
-published assets are not addressed by anything in this document. `cargo deny`
-guards the *dependency* chain; a compromised dependency ships inside a perfectly
-signed asset, and conversely no amount of dependency auditing detects a tampered
-release. That work belongs to the release workflow (#10) and is called out here
-so a green CI badge is not mistaken for having covered it.
+**Release supply chain.** `Release` publishes a `SHA256SUMS` alongside the five
+assets, which is the whole of it — **signing and build provenance are not
+addressed by anything here**, and a checksum published beside the artefact it
+describes attests only that the two were written together. `cargo deny` guards
+the *dependency* chain, a different one: a compromised dependency ships inside a
+perfectly signed asset, and no amount of dependency auditing detects a tampered
+release. Called out so a green CI badge is not mistaken for having covered it.
 
-**Termux.** Nothing in CI runs on Android. #10's Android asset is built and
-inspected, never executed.
+**Termux.** Nothing in CI runs on Android. `Release`'s Android asset is built
+and inspected, never executed — the assertion that it is an Android binary reads
+what the artefact *is*, which is the most a Linux runner can say about it. That
+it works on a device rests on #5's on-device run of a probe crate sharing the
+target triple; a device check after the first release is what closes it.
