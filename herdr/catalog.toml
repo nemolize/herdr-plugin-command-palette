@@ -128,7 +128,7 @@ contexts = ["global", "workspace", "tab", "pane"]
 
 [[command]]
 id = "tab.focus"
-title = "Switch to tab…"
+title = "Focus tab…"
 args = ["tab", "focus", "{}"]
 resolve = "tab list"
 contexts = ["global", "workspace", "tab", "pane"]
@@ -154,7 +154,7 @@ contexts = ["global", "workspace", "tab", "pane"]
 
 [[command]]
 id = "workspace.focus"
-title = "Switch to workspace…"
+title = "Focus workspace…"
 args = ["workspace", "focus", "{}"]
 resolve = "workspace list"
 contexts = ["global", "workspace", "tab", "pane"]
