@@ -273,7 +273,7 @@ mod tests {
     fn a_dynamic_entry_asks_for_a_target_instead_of_running() {
         let mut app = app_with(vec![cmd(
             "tab.focus",
-            "Switch to tab",
+            "Focus tab",
             &["tab", "focus", "{}"],
             Some("tab list"),
         )]);
@@ -296,7 +296,7 @@ mod tests {
     fn picking_a_target_substitutes_it_into_the_command() {
         let command = cmd(
             "tab.focus",
-            "Switch to tab",
+            "Focus tab",
             &["tab", "focus", "{}"],
             Some("tab list"),
         );
@@ -364,7 +364,7 @@ mod tests {
     fn esc_backs_out_of_targets_before_it_closes_the_palette() {
         let command = cmd(
             "tab.focus",
-            "Switch to tab",
+            "Focus tab",
             &["tab", "focus", "{}"],
             Some("tab list"),
         );
@@ -382,7 +382,7 @@ mod tests {
         assert_eq!(app.rows(), vec!["herdr"]);
         assert!(app.leave_targets());
         // Back at the commands, with the target query discarded.
-        assert_eq!(app.rows(), vec!["Switch to tab"]);
+        assert_eq!(app.rows(), vec!["Focus tab"]);
         assert!(app.query.is_empty());
         assert!(!app.leave_targets());
     }
