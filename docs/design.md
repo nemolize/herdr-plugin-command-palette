@@ -199,8 +199,8 @@ tabs; moving between workspaces. The full CLI is ~91 methods, and listing all of
 them would make the palette worse, not better: every rarely-used entry is noise
 in front of the handful that matter. The catalog grows on demand, from use.
 
-Twenty entries also keeps the drift surface small, which matters because nothing
-detects drift automatically (below).
+Twenty entries also keeps the drift surface small, which still matters now that
+CI checks them: each entry costs a fixture session of its own (below).
 
 Each entry names a title, the argv to run, and the contexts it is valid in:
 
@@ -213,16 +213,36 @@ contexts = ["pane"]
 ```
 
 The risk is honest and worth stating plainly: **this catalog drifts when Herdr
-changes its CLI.** Nothing detects the drift automatically. Two mitigations,
-neither complete:
+changes its CLI.** Three mitigations:
 
+- **CI runs every entry against a real herdr** (`herdr/catalog-e2e.py`, #24).
+  Each entry gets its own fixture session under `XDG_CONFIG_HOME`, so the
+  destructive entries are safe to run and no entry depends on what a previous
+  one left behind. herdr's clap layer accepts a wrong flag *combination* and its
+  runtime rejects it — exit 2 with usage on stderr — so the exit code alone
+  separates a runnable entry from a broken one, with no transcription to keep
+  current. This is what the unit tests in `src/catalog.rs` cannot reach: they
+  encode a hand-copied `--help` table (`required`, `catalog.rs`), which goes
+  stale the moment herdr adds a constraint the table does not carry. That is
+  exactly how `pane.move.tab` shipped with `--tab` and no `--split`.
 - Pin the catalog's `checked_against` and bump it deliberately when the catalog
   is re-checked against a new release. It is deliberately not called
   `min_herdr_version`: the manifest's key of that name is a hard install gate,
-  while this one is a soft baseline the palette only warns about.
+  while this one is a soft baseline the palette only warns about. The E2E run
+  notes when the running herdr and this pin disagree, since a green run against
+  an unpinned version leaves the pin behind what was actually verified.
 - Have the palette surface a failed dispatch as a visible error naming the
   command id, so a drifted entry reports itself the first time it is used
   instead of silently doing nothing.
+
+The E2E's limit is worth naming, because one of the three shipped defects falls
+outside it: it proves herdr *accepts* an entry's argv, never that the entry does
+what its title claims. `tab.rename` and `pane.move.tab` were both rejections and
+both would be caught. The `--current` defect was not — the argv was well-formed
+and herdr ran it happily, against the palette's own popup rather than the pane
+behind it. Catching that class means asserting post-state per entry, a much
+larger fixture surface; `catalog.rs`'s test refusing `--current` in any entry is
+the cheaper guard for the one instance of it that has actually bitten.
 
 Entries requiring an argument the user must choose resolve their candidates at
 open time from `herdr workspace list` / `herdr tab list` / `herdr pane list`,

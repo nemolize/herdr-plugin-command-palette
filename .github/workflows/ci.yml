@@ -49,6 +49,20 @@ jobs:
           tool: just@1.58.0
       - run: just test
 
+  # The unit tests check the catalog against a transcribed `--help` table, which
+  # goes stale silently; this runs every entry against a real herdr (issue #24).
+  Catalog:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: taiki-e/install-action@742a3317eac7bd62f91cd888b4eead5e784ba833 # v2.87.1
+        with:
+          tool: just@1.58.0
+      - run: just fetch-herdr
+      - run: just catalog-e2e
+
   Build:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
