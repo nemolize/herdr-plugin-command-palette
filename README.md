@@ -127,9 +127,12 @@ box exactly when it matters.
 ## The catalog drifts, and says so when it does
 
 Nothing enumerates Herdr's built-ins, so the catalog is hand-written argv — and
-it goes stale when Herdr changes its CLI. Two things make that visible rather
+it goes stale when Herdr changes its CLI. Three things make that visible rather
 than silent:
 
+- CI runs every entry against a real herdr, each in its own throwaway session,
+  and fails naming the entry id and the argv herdr rejected. Run it yourself
+  with `just fetch-herdr && just catalog-e2e`.
 - `checked_against` pins the herdr release the entries were last verified on.
   When the running herdr is older, the palette says so in its footer rather than
   refusing — most entries still work. It is deliberately not

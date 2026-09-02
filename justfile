@@ -34,3 +34,12 @@ build-musl:
 # Not part of `ci`: it needs the advisory database over the network, and it is what audit.yml runs on its own schedule
 deny:
     cargo deny --locked check
+
+# Fetch a herdr binary into ./bin, for the catalog E2E below.
+fetch-herdr:
+    sh herdr/fetch-herdr.sh ./bin
+
+# Not part of `ci`: it needs a herdr binary, which the Catalog job fetches
+# rather than every other job carrying that cost.
+catalog-e2e:
+    python3 herdr/catalog-e2e.py
