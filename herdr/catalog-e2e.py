@@ -107,9 +107,15 @@ class Fixture:
     def __init__(self, home: Path):
         self.home = home
         self.server = start_server_and_await_readiness(home)
-        herdr("workspace", "create", home=home)
-        herdr("tab", "create", home=home)
-        self.ids = self._read_ids()
+        # Past this point the server is running, so anything that raises has to
+        # stop it — an exception here binds no Fixture for the caller to close.
+        try:
+            herdr("workspace", "create", home=home)
+            herdr("tab", "create", home=home)
+            self.ids = self._read_ids()
+        except BaseException:
+            self.close()
+            raise
 
     def _read_ids(self) -> dict[str, str]:
         panes = json.loads(herdr("pane", "list", home=self.home).stdout)
@@ -117,11 +123,18 @@ class Fixture:
         focused = next((p for p in rows if p.get("focused")), rows[0])
         tabs = {p["tab_id"] for p in rows}
         another_tab = next((t for t in sorted(tabs) if t != focused["tab_id"]), None)
+        if another_tab is None:
+            # Falling back to the focused tab would let `pane.move.tab` move a
+            # pane into the tab it already occupies and still report ok.
+            raise RuntimeError(
+                f"fixture has only one tab ({focused['tab_id']}); "
+                "the entries needing a second target would not be exercised"
+            )
         return {
             "{pane}": focused["pane_id"],
             "{tab}": focused["tab_id"],
             "{workspace}": focused["workspace_id"],
-            "{}": another_tab or focused["tab_id"],
+            "{another tab}": another_tab,
         }
 
     def close(self) -> None:
@@ -138,14 +151,27 @@ def resolved_args(entry: dict, ids: dict[str, str]) -> list[str]:
     `{pane}` / `{tab}` / `{workspace}` come from the invocation's context
     (`src/context.rs`); `{}` is the row the user picks from the list named by
     `resolve` (`src/catalog.rs`), so which list that is decides what `{}` holds.
-    A tab id is the default because most resolving entries take one.
+    A tab-resolving entry takes the tab the pane is NOT in, so the move it
+    performs is a real one.
+
+    Raises on a `resolve` this file does not know: defaulting it to a tab id
+    would substitute a plausible argument into an entry never taught here and
+    report ok, which is the silent staleness this check exists to remove.
     """
     table = dict(ids)
     resolve = entry.get("resolve")
-    if resolve == "workspace list":
-        table["{}"] = ids["{workspace}"]
-    elif resolve == "pane list":
-        table["{}"] = ids["{pane}"]
+    if resolve is not None:
+        picked = {
+            "tab list": "{another tab}",
+            "pane list": "{pane}",
+            "workspace list": "{workspace}",
+        }.get(resolve)
+        if picked is None:
+            raise RuntimeError(
+                f"{entry['id']}: resolve = {resolve!r} is not a list this "
+                "harness knows how to pick a target from"
+            )
+        table["{}"] = ids[picked]
 
     return [table.get(a, a) for a in entry["args"]]
 
@@ -168,17 +194,34 @@ def note_if_pin_disagrees_with_running_herdr(checked_against: str | None) -> Non
         )
 
 
-def report_failures(failures: list[tuple[str, list[str], int, str]]) -> None:
-    """Print the entry id and argv per failure, because #24's whole point is that
-    a drifted catalog must say which line to edit — herdr's own runtime already
-    reports that something is wrong and that was not enough."""
-    plural = "y" if len(failures) == 1 else "ies"
-    print(f"\n{len(failures)} catalog entr{plural} herdr rejected:\n", file=sys.stderr)
-    for entry_id, args, code, stderr in failures:
+def report_rejected(rejected: list[tuple[str, list[str], int, str]]) -> None:
+    """Print the entry id and argv per rejection, because #24's whole point is
+    that a drifted catalog must say which line to edit — herdr's own runtime
+    already reports that something is wrong and that was not enough."""
+    plural = "y" if len(rejected) == 1 else "ies"
+    print(f"\n{len(rejected)} catalog entr{plural} herdr rejected:\n", file=sys.stderr)
+    for entry_id, args, code, stderr in rejected:
         print(f"  {entry_id}", file=sys.stderr)
         print(f"    argv: herdr {' '.join(args)}", file=sys.stderr)
         print(f"    exit: {code}", file=sys.stderr)
         for line in stderr.splitlines()[:4]:
+            print(f"    {line}", file=sys.stderr)
+        print(file=sys.stderr)
+
+
+def report_broken(broken: list[tuple[str, str]]) -> None:
+    """Report separately from rejections: this is the harness failing to build a
+    session, not the catalog being wrong, and reading one as the other sends
+    whoever is on the red build to edit a file that is fine."""
+    plural = "y" if len(broken) == 1 else "ies"
+    print(
+        f"\n{len(broken)} entr{plural} could not be checked — the fixture "
+        "failed to build, which is a harness fault rather than catalog drift:\n",
+        file=sys.stderr,
+    )
+    for entry_id, message in broken:
+        print(f"  {entry_id}", file=sys.stderr)
+        for line in message.splitlines()[:6]:
             print(f"    {line}", file=sys.stderr)
         print(file=sys.stderr)
 
@@ -200,31 +243,41 @@ def main() -> int:
     note_if_pin_disagrees_with_running_herdr(catalog.get("checked_against"))
 
     FIXTURE_ROOT.mkdir(parents=True, exist_ok=True)
-    failures: list[tuple[str, list[str], int, str]] = []
+    rejected: list[tuple[str, list[str], int, str]] = []
+    broken: list[tuple[str, str]] = []
 
     for entry in entries:
         home = Path(tempfile.mkdtemp(dir=FIXTURE_ROOT))
         try:
             fixture = Fixture(home)
         except RuntimeError as e:
-            print(f"FAIL {entry['id']}: {e}", file=sys.stderr)
+            # Keep going: one flaky boot must not swallow every later entry's
+            # verdict, and a harness fault is not a drifted catalog.
+            broken.append((entry["id"], str(e)))
+            print(f"BROKE {entry['id']}", file=sys.stderr)
             shutil.rmtree(home, ignore_errors=True)
-            return 1
+            continue
 
         try:
             args = resolved_args(entry, fixture.ids)
             proc = herdr(*args, home=home, check=False)
             if proc.returncode != 0:
-                failures.append((entry["id"], args, proc.returncode, proc.stderr.strip()))
+                rejected.append((entry["id"], args, proc.returncode, proc.stderr.strip()))
                 print(f"FAIL {entry['id']}", file=sys.stderr)
             else:
                 print(f"ok   {entry['id']}", file=sys.stderr)
+        except RuntimeError as e:
+            broken.append((entry["id"], str(e)))
+            print(f"BROKE {entry['id']}", file=sys.stderr)
         finally:
             fixture.close()
             shutil.rmtree(home, ignore_errors=True)
 
-    if failures:
-        report_failures(failures)
+    if rejected:
+        report_rejected(rejected)
+    if broken:
+        report_broken(broken)
+    if rejected or broken:
         return 1
 
     print(

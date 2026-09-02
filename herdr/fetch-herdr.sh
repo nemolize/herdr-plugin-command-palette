@@ -28,20 +28,24 @@ key="$os-$arch"
 
 manifest=$(curl -fsSL --retry 3 "$MANIFEST") || die "could not fetch $MANIFEST"
 
-read -r url sum version <<EOF
-$(printf '%s' "$manifest" | python3 -c '
+# Capture before splitting: a `read` fed by a command substitution discards the
+# helper's exit status, so a failure would surface only as an empty field later.
+fields=$(printf '%s' "$manifest" | python3 -c '
 import json, sys
 d = json.load(sys.stdin)
 key = sys.argv[1]
 url = d.get("assets", {}).get(key)
 sum = d.get("sha256", {}).get(key)
 if not url or not sum:
-    sys.exit(f"manifest has no {key} asset")
+    sys.exit(f"manifest has no url and sha256 for {key}")
 print(url, sum, d.get("version", "?"))
-' "$key")
+' "$key") || die "could not read the $key asset out of $MANIFEST"
+
+read -r url sum version <<EOF
+$fields
 EOF
 
-[ -n "$url" ] || die "manifest has no $key asset"
+[ -n "$url" ] && [ -n "$sum" ] || die "manifest has no $key asset"
 
 mkdir -p "$DEST_DIR"
 tmp="$DEST_DIR/herdr.download"
