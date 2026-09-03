@@ -1,7 +1,6 @@
 //! Rendering and the event loop. The pane entrypoint has a real TTY, unlike the
 //! action hop (docs/design.md §3).
 use std::io::{stdout, Stdout};
-use std::rc::Rc;
 
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use crossterm::terminal::{
@@ -104,40 +103,37 @@ pub fn next_step(app: &mut App) -> Result<Step, String> {
 }
 
 fn render(f: &mut Frame, app: &mut App) {
-    // Herdr draws the pane's own bordered frame (title from herdr-plugin.toml);
-    // a second Block here doubled it, so the Targets command name gets its own line instead.
-    let chunks = match &app.stage {
-        Stage::Commands => Layout::vertical([
-            Constraint::Length(1),
-            Constraint::Min(1),
-            Constraint::Length(1),
-        ])
-        .split(f.area()),
-        Stage::Targets { command, .. } => {
-            let rows = Layout::vertical([
-                Constraint::Length(1),
-                Constraint::Length(1),
-                Constraint::Min(1),
-                Constraint::Length(1),
-            ])
-            .split(f.area());
-            f.render_widget(Paragraph::new(command.title.clone()).bold(), rows[0]);
-            Rc::new([rows[1], rows[2], rows[3]])
-        }
+    // Herdr draws the pane's own frame; a second Block here doubled it. Its
+    // title is static, so Targets shows the command name on a line of its own.
+    let header = match &app.stage {
+        Stage::Commands => None,
+        Stage::Targets { command, .. } => Some(command.title.clone()),
     };
 
-    f.render_widget(Paragraph::new(format!("> {}", app.query)), chunks[0]);
+    let chunks = Layout::vertical([
+        Constraint::Length(if header.is_some() { 1 } else { 0 }),
+        Constraint::Length(1),
+        Constraint::Min(1),
+        Constraint::Length(1),
+    ])
+    .split(f.area());
+
+    if let Some(title) = header {
+        f.render_widget(Paragraph::new(title).bold(), chunks[0]);
+    }
+
+    f.render_widget(Paragraph::new(format!("> {}", app.query)), chunks[1]);
 
     // Owned rather than borrowed: the list borrows `app` immutably while
     // render_stateful_widget needs `app.state` mutably.
     let rows: Vec<String> = app.rows().into_iter().map(str::to_owned).collect();
     if rows.is_empty() {
-        f.render_widget(Paragraph::new("no matches").dim(), chunks[1]);
+        f.render_widget(Paragraph::new("no matches").dim(), chunks[2]);
     } else {
         let items: Vec<ListItem> = rows.into_iter().map(ListItem::new).collect();
         f.render_stateful_widget(
             List::new(items).highlight_symbol("▶ "),
-            chunks[1],
+            chunks[2],
             &mut app.state,
         );
     }
@@ -152,5 +148,5 @@ fn render(f: &mut Frame, app: &mut App) {
             format!("{}/{} · {esc}", app.shown(), app.total())
         }
     };
-    f.render_widget(Paragraph::new(footer).dim(), chunks[2]);
+    f.render_widget(Paragraph::new(footer).dim(), chunks[3]);
 }
