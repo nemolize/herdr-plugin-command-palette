@@ -150,3 +150,128 @@ fn render(f: &mut Frame, app: &mut App) {
     };
     f.render_widget(Paragraph::new(footer).dim(), chunks[3]);
 }
+
+#[cfg(test)]
+mod render_tests {
+    use super::*;
+    use crate::app::Candidate;
+    use crate::catalog::Command;
+    use crate::frecency::Frecency;
+    use crate::herdr::Target;
+    use ratatui::backend::TestBackend;
+    use std::path::Path;
+
+    fn command(id: &str, title: &str, resolve: Option<&str>) -> Command {
+        Command {
+            id: id.to_string(),
+            title: title.to_string(),
+            args: vec!["noop".to_string()],
+            contexts: Vec::new(),
+            resolve: resolve.map(str::to_string),
+        }
+    }
+
+    fn app_with(commands: Vec<Command>) -> App {
+        let candidates = commands.into_iter().map(Candidate::from_command).collect();
+        App::new(candidates, Frecency::load(Path::new("/nonexistent")))
+    }
+
+    /// Draws into the region Herdr hands the plugin and returns it as lines.
+    fn draw(app: &mut App, width: u16, height: u16) -> Vec<String> {
+        let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+        terminal.draw(|f| render(f, app)).unwrap();
+        let buffer = terminal.backend().buffer();
+        (0..height)
+            .map(|y| {
+                (0..width)
+                    .map(|x| buffer[(x, y)].symbol().to_string())
+                    .collect::<String>()
+                    .trim_end()
+                    .to_string()
+            })
+            .collect()
+    }
+
+    /// The regression #31 fixed: a bordered Block here landed inside Herdr's
+    /// own frame, so the palette showed two.
+    #[test]
+    fn draws_no_frame_of_its_own() {
+        let mut app = app_with(vec![command("split.right", "Split pane: right", None)]);
+        let lines = draw(&mut app, 36, 8);
+        let border = ['┌', '┐', '└', '┘', '─', '│'];
+        assert!(
+            !lines.iter().any(|l| l.chars().any(|c| border.contains(&c))),
+            "border drawn: {lines:#?}"
+        );
+    }
+
+    /// Herdr's pane title is static, so the selected command's name has to be
+    /// visible from inside the pane.
+    #[test]
+    fn targets_stage_names_the_selected_command() {
+        let picked = command("focus.tab", "Focus tab…", Some("tabs"));
+        let mut app = app_with(vec![picked.clone()]);
+        app.enter_targets(
+            picked,
+            vec![Target {
+                id: "1".into(),
+                label: "editor".into(),
+            }],
+        );
+        let lines = draw(&mut app, 36, 8);
+        assert_eq!(lines[0], "Focus tab…", "{lines:#?}");
+        assert_eq!(lines[1], ">", "{lines:#?}");
+    }
+
+    /// The Commands stage must not pay for the header row it has no use for.
+    #[test]
+    fn commands_stage_starts_at_the_query_line() {
+        let mut app = app_with(vec![command("split.right", "Split pane: right", None)]);
+        let lines = draw(&mut app, 36, 8);
+        assert_eq!(lines[0], ">", "{lines:#?}");
+    }
+
+    /// Width is the axis docs/design.md §5 gives a readability floor to, and
+    /// nothing else here would notice the region narrowing: every other
+    /// assertion is on a short string that fits whatever it is given.
+    #[test]
+    fn every_column_of_the_pane_is_drawn_into() {
+        let wide = "W".repeat(80);
+        let picked = command("focus.tab", &wide, Some("tabs"));
+        let mut app = app_with(vec![picked.clone()]);
+        app.enter_targets(
+            picked,
+            vec![Target {
+                id: "1".into(),
+                label: wide.clone(),
+            }],
+        );
+        let lines = draw(&mut app, 36, 8);
+        let overlong: Vec<&String> = lines.iter().filter(|l| l.contains('W')).collect();
+        assert_eq!(overlong.len(), 2, "header and list row: {lines:#?}");
+        for line in overlong {
+            assert_eq!(line.chars().count(), 36, "{line:?} in {lines:#?}");
+        }
+    }
+
+    /// The stage that pays for the header is the one to measure, at the
+    /// contracted grid docs/design.md §5 floors at min_height = 8. More
+    /// candidates than can fit, so the count is the list's height.
+    #[test]
+    fn the_list_stays_usable_at_the_documented_height_floor() {
+        let picked = command("focus.tab", "Focus tab…", Some("tabs"));
+        let mut app = app_with(vec![picked.clone()]);
+        app.enter_targets(
+            picked,
+            (0..99)
+                .map(|i| Target {
+                    id: i.to_string(),
+                    label: format!("Target {i}"),
+                })
+                .collect(),
+        );
+        let lines = draw(&mut app, 36, 8);
+        let listed = lines.iter().filter(|l| l.contains("Target")).count();
+        assert_eq!(listed, 5, "{lines:#?}");
+    }
+}
