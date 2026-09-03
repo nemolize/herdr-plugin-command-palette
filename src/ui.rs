@@ -192,8 +192,8 @@ mod render_tests {
             .collect()
     }
 
-    /// The bug this fixes: a bordered Block here landed inside Herdr's own
-    /// frame, so the palette showed two.
+    /// The regression #31 fixed: a bordered Block here landed inside Herdr's
+    /// own frame, so the palette showed two.
     #[test]
     fn draws_no_frame_of_its_own() {
         let mut app = app_with(vec![command("split.right", "Split pane: right", None)]);
@@ -209,9 +209,10 @@ mod render_tests {
     /// visible from inside the pane.
     #[test]
     fn targets_stage_names_the_selected_command() {
-        let mut app = app_with(vec![command("focus.tab", "Focus tab…", Some("tabs"))]);
+        let picked = command("focus.tab", "Focus tab…", Some("tabs"));
+        let mut app = app_with(vec![picked.clone()]);
         app.enter_targets(
-            command("focus.tab", "Focus tab…", Some("tabs")),
+            picked,
             vec![Target {
                 id: "1".into(),
                 label: "editor".into(),
@@ -230,17 +231,16 @@ mod render_tests {
         assert_eq!(lines[0], ">", "{lines:#?}");
     }
 
-    /// docs/design.md §5 sizes for a contracted grid floored at min_height = 8;
-    /// the header must not eat into the list past what that section allows.
+    /// The stage that pays for the header is the one to measure, at the
+    /// contracted grid docs/design.md §5 floors at min_height = 8. More
+    /// candidates than can fit, so the count is the list's height.
     #[test]
     fn the_list_stays_usable_at_the_documented_height_floor() {
-        let commands: Vec<Command> = (0..9)
-            .map(|i| command(&format!("c{i}"), &format!("Command {i}"), Some("tabs")))
-            .collect();
-        let mut app = app_with(commands.clone());
+        let picked = command("focus.tab", "Focus tab…", Some("tabs"));
+        let mut app = app_with(vec![picked.clone()]);
         app.enter_targets(
-            commands[0].clone(),
-            (0..9)
+            picked,
+            (0..99)
                 .map(|i| Target {
                     id: i.to_string(),
                     label: format!("Target {i}"),
@@ -248,7 +248,7 @@ mod render_tests {
                 .collect(),
         );
         let lines = draw(&mut app, 36, 8);
-        let listed = lines[2..7].iter().filter(|l| l.contains("Target")).count();
+        let listed = lines.iter().filter(|l| l.contains("Target")).count();
         assert_eq!(listed, 5, "{lines:#?}");
     }
 }
