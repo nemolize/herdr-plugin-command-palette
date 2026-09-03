@@ -231,6 +231,29 @@ mod render_tests {
         assert_eq!(lines[0], ">", "{lines:#?}");
     }
 
+    /// Width is the axis docs/design.md §5 gives a readability floor to, and
+    /// nothing else here would notice the region narrowing: every other
+    /// assertion is on a short string that fits whatever it is given.
+    #[test]
+    fn every_column_of_the_pane_is_drawn_into() {
+        let wide = "W".repeat(80);
+        let picked = command("focus.tab", &wide, Some("tabs"));
+        let mut app = app_with(vec![picked.clone()]);
+        app.enter_targets(
+            picked,
+            vec![Target {
+                id: "1".into(),
+                label: wide.clone(),
+            }],
+        );
+        let lines = draw(&mut app, 36, 8);
+        let overlong: Vec<&String> = lines.iter().filter(|l| l.contains('W')).collect();
+        assert_eq!(overlong.len(), 2, "header and list row: {lines:#?}");
+        for line in overlong {
+            assert_eq!(line.chars().count(), 36, "{line:?} in {lines:#?}");
+        }
+    }
+
     /// The stage that pays for the header is the one to measure, at the
     /// contracted grid docs/design.md §5 floors at min_height = 8. More
     /// candidates than can fit, so the count is the list's height.
