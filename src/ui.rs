@@ -8,7 +8,7 @@ use crossterm::terminal::{
 };
 use crossterm::ExecutableCommand;
 use ratatui::prelude::*;
-use ratatui::widgets::{Block, Borders, List, ListItem, Paragraph};
+use ratatui::widgets::{List, ListItem, Paragraph};
 
 use crate::app::{App, Stage, Step};
 
@@ -103,34 +103,37 @@ pub fn next_step(app: &mut App) -> Result<Step, String> {
 }
 
 fn render(f: &mut Frame, app: &mut App) {
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .title(match &app.stage {
-            Stage::Commands => " Command Palette ".to_string(),
-            Stage::Targets { command, .. } => format!(" {} ", command.title),
-        });
-    let inner = block.inner(f.area());
-    f.render_widget(block, f.area());
+    // Herdr draws the pane's own frame; a second Block here doubled it. Its
+    // title is static, so Targets shows the command name on a line of its own.
+    let header = match &app.stage {
+        Stage::Commands => None,
+        Stage::Targets { command, .. } => Some(command.title.clone()),
+    };
 
     let chunks = Layout::vertical([
+        Constraint::Length(if header.is_some() { 1 } else { 0 }),
         Constraint::Length(1),
         Constraint::Min(1),
         Constraint::Length(1),
     ])
-    .split(inner);
+    .split(f.area());
 
-    f.render_widget(Paragraph::new(format!("> {}", app.query)), chunks[0]);
+    if let Some(title) = header {
+        f.render_widget(Paragraph::new(title).bold(), chunks[0]);
+    }
+
+    f.render_widget(Paragraph::new(format!("> {}", app.query)), chunks[1]);
 
     // Owned rather than borrowed: the list borrows `app` immutably while
     // render_stateful_widget needs `app.state` mutably.
     let rows: Vec<String> = app.rows().into_iter().map(str::to_owned).collect();
     if rows.is_empty() {
-        f.render_widget(Paragraph::new("no matches").dim(), chunks[1]);
+        f.render_widget(Paragraph::new("no matches").dim(), chunks[2]);
     } else {
         let items: Vec<ListItem> = rows.into_iter().map(ListItem::new).collect();
         f.render_stateful_widget(
             List::new(items).highlight_symbol("▶ "),
-            chunks[1],
+            chunks[2],
             &mut app.state,
         );
     }
@@ -145,5 +148,5 @@ fn render(f: &mut Frame, app: &mut App) {
             format!("{}/{} · {esc}", app.shown(), app.total())
         }
     };
-    f.render_widget(Paragraph::new(footer).dim(), chunks[2]);
+    f.render_widget(Paragraph::new(footer).dim(), chunks[3]);
 }
