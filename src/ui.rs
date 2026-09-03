@@ -150,3 +150,105 @@ fn render(f: &mut Frame, app: &mut App) {
     };
     f.render_widget(Paragraph::new(footer).dim(), chunks[3]);
 }
+
+#[cfg(test)]
+mod render_tests {
+    use super::*;
+    use crate::app::Candidate;
+    use crate::catalog::Command;
+    use crate::frecency::Frecency;
+    use crate::herdr::Target;
+    use ratatui::backend::TestBackend;
+    use std::path::Path;
+
+    fn command(id: &str, title: &str, resolve: Option<&str>) -> Command {
+        Command {
+            id: id.to_string(),
+            title: title.to_string(),
+            args: vec!["noop".to_string()],
+            contexts: Vec::new(),
+            resolve: resolve.map(str::to_string),
+        }
+    }
+
+    fn app_with(commands: Vec<Command>) -> App {
+        let candidates = commands.into_iter().map(Candidate::from_command).collect();
+        App::new(candidates, Frecency::load(Path::new("/nonexistent")))
+    }
+
+    /// Draws into the region Herdr hands the plugin and returns it as lines.
+    fn draw(app: &mut App, width: u16, height: u16) -> Vec<String> {
+        let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+        terminal.draw(|f| render(f, app)).unwrap();
+        let buffer = terminal.backend().buffer();
+        (0..height)
+            .map(|y| {
+                (0..width)
+                    .map(|x| buffer[(x, y)].symbol().to_string())
+                    .collect::<String>()
+                    .trim_end()
+                    .to_string()
+            })
+            .collect()
+    }
+
+    /// The bug this fixes: a bordered Block here landed inside Herdr's own
+    /// frame, so the palette showed two.
+    #[test]
+    fn draws_no_frame_of_its_own() {
+        let mut app = app_with(vec![command("split.right", "Split pane: right", None)]);
+        let lines = draw(&mut app, 36, 8);
+        let border = ['┌', '┐', '└', '┘', '─', '│'];
+        assert!(
+            !lines.iter().any(|l| l.chars().any(|c| border.contains(&c))),
+            "border drawn: {lines:#?}"
+        );
+    }
+
+    /// Herdr's pane title is static, so the selected command's name has to be
+    /// visible from inside the pane.
+    #[test]
+    fn targets_stage_names_the_selected_command() {
+        let mut app = app_with(vec![command("focus.tab", "Focus tab…", Some("tabs"))]);
+        app.enter_targets(
+            command("focus.tab", "Focus tab…", Some("tabs")),
+            vec![Target {
+                id: "1".into(),
+                label: "editor".into(),
+            }],
+        );
+        let lines = draw(&mut app, 36, 8);
+        assert_eq!(lines[0], "Focus tab…", "{lines:#?}");
+        assert_eq!(lines[1], ">", "{lines:#?}");
+    }
+
+    /// The Commands stage must not pay for the header row it has no use for.
+    #[test]
+    fn commands_stage_starts_at_the_query_line() {
+        let mut app = app_with(vec![command("split.right", "Split pane: right", None)]);
+        let lines = draw(&mut app, 36, 8);
+        assert_eq!(lines[0], ">", "{lines:#?}");
+    }
+
+    /// docs/design.md §5 sizes for a contracted grid floored at min_height = 8;
+    /// the header must not eat into the list past what that section allows.
+    #[test]
+    fn the_list_stays_usable_at_the_documented_height_floor() {
+        let commands: Vec<Command> = (0..9)
+            .map(|i| command(&format!("c{i}"), &format!("Command {i}"), Some("tabs")))
+            .collect();
+        let mut app = app_with(commands.clone());
+        app.enter_targets(
+            commands[0].clone(),
+            (0..9)
+                .map(|i| Target {
+                    id: i.to_string(),
+                    label: format!("Target {i}"),
+                })
+                .collect(),
+        );
+        let lines = draw(&mut app, 36, 8);
+        let listed = lines[2..7].iter().filter(|l| l.contains("Target")).count();
+        assert_eq!(listed, 5, "{lines:#?}");
+    }
+}
