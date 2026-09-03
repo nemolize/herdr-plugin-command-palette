@@ -1,6 +1,7 @@
 //! Rendering and the event loop. The pane entrypoint has a real TTY, unlike the
 //! action hop (docs/design.md §3).
 use std::io::{stdout, Stdout};
+use std::rc::Rc;
 
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use crossterm::terminal::{
@@ -8,7 +9,7 @@ use crossterm::terminal::{
 };
 use crossterm::ExecutableCommand;
 use ratatui::prelude::*;
-use ratatui::widgets::{Block, Borders, List, ListItem, Paragraph};
+use ratatui::widgets::{List, ListItem, Paragraph};
 
 use crate::app::{App, Stage, Step};
 
@@ -103,21 +104,27 @@ pub fn next_step(app: &mut App) -> Result<Step, String> {
 }
 
 fn render(f: &mut Frame, app: &mut App) {
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .title(match &app.stage {
-            Stage::Commands => " Command Palette ".to_string(),
-            Stage::Targets { command, .. } => format!(" {} ", command.title),
-        });
-    let inner = block.inner(f.area());
-    f.render_widget(block, f.area());
-
-    let chunks = Layout::vertical([
-        Constraint::Length(1),
-        Constraint::Min(1),
-        Constraint::Length(1),
-    ])
-    .split(inner);
+    // Herdr draws the pane's own bordered frame (title from herdr-plugin.toml);
+    // a second Block here doubled it, so the Targets command name gets its own line instead.
+    let chunks = match &app.stage {
+        Stage::Commands => Layout::vertical([
+            Constraint::Length(1),
+            Constraint::Min(1),
+            Constraint::Length(1),
+        ])
+        .split(f.area()),
+        Stage::Targets { command, .. } => {
+            let rows = Layout::vertical([
+                Constraint::Length(1),
+                Constraint::Length(1),
+                Constraint::Min(1),
+                Constraint::Length(1),
+            ])
+            .split(f.area());
+            f.render_widget(Paragraph::new(command.title.clone()).bold(), rows[0]);
+            Rc::new([rows[1], rows[2], rows[3]])
+        }
+    };
 
     f.render_widget(Paragraph::new(format!("> {}", app.query)), chunks[0]);
 
