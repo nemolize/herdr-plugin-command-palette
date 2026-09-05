@@ -1,6 +1,6 @@
 id = "command-palette"
 name = "Command Palette"
-version = "0.1.0"
+version = "0.2.0"
 # Undocumented `--placement popup` leaves 0.8.0/0.8.1 support unknown; guessing
 # low fails at first keypress with no diagnostic, guessing high only over-refuses.
 min_herdr_version = "0.8.2"
