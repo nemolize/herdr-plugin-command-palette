@@ -1,0 +1,39 @@
+name: Release Please
+
+on:
+  push:
+    branches: [main]
+
+permissions: {}
+
+concurrency:
+  group: release-please
+
+jobs:
+  Release-Please:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
+      sha: ${{ steps.release.outputs.sha }}
+
+    steps:
+      - id: release
+        uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+
+  # Called rather than left to the tag's own push event (docs/ci.md).
+  Assets:
+    needs: Release-Please
+    if: needs.Release-Please.outputs.release_created == 'true'
+    uses: ./.github/workflows/release.yml
+    permissions:
+      contents: write
+    with:
+      # The release commit, not the branch: main can move on while the five
+      # platforms build, and the assets must match the tag that was cut.
+      ref: ${{ needs.Release-Please.outputs.sha }}
+      tag: ${{ needs.Release-Please.outputs.tag_name }}

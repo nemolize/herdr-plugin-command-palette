@@ -132,9 +132,40 @@ same standard.
 
 ## Cutting a release
 
-A tag matching `v[0-9]*.[0-9]*.[0-9]*` builds the five assets of §11 in a
-`fail-fast: false` matrix and publishes them. Three properties are worth stating
-because each fails silently otherwise:
+Merging the release PR release-please keeps open cuts the release: it writes the
+version into `Cargo.toml`, `Cargo.lock` and `herdr-plugin.toml`, then opens a
+**draft** GitHub Release on the merge commit. `Release-Please` calls `Release`
+directly rather than leaving a tag to trigger it — a tag the default
+`GITHUB_TOKEN` writes starts no workflow run, so the five assets would never
+build, and `workflow_call` is an invocation rather than an event, which is what
+keeps this working without a PAT or a GitHub App.
+
+The draft is what makes the publish all-or-nothing in time as well as in asset
+count. A public release with no binaries yet would 404 for anyone installing in
+that window, since `install.sh` derives its download URL from the manifest
+version, and a failed target would leave that state permanently.
+`action-gh-release` keeps an existing release's draft flag while it uploads and
+clears it once every asset is attached — so the release goes live, and **the git
+tag comes into existence**, only at that point. Nothing in `Release` reads the
+tag from git: both jobs check out the release commit by SHA, and the manifest
+assertion compares the tag as a string.
+
+The release PR's own checks need one click before they run. A pull request the
+default `GITHUB_TOKEN` opens creates its workflow runs in an approval-required
+state — the one thing that token can trigger, and only that far — so `Lint`,
+`Test` and `Build` sit behind "Approve workflows to run" on every release PR and
+on every re-sync as `main` moves. Approving is the release's own review step
+rather than an extra one, which is why this is accepted rather than worked
+around.
+
+Pushing a tag matching `v[0-9]*.[0-9]*.[0-9]*` by hand still publishes, so a
+release can be cut when release-please cannot. That route writes no changelog and
+leaves `.release-please-manifest.json` behind, from which the next release PR
+computes its version — so a hand-cut release means editing the manifest to match
+in the same breath as `herdr-plugin.toml`, which the publish already asserts
+against the tag. Either way the same matrix builds the five assets of §11 with
+`fail-fast: false`. Three properties are worth stating because each fails
+silently otherwise:
 
 - **The publish is all-or-nothing.** `install.sh` requests exactly one asset
   name per platform, so a release carrying four of the five is not a partial
