@@ -11,6 +11,18 @@ on:
     inputs:
       ref:
         description: "Ref to build; defaults to the dispatched ref. Publishes nothing."
+  workflow_call:
+    inputs:
+      ref:
+        # Required because `tag` without it would build the caller's branch head
+        # and publish that onto the tag, which can already have moved on.
+        description: "Commit to build and publish."
+        type: string
+        required: true
+      tag:
+        description: "Tag to publish the assets onto."
+        type: string
+        required: true
 
 permissions: {}
 
@@ -149,6 +161,13 @@ jobs:
     permissions:
       contents: write
 
+    env:
+      # A dispatch can select a tag as its ref, so the tag route is gated on the
+      # event as well; the call route cannot use the event at all, since a called
+      # workflow reports the caller's, which for release-please is a push to main.
+      PUBLISHING: ${{ inputs.tag != '' || (github.event_name == 'push' && github.ref_type == 'tag') }}
+      PUBLISH_TAG: ${{ inputs.tag || github.ref_name }}
+
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -162,12 +181,12 @@ jobs:
 
       # install.sh derives the tag from herdr-plugin.toml's version, so a tag
       # disagreeing with the manifest publishes assets nobody will ever request.
-      - if: github.event_name == 'push'
+      - if: env.PUBLISHING == 'true'
         name: Assert the tag matches the manifest version
         run: |
           manifest=$(sed -n 's/^version[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' herdr-plugin.toml | head -n 1)
           [ -n "$manifest" ] || { echo "::error::could not read version from herdr-plugin.toml"; exit 1; }
-          tag=${GITHUB_REF_NAME#v}
+          tag=${PUBLISH_TAG#v}
           [ "$manifest" = "$tag" ] || {
             echo "::error::tag v$tag does not match herdr-plugin.toml version $manifest"
             exit 1
@@ -195,9 +214,12 @@ jobs:
       # and build provenance as still uncovered.
       - run: cd dist && sha256sum "$BIN_NAME"-* > SHA256SUMS && cat SHA256SUMS
 
-      - if: github.event_name == 'push'
+      - if: env.PUBLISHING == 'true'
         uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
+          tag_name: ${{ env.PUBLISH_TAG }}
           files: dist/*
           fail_on_unmatched_files: true
-          generate_release_notes: true
+          # release-please is the only caller passing a tag, and it has already
+          # written the notes from the changelog.
+          generate_release_notes: ${{ !inputs.tag }}
