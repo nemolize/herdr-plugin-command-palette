@@ -138,17 +138,41 @@ fn render(f: &mut Frame, app: &mut App) {
         );
     }
 
-    let footer = match &app.status {
-        Some(msg) => msg.clone(),
+    match &app.status {
+        Some(msg) => f.render_widget(Paragraph::new(msg.clone()).dim(), chunks[3]),
         None => {
             let esc = match app.stage {
                 Stage::Commands => "esc to close",
                 Stage::Targets { .. } => "esc to go back",
             };
-            format!("{}/{} · {esc}", app.shown(), app.total())
+            let counts = format!("{}/{} · {esc}", app.shown(), app.total());
+            f.render_widget(
+                Paragraph::new(footer(&counts, chunks[3].width)).dim(),
+                chunks[3],
+            );
         }
-    };
-    f.render_widget(Paragraph::new(footer).dim(), chunks[3]);
+    }
+}
+
+/// The counts on the left, the running version flush right. Herdr can hand the
+/// plugin a region narrower than docs/design.md §5's floor, and there the counts
+/// are what has to survive — so the version is dropped rather than either half
+/// being truncated.
+fn footer(counts: &str, width: u16) -> Line<'static> {
+    let version = format!("v{}", env!("CARGO_PKG_VERSION"));
+    let width = width as usize;
+    let gap = width
+        .checked_sub(counts.chars().count() + version.chars().count())
+        .filter(|gap| *gap >= 1);
+
+    match gap {
+        Some(gap) => Line::from(vec![
+            Span::raw(counts.to_string()),
+            Span::raw(" ".repeat(gap)),
+            Span::raw(version),
+        ]),
+        None => Line::from(counts.to_string()),
+    }
 }
 
 #[cfg(test)]
@@ -252,6 +276,81 @@ mod render_tests {
         for line in overlong {
             assert_eq!(line.chars().count(), 36, "{line:?} in {lines:#?}");
         }
+    }
+
+    /// Issue #36: the running build has to be readable from inside the palette,
+    /// at the width docs/design.md §5 floors at.
+    #[test]
+    fn the_footer_ends_with_the_running_version() {
+        let mut app = app_with(vec![command("split.right", "Split pane: right", None)]);
+        let lines = draw(&mut app, 36, 8);
+        let footer = lines.last().unwrap();
+        assert!(
+            footer.starts_with("1/1 · esc to close"),
+            "counts kept their place: {lines:#?}"
+        );
+        assert!(
+            footer.ends_with(&format!("v{}", env!("CARGO_PKG_VERSION"))),
+            "{lines:#?}"
+        );
+    }
+
+    /// The version tracks Cargo.toml rather than a literal that a release bump
+    /// would leave behind, so the assertion above cannot be a hardcoded string.
+    #[test]
+    fn the_version_is_the_crate_version() {
+        let mut app = app_with(vec![command("split.right", "Split pane: right", None)]);
+        let lines = draw(&mut app, 36, 8);
+        assert!(
+            lines.last().unwrap().ends_with(env!("CARGO_PKG_VERSION")),
+            "{lines:#?}"
+        );
+    }
+
+    /// The Targets stage carries a different esc hint, and the version sits to
+    /// the right of that one too.
+    #[test]
+    fn the_targets_stage_footer_carries_the_version() {
+        let picked = command("focus.tab", "Focus tab…", Some("tabs"));
+        let mut app = app_with(vec![picked.clone()]);
+        app.enter_targets(
+            picked,
+            vec![Target {
+                id: "1".into(),
+                label: "editor".into(),
+            }],
+        );
+        let lines = draw(&mut app, 36, 8);
+        let footer = lines.last().unwrap();
+        assert!(footer.starts_with("1/1 · esc to go back"), "{lines:#?}");
+        assert!(
+            footer.ends_with(&format!("v{}", env!("CARGO_PKG_VERSION"))),
+            "{lines:#?}"
+        );
+    }
+
+    /// A status message is the row's whole content — right-aligning the version
+    /// against it would cost the message the columns it needs.
+    #[test]
+    fn a_status_message_hides_the_version() {
+        let mut app = app_with(vec![command("split.right", "Split pane: right", None)]);
+        app.status = Some("Split pane: right".to_string());
+        let lines = draw(&mut app, 36, 8);
+        assert_eq!(lines.last().unwrap(), "Split pane: right", "{lines:#?}");
+    }
+
+    /// Herdr can hand the plugin a region narrower than §5's floor. The counts
+    /// are what has to survive there, so the version is dropped whole rather
+    /// than either half being truncated.
+    #[test]
+    fn a_pane_too_narrow_for_both_drops_the_version() {
+        let counts = "1/1 · esc to close";
+        let version_width = 1 + env!("CARGO_PKG_VERSION").chars().count();
+        let one_column_short = counts.chars().count() + version_width;
+
+        let mut app = app_with(vec![command("split.right", "Split pane: right", None)]);
+        let lines = draw(&mut app, one_column_short as u16, 8);
+        assert_eq!(lines.last().unwrap(), counts, "{lines:#?}");
     }
 
     /// The stage that pays for the header is the one to measure, at the
