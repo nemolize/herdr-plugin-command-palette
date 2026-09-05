@@ -150,6 +150,14 @@ tag comes into existence**, only at that point. Nothing in `Release` reads the
 tag from git: both jobs check out the release commit by SHA, and the manifest
 assertion compares the tag as a string.
 
+None of this starts without a repository setting no file here can carry:
+**Settings → Actions → General → "Allow GitHub Actions to create and approve
+pull requests"**. With it off, release-please cannot open the release PR at all
+— the run fails with `GitHub Actions is not permitted to create or approve pull
+requests`, and nothing in the workflow itself points at the cause. It is off by
+default, so it is the one prerequisite a fresh clone of this configuration does
+not inherit.
+
 The release PR's own checks need one click before they run. A pull request the
 default `GITHUB_TOKEN` opens creates its workflow runs in an approval-required
 state — the one thing that token can trigger, and only that far — so `Lint`,
