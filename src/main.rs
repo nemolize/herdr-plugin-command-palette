@@ -106,7 +106,7 @@ fn run() -> Result<(), String> {
 
     let mut screen = ui::Screen::enter()?;
 
-    let outcome = loop {
+    loop {
         screen.draw(&mut app)?;
         match ui::next_step(&mut app)? {
             Step::Continue => {}
@@ -124,36 +124,107 @@ fn run() -> Result<(), String> {
                     Err(e) => app.status = Some(format!("{resolve}: {e}")),
                 }
             }
-            Step::Run(outcome) => break outcome,
+            // The ranking is saved before the dispatch is attempted, so a
+            // failure still leaves the ordering updated — the user did pick it.
+            Step::Run(outcome) => {
+                if let Some(path) = frecency_path.as_deref() {
+                    let _ = app.frecency().save(path);
+                }
+                // Torn down first because the popup is a real pane while it is
+                // up: an entry that moves focus would be racing its own UI.
+                screen = match run_without_screen(screen, || dispatch(&herdr, outcome))? {
+                    Dispatched::Ran => return Ok(()),
+                    // Because a message printed after the popup closes is one
+                    // nobody reads, the palette comes back carrying it instead.
+                    Dispatched::Failed(screen, e) => {
+                        app.status = Some(e);
+                        screen
+                    }
+                };
+            }
         }
-    };
-
-    // Persist the ranking before the screen is torn down, so a dispatch failure
-    // below still leaves the ordering updated — the user did pick it.
-    if let Some(path) = frecency_path.as_deref() {
-        let _ = app.frecency().save(path);
     }
-    drop(screen);
+}
 
-    // A failed dispatch names the command id, so a drifted catalog entry reports
-    // itself the first time it is used instead of silently doing nothing (§4).
+enum Dispatched {
+    Ran,
+    Failed(ui::Screen, String),
+}
+
+/// Drops the screen, runs `f`, and re-enters only to carry a failure back to
+/// the user — success is the palette's exit, so restoring it there would flash
+/// the popup back up after the command it was closed for.
+fn run_without_screen<F>(screen: ui::Screen, f: F) -> Result<Dispatched, String>
+where
+    F: FnOnce() -> Result<(), String>,
+{
+    drop(screen);
+    let Err(failure) = f() else {
+        return Ok(Dispatched::Ran);
+    };
+    // A screen that will not reopen has nowhere to show the failure, so it
+    // leaves as this function's own error and `main` prints it.
+    let screen = ui::Screen::enter().map_err(|_| failure.clone())?;
+    Ok(Dispatched::Failed(screen, failure))
+}
+
+/// Runs what the user picked. A failure names the command id, so a drifted
+/// catalog entry reports itself the first time it is used instead of silently
+/// doing nothing (§4).
+fn dispatch(herdr: &Herdr, outcome: Outcome) -> Result<(), String> {
+    let (id, args) = argv(outcome);
+    herdr
+        .dispatch(&args)
+        .map_err(|e| format!("`{id}` failed: {e}"))
+}
+
+/// The id to name in a failure, and the argv to spawn. Split from `dispatch` so
+/// the assembly is checkable without a herdr binary.
+fn argv(outcome: Outcome) -> (String, Vec<String>) {
     match outcome {
-        Outcome::Command { id, args } => herdr
-            .dispatch(&args)
-            .map_err(|e| format!("`{id}` failed: {e}")),
+        Outcome::Command { id, args } => (id, args),
         Outcome::Action {
             id,
             plugin_id,
             action_id,
-        } => {
-            let args = [
+        } => (
+            id,
+            [
                 "plugin", "action", "invoke", "--plugin", &plugin_id, &action_id,
             ]
             .map(str::to_owned)
-            .to_vec();
-            herdr
-                .dispatch(&args)
-                .map_err(|e| format!("`{id}` failed: {e}"))
-        }
+            .to_vec(),
+        ),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_command_is_spawned_with_the_argv_it_carries() {
+        let (id, args) = argv(Outcome::Command {
+            id: "tab.create".into(),
+            args: vec!["tab".into(), "create".into()],
+        });
+        assert_eq!(id, "tab.create");
+        assert_eq!(args, ["tab", "create"]);
+    }
+
+    /// The flag name and the operand order are herdr's, not ours: `--plugin`
+    /// takes the plugin and the action id follows as a positional.
+    #[test]
+    fn an_action_is_spawned_as_plugin_action_invoke() {
+        let (id, args) = argv(Outcome::Action {
+            id: "notes.capture".into(),
+            plugin_id: "notes".into(),
+            action_id: "capture".into(),
+        });
+        assert_eq!(id, "notes.capture");
+        assert_eq!(
+            args,
+            ["plugin", "action", "invoke", "--plugin", "notes", "capture"]
+        );
     }
 }

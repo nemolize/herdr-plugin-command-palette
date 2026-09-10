@@ -48,6 +48,9 @@ jobs:
         with:
           tool: just@1.58.0
       - run: just test
+      # Rides this job rather than getting its own: it stubs herdr instead of
+      # fetching one, so it needs nothing the toolchain above has not installed.
+      - run: just palette-e2e
 
   # The unit tests check the catalog against a transcribed `--help` table, which
   # goes stale silently; this runs every entry against a real herdr (issue #24).

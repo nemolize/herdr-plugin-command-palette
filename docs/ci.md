@@ -21,7 +21,8 @@ Two facts shape every choice here:
 |---|---|---|
 | `cargo fmt --all --check` | `Lint` | Zero false positives, about a second, and it keeps diffs reviewable — the scarce resource when an agent writes most of the code and reformats regions it touches. |
 | `cargo clippy --locked --all-targets -- -D warnings` | `Lint` | The default lint group is a correctness floor, and the tree already passes at `-D warnings`, so adopting it costs nothing today and catches real bug classes later. |
-| `cargo test --locked` | `Test` | The 41 existing tests, which were being run by hand until now. |
+| `cargo test --locked` | `Test` | The unit tests, which were being run by hand until now. |
+| `python3 herdr/palette-e2e.py` | `Test` | The unit tests stop at the seams: `Screen` needs a real terminal, so nothing in-process sees a pick become a running command. This drives the built binary through a PTY against a stubbed herdr, and asserts that a rejected dispatch is readable in the pane rather than printed to a stderr the closing popup takes with it — the shape of "I picked it and nothing happened". |
 | `cargo build --release --locked` for both musl targets | `Build` | `cargo test` compiles the test profile only. This is the sole check that exercises `[profile.release]` (LTO, `opt-level = "z"`, strip) and the per-target `rust-lld` pins in `.cargo/config.toml` — breakage that would otherwise surface for the first time at a release tag. It covers the two release assets a Linux runner can build unaided; the macOS and Android assets need another host or the NDK, so `Release` is the only thing that compiles them. |
 | `cargo deny --locked check` | `Audit` | See the group table below. |
 | `cargo build --release --locked` for all five targets | `Release` | Cuts the release (docs/design.md §11). Adds the two assets `Build` cannot reach — macOS needs its own runner, Android the NDK — so the first time those two compile is a tag, unless the `workflow_dispatch` dry run is used first. |
@@ -110,7 +111,8 @@ diverge the CI cache from every local build. Clippy's `-D warnings` is passed
 per-invocation instead, where it is scoped to this crate.
 
 `justfile` holds the check definitions and each CI job runs one recipe
-(`just lint`, `just test`, `just build-musl`, `just deny`), so the commands exist
+(`just lint`, `just test` plus `just palette-e2e`, `just build-musl`,
+`just deny`), so the commands exist
 once rather than as lists kept in sync by discipline. `just ci` runs the three CI
 jobs' recipes together, reproducing a CI failure locally with no push — given the
 two tools CI pins and installs for itself:
