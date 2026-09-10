@@ -6,6 +6,7 @@ mod context;
 mod frecency;
 mod fuzzy;
 mod herdr;
+mod selection;
 mod ui;
 
 use std::path::PathBuf;
@@ -28,6 +29,25 @@ fn main() -> ExitCode {
 
 fn env_path(key: &str) -> Option<PathBuf> {
     std::env::var_os(key).map(PathBuf::from)
+}
+
+/// The current name of what a rename entry acts on, to seed its input with.
+///
+/// The argv is the source because the context ids are already substituted into
+/// it by the time an entry becomes a candidate — so `["tab", "rename", "<id>",
+/// …]` carries both the listing to search and the id to find.
+fn seed_for(herdr: &Herdr, command: &catalog::Command) -> String {
+    let (Some(subject), Some(verb), Some(id)) = (
+        command.args.first(),
+        command.args.get(1),
+        command.args.get(2),
+    ) else {
+        return String::new();
+    };
+    if verb != "rename" || id.starts_with('{') {
+        return String::new();
+    }
+    herdr.current_label(&format!("{subject} list"), id)
 }
 
 fn run() -> Result<(), String> {
@@ -53,7 +73,7 @@ fn run() -> Result<(), String> {
     // Defaulted rather than propagated because a palette of built-ins is still
     // a working palette (§4).
     let actions = herdr.plugin_actions().unwrap_or_default();
-    let candidates = assemble(
+    let (mut candidates, rejected) = assemble(
         catalog.commands,
         actions,
         &context,
@@ -62,11 +82,26 @@ fn run() -> Result<(), String> {
     );
 
     if candidates.is_empty() {
+        // The reasons are the whole diagnosis when nothing is left to offer, so
+        // they go in the message rather than a list that never renders.
+        let why = match rejected.is_empty() {
+            true => String::new(),
+            false => format!(
+                " — skipped {}",
+                rejected
+                    .iter()
+                    .map(|(id, why)| format!("{id}: {why}"))
+                    .collect::<Vec<_>>()
+                    .join("; ")
+            ),
+        };
         return Err(format!(
-            "no commands available (catalog: {})",
+            "no commands available (catalog: {}){why}",
             catalog_path.display()
         ));
     }
+
+    candidates.extend(rejected.iter().map(|(id, why)| Candidate::note(id, why)));
 
     let frecency_path = state_dir.as_deref().map(frecency::path);
     let frecency = frecency_path
@@ -88,6 +123,13 @@ fn run() -> Result<(), String> {
         }
     }
 
+    if !rejected.is_empty() {
+        app.status = Some(format!(
+            "catalog: {} skipped — search `skipped`",
+            rejected.len()
+        ));
+    }
+
     let mut screen = ui::Screen::enter()?;
 
     loop {
@@ -107,6 +149,10 @@ fn run() -> Result<(), String> {
                     }
                     Err(e) => app.status = Some(format!("{resolve}: {e}")),
                 }
+            }
+            Step::NeedsPrompt(command) => {
+                let seed = seed_for(&herdr, &command);
+                app.enter_prompt(command, seed);
             }
             // The ranking is saved before the dispatch is attempted, so a
             // failure still leaves the ordering updated — the user did pick it.
@@ -130,20 +176,32 @@ fn run() -> Result<(), String> {
     }
 }
 
-/// Everything the palette offers, from the two sources that feed it. What each
-/// filter drops is invisible once the list is drawn — an entry that should have
-/// been excluded looks exactly like one the user has not scrolled to.
+/// Everything the palette offers, from the two sources that feed it, plus the
+/// (id, reason) of every entry dropped for being malformed.
+///
+/// What each filter drops is invisible once the list is drawn — an entry that
+/// should have been excluded looks exactly like one the user has not scrolled
+/// to — so the malformed ones are returned rather than discarded, and one bad
+/// line in a hand-edited catalog costs only itself.
 fn assemble(
     commands: Vec<catalog::Command>,
     actions: Vec<herdr::PluginAction>,
     context: &Context,
     own_plugin_id: Option<&str>,
     platform: &str,
-) -> Vec<Candidate> {
+) -> (Vec<Candidate>, Vec<(String, String)>) {
     let scope = context.scope();
+    let mut rejected: Vec<(String, String)> = Vec::new();
 
     let mut candidates: Vec<Candidate> = commands
         .into_iter()
+        .filter(|c| match catalog::rejection(c) {
+            Some(why) => {
+                rejected.push((c.id.clone(), why));
+                false
+            }
+            None => true,
+        })
         .filter(|c| c.available_in(scope) && context.can_satisfy(&c.args))
         .map(|mut c| {
             c.args = context.substitute(&c.args);
@@ -162,7 +220,7 @@ fn assemble(
             .map(Candidate::from_action),
     );
 
-    candidates
+    (candidates, rejected)
 }
 
 enum Dispatched {
@@ -228,6 +286,7 @@ mod tests {
             args: args.iter().map(|s| s.to_string()).collect(),
             contexts: contexts.iter().map(|s| s.to_string()).collect(),
             resolve: None,
+            prompt: None,
         }
     }
 
@@ -262,7 +321,7 @@ mod tests {
     /// `popup already open`, and nothing downstream would report that as wrong.
     #[test]
     fn the_palettes_own_action_is_not_offered_inside_itself() {
-        let candidates = assemble(
+        let (candidates, _) = assemble(
             Vec::new(),
             vec![
                 action("command-palette", "open", &[], &[]),
@@ -279,7 +338,7 @@ mod tests {
     /// filter cannot fire — every action stands, including ours.
     #[test]
     fn an_unknown_own_id_excludes_nothing() {
-        let candidates = assemble(
+        let (candidates, _) = assemble(
             Vec::new(),
             vec![action("command-palette", "open", &[], &[])],
             &in_a_pane(),
@@ -293,7 +352,7 @@ mod tests {
     /// dropped here is dropped for exactly one reason, named in its id.
     #[test]
     fn an_entry_must_clear_every_filter_to_be_offered() {
-        let candidates = assemble(
+        let (candidates, _) = assemble(
             vec![
                 command("pane.split", &["pane", "split", "{pane}"], &["pane"]),
                 command(
@@ -323,7 +382,7 @@ mod tests {
     /// reaches `dispatch` is already the argv herdr runs.
     #[test]
     fn context_ids_are_substituted_into_the_argv() {
-        let candidates = assemble(
+        let (candidates, _) = assemble(
             vec![command(
                 "pane.split",
                 &["pane", "split", "--pane", "{pane}"],
@@ -346,7 +405,7 @@ mod tests {
     /// caller defaults the error away rather than propagating it.
     #[test]
     fn built_ins_stand_alone_when_no_actions_are_listed() {
-        let candidates = assemble(
+        let (candidates, _) = assemble(
             vec![command("tab.create", &["tab", "create"], &[])],
             Vec::new(),
             &in_a_pane(),

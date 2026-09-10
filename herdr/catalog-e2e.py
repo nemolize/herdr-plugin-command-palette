@@ -148,17 +148,16 @@ class Fixture:
 def resolved_args(entry: dict, ids: dict[str, str]) -> list[str]:
     """Substitute the placeholders the palette would have filled at open time.
 
-    `{pane}` / `{tab}` / `{workspace}` come from the invocation's context
-    (`src/context.rs`); `{}` is the row the user picks from the list named by
-    `resolve` (`src/catalog.rs`), so which list that is decides what `{}` holds.
     A tab-resolving entry takes the tab the pane is NOT in, so the move it
-    performs is a real one.
+    performs is a real one. `{text}` carries a space because that is the shape
+    that breaks if the palette ever splits the typed name across argv elements.
 
     Raises on a `resolve` this file does not know: defaulting it to a tab id
     would substitute a plausible argument into an entry never taught here and
     report ok, which is the silent staleness this check exists to remove.
     """
     table = dict(ids)
+    table["{text}"] = "e2e renamed"
     resolve = entry.get("resolve")
     if resolve is not None:
         picked = {

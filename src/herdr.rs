@@ -97,6 +97,31 @@ impl Herdr {
             .collect())
     }
 
+    /// The current name of `id`, for seeding a rename. Empty when there is no
+    /// name to edit, including when the lookup fails: an unseeded prompt still
+    /// renames, so it is not worth refusing the stage over.
+    pub fn current_label(&self, resolve: &str, id: &str) -> String {
+        let (collection, id_key) = match resolve {
+            "pane list" => ("panes", "pane_id"),
+            "tab list" => ("tabs", "tab_id"),
+            "workspace list" => ("workspaces", "workspace_id"),
+            _ => return String::new(),
+        };
+        let args: Vec<String> = resolve.split_whitespace().map(str::to_owned).collect();
+        let Ok(result) = self.call(&args) else {
+            return String::new();
+        };
+        result
+            .get(collection)
+            .and_then(|v| v.as_array())
+            .and_then(|rows| {
+                rows.iter()
+                    .find(|row| row.get(id_key).and_then(|v| v.as_str()) == Some(id))
+            })
+            .map(seed_from_row)
+            .unwrap_or_default()
+    }
+
     /// (workspace_id, label) pairs, for qualifying tab rows.
     fn workspace_labels(&self) -> Result<Vec<(String, String)>, String> {
         let args = ["workspace", "list"].map(str::to_owned).to_vec();
@@ -226,6 +251,22 @@ fn read_response(stdout: &[u8], stderr: &[u8]) -> Result<serde_json::Value, Stri
         .ok_or_else(|| "herdr returned no result".to_string())
 }
 
+/// The name to seed a rename input with, or empty when there is none to edit.
+///
+/// An unnamed tab's `label` IS its `number` as a string, so seeding from `label`
+/// alone would offer `1` and a bare Enter would apply it.
+fn seed_from_row(row: &serde_json::Value) -> String {
+    let label = row
+        .get("label")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_default();
+    match row.get("number").and_then(|v| v.as_u64()) {
+        Some(n) if label == n.to_string() => String::new(),
+        _ => label.to_string(),
+    }
+}
+
 /// Builds one candidate row. Pure so the label rules are testable without a
 /// herdr binary — `Herdr::call` stays the only process seam.
 fn target_from_row(
@@ -265,7 +306,7 @@ fn target_from_row(
 
 #[cfg(test)]
 mod tests {
-    use super::{read_response, target_from_row, Herdr, PluginAction};
+    use super::{read_response, seed_from_row, target_from_row, Herdr, PluginAction};
     use serde_json::json;
 
     /// The envelope's own error is what names a failure; the exit status is 1
@@ -370,6 +411,44 @@ mod tests {
     fn a_row_missing_its_id_is_skipped() {
         let row = json!({"label": "orphan"});
         assert!(target_from_row(&row, "tab_id", &[]).is_none());
+    }
+
+    /// An unnamed tab's `label` IS its number, so seeding from `label` alone
+    /// would offer `1` as the new name and a bare Enter would apply it.
+    #[test]
+    fn an_unnamed_row_seeds_nothing() {
+        let row = json!({"tab_id": "w5A:t1", "label": "1", "number": 1});
+        assert_eq!(seed_from_row(&row), "");
+    }
+
+    #[test]
+    fn a_named_row_seeds_its_name() {
+        let row = json!({"tab_id": "w5E:t1", "label": "release notes", "number": 1});
+        assert_eq!(seed_from_row(&row), "release notes");
+    }
+
+    /// A name that merely looks numeric is still a name the user chose — only
+    /// the row's OWN number is the placeholder.
+    #[test]
+    fn a_numeric_name_that_is_not_the_row_number_is_kept() {
+        let row = json!({"tab_id": "w5E:t1", "label": "2024", "number": 1});
+        assert_eq!(seed_from_row(&row), "2024");
+    }
+
+    /// An unnamed pane reports no `label` at all — its terminal title is not a
+    /// name the user set, so there is nothing to edit.
+    #[test]
+    fn a_row_without_a_label_seeds_nothing() {
+        let row = json!({"pane_id": "w5A:p1", "terminal_title_stripped": "Claude Code"});
+        assert_eq!(seed_from_row(&row), "");
+    }
+
+    /// A named pane DOES report a label, and carries no `number` to mistake it
+    /// for — so the number rule must not swallow it.
+    #[test]
+    fn a_named_pane_seeds_its_name() {
+        let row = json!({"pane_id": "w5A:p1", "label": "editor"});
+        assert_eq!(seed_from_row(&row), "editor");
     }
 
     fn action(platforms: &[&str]) -> PluginAction {
