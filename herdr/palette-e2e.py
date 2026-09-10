@@ -54,10 +54,31 @@ echo "$@" >> "$HERDR_STUB_LOG"
 %s
 """
 
-# Two stubs, one per verdict. Each answers in JSON because the palette reads the
-# body rather than the exit status, which alone cannot name a failure.
+# One stub per verdict. Each answers in JSON because the palette reads the body
+# rather than the exit status, which alone cannot name a failure.
 REJECTS = STUB % ("""echo '{"error":{"message":"%s"}}'\nexit 1""" % FAILURE)
 ACCEPTS = STUB % """echo '{"result":{"type":"ok"}}'\nexit 0"""
+
+# Everything but the listing succeeds, so the palette still opens and the entry
+# is still offered — the emptiness is met only after it is picked.
+NO_TABS = STUB % """if [ "$1" = "tab" ] && [ "$2" = "list" ]; then
+  echo '{"result":{"tabs":[]}}'
+  exit 0
+fi
+echo '{"result":{"type":"ok"}}'
+exit 0"""
+
+LISTING_REFUSED = "tab list is not available on this session"
+
+REJECTS_LISTING = STUB % (
+    """if [ "$1" = "tab" ] && [ "$2" = "list" ]; then
+  echo '{"error":{"message":"%s"}}'
+  exit 1
+fi
+echo '{"result":{"type":"ok"}}'
+exit 0"""
+    % LISTING_REFUSED
+)
 
 
 def write_stub(path: Path, body: str) -> Path:
@@ -145,6 +166,21 @@ class Palette:
                 return False
             if not self._pump(min(0.1, remaining)):
                 return needle in visible(self.painted)
+
+    def wait_until_squeezed(self, needle: str, timeout: float) -> bool:
+        """Matches with all whitespace removed, because ratatui writes a row
+        cell by cell and a wrap can fall mid-message: the words of a status line
+        are never reliably contiguous in what the pty carries. `needle` must
+        therefore be given already squeezed."""
+        deadline = time.monotonic() + timeout
+        while True:
+            if needle in "".join(visible(self.painted).split()):
+                return True
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return False
+            if not self._pump(min(0.1, remaining)):
+                return needle in "".join(visible(self.painted).split())
 
     def wait_for_exit(self, timeout: float) -> int | None:
         deadline = time.monotonic() + timeout
@@ -298,6 +334,59 @@ def accepted_command_closes_the_palette(scratch: Path) -> bool:
         palette.close()
 
 
+def an_empty_listing_is_reported(scratch: Path) -> bool:
+    """Picking a `resolve` entry with nothing to pick from. The palette has no
+    targets to show, so without a message it just sits there — the same
+    nothing-happened the dispatch path was fixed for."""
+    stub = write_stub(scratch / "herdr-no-tabs", NO_TABS)
+    log = scratch / "no-tabs.log"
+    log.write_text("")
+    palette = Palette(stub, log, scratch / "no-tabs.stderr")
+    name = "an empty target list is reported, not silent"
+    try:
+        if not started(palette, name):
+            return False
+        palette.send(b"Focus tab\r")
+        seen = palette.wait_until_squeezed("nothingtopickfrom", OUTCOME_TIMEOUT)
+        text = visible(palette.painted).replace("\n", " ")
+        passed = check(name, seen, f"drew: {text[-400:]!r}")
+        passed &= check(
+            "the palette stays up after an empty listing",
+            palette.wait_for_exit(1.0) is None,
+            "it exited instead of letting the user pick something else",
+        )
+        return passed
+    finally:
+        palette.close()
+
+
+def a_refused_listing_is_reported(scratch: Path) -> bool:
+    """The other way a `resolve` entry fails before reaching a target: herdr
+    refuses the listing. The message it gives is the only account of why."""
+    stub = write_stub(scratch / "herdr-no-listing", REJECTS_LISTING)
+    log = scratch / "no-listing.log"
+    log.write_text("")
+    palette = Palette(stub, log, scratch / "no-listing.stderr")
+    name = "a refused target listing surfaces herdr's reason"
+    try:
+        if not started(palette, name):
+            return False
+        palette.send(b"Focus tab\r")
+        seen = palette.wait_until_squeezed(
+            "".join(LISTING_REFUSED.split()), OUTCOME_TIMEOUT
+        )
+        text = visible(palette.painted).replace("\n", " ")
+        passed = check(name, seen, f"drew: {text[-400:]!r}")
+        passed &= check(
+            "the palette stays up after a refused listing",
+            palette.wait_for_exit(1.0) is None,
+            "it exited instead of letting the user pick something else",
+        )
+        return passed
+    finally:
+        palette.close()
+
+
 def esc_closes_the_palette(scratch: Path) -> bool:
     stub = write_stub(scratch / "herdr-esc", ACCEPTS)
     log = scratch / "esc.log"
@@ -337,6 +426,8 @@ def main() -> int:
 
     passed = rejected_command_is_reported(scratch)
     passed &= accepted_command_closes_the_palette(scratch)
+    passed &= an_empty_listing_is_reported(scratch)
+    passed &= a_refused_listing_is_reported(scratch)
     passed &= esc_closes_the_palette(scratch)
 
     return 0 if passed else 1
