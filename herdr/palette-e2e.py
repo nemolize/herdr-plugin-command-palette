@@ -147,8 +147,6 @@ class Palette:
                 return needle in visible(self.painted)
 
     def wait_for_exit(self, timeout: float) -> int | None:
-        """The palette's exit status, or None if it was still up. A crash after
-        the pick exits too, so the status is what separates the two."""
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             pid, status = os.waitpid(self.pid, os.WNOHANG)
@@ -175,24 +173,45 @@ class Palette:
             pass
         if self.reaped:
             return
-        for sig in (signal.SIGTERM, signal.SIGKILL):
+        # Read before the parent dies: once it is reaped its pid can be recycled,
+        # and `getpgid` would then name some unrelated process's group.
+        group = self._group()
+
+        self._signal(group, signal.SIGTERM)
+        self._reap(2.0)
+        # Sent whether or not the parent went, because a descendant that ignored
+        # SIGTERM is precisely the process that outlives it.
+        self._signal(group, signal.SIGKILL)
+        self._reap(2.0)
+
+    def _group(self) -> int | None:
+        try:
+            return os.getpgid(self.pid)
+        except (ProcessLookupError, PermissionError):
+            return None
+
+    def _signal(self, group: int | None, sig: int) -> None:
+        if group is None:
+            return
+        try:
+            os.killpg(group, sig)
+        except (ProcessLookupError, PermissionError):
+            pass
+
+    def _reap(self, timeout: float) -> None:
+        if self.reaped:
+            return
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
             try:
-                # The group, not the pid: `pty.fork` makes the child a session
-                # leader, so a stub it spawned would outlive a bare kill.
-                os.killpg(os.getpgid(self.pid), sig)
-            except (ProcessLookupError, PermissionError):
-                break
-            deadline = time.monotonic() + 2.0
-            while time.monotonic() < deadline:
-                try:
-                    pid, _ = os.waitpid(self.pid, os.WNOHANG)
-                except ChildProcessError:
-                    self.reaped = True
-                    return
-                if pid:
-                    self.reaped = True
-                    return
-                time.sleep(0.05)
+                pid, _ = os.waitpid(self.pid, os.WNOHANG)
+            except ChildProcessError:
+                self.reaped = True
+                return
+            if pid:
+                self.reaped = True
+                return
+            time.sleep(0.05)
 
 
 def check(name: str, ok: bool, detail: str) -> bool:
@@ -241,8 +260,6 @@ def rejected_command_is_reported(scratch: Path) -> bool:
             "pane split" in log.read_text(),
             f"stub log: {log.read_text()!r}",
         )
-        # Checked because printing the message and then exiting is exactly what
-        # the old code did, and the accumulated output cannot tell the two apart.
         passed &= check(
             "the palette stays up holding the failure",
             palette.wait_for_exit(1.0) is None,

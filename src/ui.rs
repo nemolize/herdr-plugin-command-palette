@@ -131,8 +131,6 @@ fn render(f: &mut Frame, app: &mut App) {
         Stage::Targets { command, .. } => Some(command.title.clone()),
     };
 
-    // Built before the layout because its wrapped height is what the status
-    // row has to be given.
     let status = app
         .status
         .as_ref()
