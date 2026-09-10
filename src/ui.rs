@@ -20,8 +20,7 @@ pub struct Screen {
 
 impl Screen {
     /// Each failure undoes what it got through, because `Drop` restores the
-    /// terminal only once a `Screen` exists — a bare `?` after raw mode is on
-    /// would return leaving the pane raw with nothing left to reset it.
+    /// terminal only once a `Screen` exists — a bare `?` would leave it raw.
     pub fn enter() -> Result<Self, String> {
         enable_raw_mode().map_err(|e| e.to_string())?;
 
@@ -132,8 +131,8 @@ fn render(f: &mut Frame, app: &mut App) {
         Stage::Targets { command, .. } => Some(command.title.clone()),
     };
 
-    // Built before the layout because a dispatch failure carries herdr's own
-    // message, whose wrapped height is what the status row has to be given.
+    // Built before the layout because its wrapped height is what the status
+    // row has to be given.
     let status = app
         .status
         .as_ref()
@@ -187,11 +186,9 @@ fn render(f: &mut Frame, app: &mut App) {
     }
 }
 
-/// Rows the status fills at this width, measured by rendering it into a scratch
-/// buffer as tall as the pane. Counting characters instead under-counts a
-/// message that word-wraps, and the row cut off is the one naming the cause;
-/// ratatui's own `line_count` is behind an unstable feature, so this asks the
-/// renderer the same question through the API that is stable.
+/// Measured by rendering because counting characters under-counts a word-wrapped
+/// message, cutting the row that names the cause; ratatui's own `line_count`
+/// would answer this but sits behind an unstable feature.
 fn wrapped_height(status: &Paragraph, area: Rect) -> u16 {
     if area.width == 0 || area.height == 0 {
         return 1;
@@ -415,10 +412,8 @@ mod render_tests {
         assert_eq!(shown, message, "{lines:#?}");
     }
 
-    /// Word-wrapping breaks a line before a word rather than at the column, so
-    /// a message needs more rows than its length divided by the width. Counting
-    /// characters gave this one two rows where it wraps to three, and the row
-    /// lost was the one naming the cause.
+    /// This message wraps to three rows but is 105 chars over 60 columns, so a
+    /// character count gives it two and drops the row naming the cause.
     #[test]
     fn a_failure_that_word_wraps_is_not_cut_short() {
         let message = "`pane.move.tab` failed: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";

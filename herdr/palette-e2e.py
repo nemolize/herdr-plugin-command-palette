@@ -87,8 +87,6 @@ def visible(painted: str) -> str:
 
 
 class Palette:
-    """One run of the palette on its own pty, driven by what it draws."""
-
     def __init__(self, stub: Path, log: Path, errlog: Path):
         env = dict(
             os.environ,
@@ -122,8 +120,6 @@ class Palette:
         self.reaped = False
 
     def _pump(self, budget: float) -> bool:
-        """Reads whatever arrives within `budget`. False at EOF, which is how a
-        palette that has exited announces itself."""
         ready, _, _ = select.select([self.fd], [], [], budget)
         if not ready:
             return True
@@ -137,8 +133,9 @@ class Palette:
         return True
 
     def wait_for(self, needle: str, timeout: float) -> bool:
-        """Returns as soon as `needle` is on screen, so the timeout is only ever
-        spent by a run that was going to fail."""
+        """Searches everything drawn so far, not the current screen — so every
+        `needle` used here must be one that cannot appear before the state it
+        is taken to signal."""
         deadline = time.monotonic() + timeout
         while True:
             if needle in visible(self.painted):
@@ -149,15 +146,17 @@ class Palette:
             if not self._pump(min(0.1, remaining)):
                 return needle in visible(self.painted)
 
-    def wait_for_exit(self, timeout: float) -> bool:
+    def wait_for_exit(self, timeout: float) -> int | None:
+        """The palette's exit status, or None if it was still up. A crash after
+        the pick exits too, so the status is what separates the two."""
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
-            pid, _ = os.waitpid(self.pid, os.WNOHANG)
+            pid, status = os.waitpid(self.pid, os.WNOHANG)
             if pid:
                 self.reaped = True
-                return True
+                return os.waitstatus_to_exitcode(status)
             self._pump(0.1)
-        return False
+        return None
 
     def send(self, keys: bytes) -> None:
         try:
@@ -178,8 +177,10 @@ class Palette:
             return
         for sig in (signal.SIGTERM, signal.SIGKILL):
             try:
-                os.kill(self.pid, sig)
-            except ProcessLookupError:
+                # The group, not the pid: `pty.fork` makes the child a session
+                # leader, so a stub it spawned would outlive a bare kill.
+                os.killpg(os.getpgid(self.pid), sig)
+            except (ProcessLookupError, PermissionError):
                 break
             deadline = time.monotonic() + 2.0
             while time.monotonic() < deadline:
@@ -240,6 +241,13 @@ def rejected_command_is_reported(scratch: Path) -> bool:
             "pane split" in log.read_text(),
             f"stub log: {log.read_text()!r}",
         )
+        # Checked because printing the message and then exiting is exactly what
+        # the old code did, and the accumulated output cannot tell the two apart.
+        passed &= check(
+            "the palette stays up holding the failure",
+            palette.wait_for_exit(1.0) is None,
+            "it exited after reporting, so the message was not left readable",
+        )
         return passed
     finally:
         palette.close()
@@ -257,10 +265,11 @@ def accepted_command_closes_the_palette(scratch: Path) -> bool:
         palette.send(b"\r")
         # No Esc follows: Esc closes the palette too, so a check that sent one
         # could not tell a successful pick from its own cleanup.
+        code = palette.wait_for_exit(EXIT_TIMEOUT)
         passed = check(
             name,
-            palette.wait_for_exit(EXIT_TIMEOUT),
-            "still up after the pick",
+            code == 0,
+            "still up after the pick" if code is None else f"exited {code}",
         )
         passed &= check(
             "the accepted entry really reached the stub",
@@ -282,7 +291,12 @@ def esc_closes_the_palette(scratch: Path) -> bool:
         if not started(palette, name):
             return False
         palette.send(b"\x1b")
-        passed = check(name, palette.wait_for_exit(EXIT_TIMEOUT), "still up after esc")
+        code = palette.wait_for_exit(EXIT_TIMEOUT)
+        passed = check(
+            name,
+            code == 0,
+            "still up after esc" if code is None else f"exited {code}",
+        )
         passed &= check(
             "esc dispatched nothing",
             log.read_text() == "",
