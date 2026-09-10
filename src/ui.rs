@@ -8,7 +8,7 @@ use crossterm::terminal::{
 };
 use crossterm::ExecutableCommand;
 use ratatui::prelude::*;
-use ratatui::widgets::{List, ListItem, Paragraph};
+use ratatui::widgets::{List, ListItem, Paragraph, Wrap};
 
 use crate::app::{App, Stage, Step};
 
@@ -49,57 +49,67 @@ impl Drop for Screen {
 pub fn next_step(app: &mut App) -> Result<Step, String> {
     loop {
         let event = event::read().map_err(|e| e.to_string())?;
-        // A resize has to redraw immediately rather than wait for a keypress:
-        // on Termux the popup resizes exactly when the software keyboard is
-        // raised, which is the moment the palette is being used (§5).
-        if matches!(event, Event::Resize(_, _)) {
-            return Ok(Step::Continue);
+        if let Some(step) = apply(app, event) {
+            return Ok(step);
         }
-        let Event::Key(key) = event else {
-            continue;
-        };
-        if key.kind != KeyEventKind::Press {
-            continue;
-        }
-        // Ctrl-C is the other reflex for "get me out of here", and a palette
-        // that ignored it would read as hung.
-        if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
-            return Ok(Step::Cancel);
-        }
-        return Ok(match key.code {
-            // From the target list Esc backs out to the commands rather than
-            // closing: picking a dynamic entry would otherwise be a one-way
-            // door out of the palette.
-            KeyCode::Esc => {
-                if app.leave_targets() {
-                    Step::Continue
-                } else {
-                    Step::Cancel
-                }
-            }
-            KeyCode::Up => {
-                app.move_selection(-1);
-                Step::Continue
-            }
-            KeyCode::Down => {
-                app.move_selection(1);
-                Step::Continue
-            }
-            KeyCode::Enter => app.confirm(),
-            KeyCode::Backspace => {
-                app.pop();
-                Step::Continue
-            }
-            // Modifiers are excluded so a chord (Ctrl-A, Alt-f) is not typed
-            // into the query as its bare letter. SHIFT is what produces capitals
-            // and belongs in the text.
-            KeyCode::Char(c) if (key.modifiers - KeyModifiers::SHIFT).is_empty() => {
-                app.push(c);
-                Step::Continue
-            }
-            _ => Step::Continue,
-        });
     }
+}
+
+/// One event against the state. `None` means the event carried nothing to act
+/// on and the loop should read again — separated from `next_step` so a key
+/// sequence can be driven through the same path a keypress takes, without a
+/// terminal (`wiring_tests`).
+fn apply(app: &mut App, event: Event) -> Option<Step> {
+    // A resize has to redraw immediately rather than wait for a keypress:
+    // on Termux the popup resizes exactly when the software keyboard is
+    // raised, which is the moment the palette is being used (§5).
+    if matches!(event, Event::Resize(_, _)) {
+        return Some(Step::Continue);
+    }
+    let Event::Key(key) = event else {
+        return None;
+    };
+    if key.kind != KeyEventKind::Press {
+        return None;
+    }
+    // Ctrl-C is the other reflex for "get me out of here", and a palette
+    // that ignored it would read as hung.
+    if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
+        return Some(Step::Cancel);
+    }
+    Some(match key.code {
+        // From the target list Esc backs out to the commands rather than
+        // closing: picking a dynamic entry would otherwise be a one-way
+        // door out of the palette.
+        KeyCode::Esc => {
+            if app.leave_targets() {
+                Step::Continue
+            } else {
+                Step::Cancel
+            }
+        }
+        KeyCode::Up => {
+            app.move_selection(-1);
+            Step::Continue
+        }
+        KeyCode::Down => {
+            app.move_selection(1);
+            Step::Continue
+        }
+        KeyCode::Enter => app.confirm(),
+        KeyCode::Backspace => {
+            app.pop();
+            Step::Continue
+        }
+        // Modifiers are excluded so a chord (Ctrl-A, Alt-f) is not typed
+        // into the query as its bare letter. SHIFT is what produces capitals
+        // and belongs in the text.
+        KeyCode::Char(c) if (key.modifiers - KeyModifiers::SHIFT).is_empty() => {
+            app.push(c);
+            Step::Continue
+        }
+        _ => Step::Continue,
+    })
 }
 
 fn render(f: &mut Frame, app: &mut App) {
@@ -110,11 +120,18 @@ fn render(f: &mut Frame, app: &mut App) {
         Stage::Targets { command, .. } => Some(command.title.clone()),
     };
 
+    // Given more than one line because a dispatch failure carries herdr's own
+    // message, which runs past the popup's 60 columns and loses its cause.
+    let status_height = match &app.status {
+        Some(msg) => wrapped_height(msg, f.area().width),
+        None => 1,
+    };
+
     let chunks = Layout::vertical([
         Constraint::Length(if header.is_some() { 1 } else { 0 }),
         Constraint::Length(1),
         Constraint::Min(1),
-        Constraint::Length(1),
+        Constraint::Length(status_height),
     ])
     .split(f.area());
 
@@ -139,7 +156,10 @@ fn render(f: &mut Frame, app: &mut App) {
     }
 
     match &app.status {
-        Some(msg) => f.render_widget(Paragraph::new(msg.clone()).dim(), chunks[3]),
+        Some(msg) => f.render_widget(
+            Paragraph::new(msg.clone()).wrap(Wrap { trim: false }).dim(),
+            chunks[3],
+        ),
         None => {
             let esc = match app.stage {
                 Stage::Commands => "esc to close",
@@ -152,6 +172,16 @@ fn render(f: &mut Frame, app: &mut App) {
             );
         }
     }
+}
+
+/// Lines a status message needs at this width, uncapped — the layout trims a
+/// `Length` larger than the pane, so a candidate row survives even a message
+/// asking for more lines than exist (`a_long_status_leaves_the_list_a_row`).
+fn wrapped_height(msg: &str, width: u16) -> u16 {
+    if width == 0 {
+        return 1;
+    }
+    (msg.chars().count().div_ceil(width as usize) as u16).max(1)
 }
 
 /// The counts on the left, the running version flush right. Herdr can hand the
@@ -339,6 +369,42 @@ mod render_tests {
         assert_eq!(lines.last().unwrap(), "Split pane: right", "{lines:#?}");
     }
 
+    /// A dispatch failure carries herdr's own message and runs well past the
+    /// popup's width. Truncated to one line it loses the half naming the cause,
+    /// which leaves the user where the silent failure did — knowing only that
+    /// nothing happened.
+    #[test]
+    fn a_dispatch_failure_is_readable_in_full() {
+        let message =
+            "`pane.move.tab` failed: pane cannot be moved into the tab it already occupies";
+        let mut app = app_with(vec![command("pane.move.tab", "Move pane to tab", None)]);
+        app.status = Some(message.to_string());
+
+        let lines = draw(&mut app, 60, 12);
+        let shown: String = lines
+            .iter()
+            .skip_while(|l| !l.contains("pane.move.tab` failed"))
+            .map(|l| l.trim())
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert_eq!(shown, message, "{lines:#?}");
+    }
+
+    /// `wrapped_height` grows with the message and has no cap of its own, so
+    /// what keeps a candidate visible is the layout trimming a `Length` that
+    /// exceeds the pane. Verified by rendering rather than reasoned about — the
+    /// trimming is ratatui's behaviour, not something this file states.
+    #[test]
+    fn a_long_status_leaves_the_list_a_row() {
+        let mut app = app_with(vec![command("split.right", "Split pane: right", None)]);
+        app.status = Some("x".repeat(500));
+        let lines = draw(&mut app, 36, 8);
+        assert!(
+            lines.iter().any(|l| l.contains("Split pane: right")),
+            "the candidate was pushed off: {lines:#?}"
+        );
+    }
+
     /// Herdr can hand the plugin a region narrower than §5's floor. The counts
     /// are what has to survive there, so the version is dropped whole rather
     /// than either half being truncated.
@@ -372,5 +438,199 @@ mod render_tests {
         let lines = draw(&mut app, 36, 8);
         let listed = lines.iter().filter(|l| l.contains("Target")).count();
         assert_eq!(listed, 5, "{lines:#?}");
+    }
+}
+
+/// Keys in, argv out. Every other test here stops at a boundary: `app::tests`
+/// checks `confirm` against a state built by hand, and `render_tests` checks
+/// what is drawn. Neither covers the join — that a key the user presses reaches
+/// `App`, that Enter reaches `confirm`, and that what falls out is the argv
+/// `Herdr::dispatch` spawns. A break anywhere along that path shows up as a
+/// palette that takes the keypress and runs nothing.
+#[cfg(test)]
+mod wiring_tests {
+    use super::*;
+    use crate::app::{Candidate, Outcome};
+    use crate::catalog::Command;
+    use crate::frecency::Frecency;
+    use crate::herdr::{PluginAction, Target};
+    use crossterm::event::{KeyEvent, KeyEventState};
+
+    fn command(id: &str, title: &str, args: &[&str], resolve: Option<&str>) -> Command {
+        Command {
+            id: id.to_string(),
+            title: title.to_string(),
+            args: args.iter().map(|s| s.to_string()).collect(),
+            contexts: Vec::new(),
+            resolve: resolve.map(str::to_string),
+        }
+    }
+
+    fn app_with(commands: Vec<Command>) -> App {
+        App::new(
+            commands.into_iter().map(Candidate::from_command).collect(),
+            Frecency::default(),
+        )
+    }
+
+    fn key(code: KeyCode) -> Event {
+        Event::Key(KeyEvent {
+            code,
+            modifiers: KeyModifiers::NONE,
+            kind: KeyEventKind::Press,
+            state: KeyEventState::NONE,
+        })
+    }
+
+    /// Types a string, then whatever keys follow, returning the first Step that
+    /// is not `Continue` — what the event loop in `main` would break on.
+    fn press(app: &mut App, typed: &str, keys: &[KeyCode]) -> Option<Step> {
+        let codes = typed.chars().map(KeyCode::Char).chain(keys.iter().copied());
+        for code in codes {
+            match apply(app, key(code)) {
+                None | Some(Step::Continue) => {}
+                Some(step) => return Some(step),
+            }
+        }
+        None
+    }
+
+    #[test]
+    fn typing_and_pressing_enter_produces_the_argv_herdr_is_run_with() {
+        let mut app = app_with(vec![
+            command("tab.create", "New tab", &["tab", "create"], None),
+            command(
+                "pane.split.right",
+                "Split pane: right",
+                &["pane", "split", "--direction", "right"],
+                None,
+            ),
+        ]);
+
+        match press(&mut app, "split", &[KeyCode::Enter]) {
+            Some(Step::Run(Outcome::Command { id, args })) => {
+                assert_eq!(id, "pane.split.right");
+                assert_eq!(args, ["pane", "split", "--direction", "right"]);
+            }
+            other => panic!("nothing ran: {}", describe(&other)),
+        }
+    }
+
+    /// A `resolve` entry must not run on the first Enter — it asks for targets
+    /// — and the second Enter is what carries the picked id into argv.
+    #[test]
+    fn a_target_entry_runs_only_after_its_target_is_picked() {
+        let entry = command(
+            "tab.focus",
+            "Focus tab",
+            &["tab", "focus", "{}"],
+            Some("tab list"),
+        );
+        let mut app = app_with(vec![entry.clone()]);
+
+        match press(&mut app, "focus", &[KeyCode::Enter]) {
+            Some(Step::NeedsTargets(c)) => assert_eq!(c.id, "tab.focus"),
+            other => panic!("expected a target prompt: {}", describe(&other)),
+        }
+
+        app.enter_targets(
+            entry,
+            vec![
+                Target {
+                    id: "w46:t1".into(),
+                    label: "one".into(),
+                },
+                Target {
+                    id: "w3Y:t1".into(),
+                    label: "two".into(),
+                },
+            ],
+        );
+
+        match press(&mut app, "", &[KeyCode::Down, KeyCode::Enter]) {
+            Some(Step::Run(Outcome::Command { args, .. })) => {
+                assert_eq!(args, ["tab", "focus", "w3Y:t1"]);
+            }
+            other => panic!("the target did not run: {}", describe(&other)),
+        }
+    }
+
+    /// An action's argv is assembled in `main` rather than carried on the
+    /// Outcome, so this asserts on the argv that assembly produces.
+    #[test]
+    fn a_plugin_action_leaves_as_an_invoke_argv() {
+        let action = PluginAction {
+            plugin_id: "notes".into(),
+            action_id: "capture".into(),
+            title: "Capture a note".into(),
+            contexts: Vec::new(),
+            platforms: Vec::new(),
+        };
+        let mut app = App::new(vec![Candidate::from_action(action)], Frecency::default());
+
+        match press(&mut app, "capture", &[KeyCode::Enter]) {
+            Some(Step::Run(Outcome::Action {
+                plugin_id,
+                action_id,
+                ..
+            })) => assert_eq!(
+                [
+                    "plugin".to_string(),
+                    "action".to_string(),
+                    "invoke".to_string(),
+                    "--plugin".to_string(),
+                    plugin_id,
+                    action_id
+                ],
+                ["plugin", "action", "invoke", "--plugin", "notes", "capture"]
+            ),
+            other => panic!("the action did not run: {}", describe(&other)),
+        }
+    }
+
+    /// Enter on a query matching nothing must not run whatever was selected
+    /// before the query narrowed the list to zero.
+    #[test]
+    fn enter_on_an_empty_list_runs_nothing() {
+        let mut app = app_with(vec![command(
+            "tab.create",
+            "New tab",
+            &["tab", "create"],
+            None,
+        )]);
+        assert!(press(&mut app, "zzzz", &[KeyCode::Enter]).is_none());
+    }
+
+    /// A query that cannot be corrected leaves the palette taking Enter with
+    /// nothing to run, which reads as the keypress being ignored.
+    #[test]
+    fn backspace_restores_a_candidate_a_typo_filtered_out() {
+        let mut app = app_with(vec![command(
+            "tab.create",
+            "New tab",
+            &["tab", "create"],
+            None,
+        )]);
+        assert!(press(&mut app, "tabz", &[KeyCode::Enter]).is_none());
+
+        match press(&mut app, "", &[KeyCode::Backspace, KeyCode::Enter]) {
+            Some(Step::Run(Outcome::Command { id, .. })) => assert_eq!(id, "tab.create"),
+            other => panic!("backspace did not restore it: {}", describe(&other)),
+        }
+    }
+
+    /// Every failure above is "the palette accepted the key and ran nothing",
+    /// so the panic has to say what it did instead.
+    fn describe(step: &Option<Step>) -> String {
+        match step {
+            None => "the keys were consumed and no step was produced".into(),
+            Some(Step::Continue) => "Continue".into(),
+            Some(Step::Cancel) => "Cancel".into(),
+            Some(Step::NeedsTargets(c)) => format!("NeedsTargets({})", c.id),
+            Some(Step::Run(Outcome::Command { id, args })) => {
+                format!("Run({id}: {})", args.join(" "))
+            }
+            Some(Step::Run(Outcome::Action { id, .. })) => format!("Run(action {id})"),
+        }
     }
 }

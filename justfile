@@ -3,7 +3,7 @@
 
 default: ci
 
-ci: lint test build-musl
+ci: lint test palette-e2e build-musl
 
 fmt:
     cargo fmt --all
@@ -18,6 +18,12 @@ clippy:
 
 test:
     cargo test --locked
+
+# Part of `ci`, unlike catalog-e2e below: it stubs herdr rather than fetching
+# one, so it costs a debug build and a few seconds.
+palette-e2e:
+    cargo build --locked
+    python3 herdr/palette-e2e.py
 
 # One release asset. release.yml calls this per matrix target, so the build
 # invocation has one definition rather than a copy per consumer.
