@@ -42,25 +42,7 @@ impl Herdr {
             .output()
             .map_err(|e| format!("could not run {}: {e}", self.bin))?;
 
-        let body: Envelope = serde_json::from_slice(&out.stdout).map_err(|_| {
-            let stderr = String::from_utf8_lossy(&out.stderr);
-            let text = if stderr.trim().is_empty() {
-                String::from_utf8_lossy(&out.stdout).trim().to_string()
-            } else {
-                stderr.trim().to_string()
-            };
-            if text.is_empty() {
-                "herdr returned no output".to_string()
-            } else {
-                text
-            }
-        })?;
-
-        if let Some(err) = body.error {
-            return Err(err.message);
-        }
-        body.result
-            .ok_or_else(|| "herdr returned no result".to_string())
+        read_response(&out.stdout, &out.stderr)
     }
 
     /// `herdr --version` prints a plain "herdr X.Y.Z" line rather than JSON, so
@@ -216,6 +198,34 @@ pub fn current_platform() -> &'static str {
     }
 }
 
+/// The value herdr returned, or the best message available for what went wrong.
+/// Pure so the failure text is testable: it is the only thing the user sees when
+/// a dispatch fails, and a herdr that answers with something other than the
+/// envelope leaves this as the sole account of it.
+fn read_response(stdout: &[u8], stderr: &[u8]) -> Result<serde_json::Value, String> {
+    let body: Envelope = serde_json::from_slice(stdout).map_err(|_| {
+        // Preferred over stdout because a herdr that failed before writing its
+        // envelope says why on stderr, and stdout is then empty or a fragment.
+        let stderr = String::from_utf8_lossy(stderr);
+        let text = if stderr.trim().is_empty() {
+            String::from_utf8_lossy(stdout).trim().to_string()
+        } else {
+            stderr.trim().to_string()
+        };
+        if text.is_empty() {
+            "herdr returned no output".to_string()
+        } else {
+            text
+        }
+    })?;
+
+    if let Some(err) = body.error {
+        return Err(err.message);
+    }
+    body.result
+        .ok_or_else(|| "herdr returned no result".to_string())
+}
+
 /// Builds one candidate row. Pure so the label rules are testable without a
 /// herdr binary — `Herdr::call` stays the only process seam.
 fn target_from_row(
@@ -255,8 +265,58 @@ fn target_from_row(
 
 #[cfg(test)]
 mod tests {
-    use super::{target_from_row, Herdr, PluginAction};
+    use super::{read_response, target_from_row, Herdr, PluginAction};
     use serde_json::json;
+
+    /// The envelope's own error is what names a failure; the exit status is 1
+    /// for an API error and 1 for a missing binary alike.
+    #[test]
+    fn an_api_error_surfaces_its_message() {
+        let body = br#"{"error":{"message":"pane not found"}}"#;
+        let err = read_response(body, b"").expect_err("an error body is a failure");
+        assert_eq!(err, "pane not found");
+    }
+
+    #[test]
+    fn a_result_body_is_returned() {
+        let body = br#"{"result":{"panes":[]}}"#;
+        let value = read_response(body, b"").expect("a result body is a success");
+        assert!(value.get("panes").is_some(), "{value}");
+    }
+
+    /// A herdr that dies before writing its envelope explains itself on stderr,
+    /// so that text is what the user needs rather than the empty stdout.
+    #[test]
+    fn non_json_output_falls_back_to_stderr() {
+        let err = read_response(b"", b"error: unknown subcommand 'pane'\n")
+            .expect_err("non-JSON is a failure");
+        assert_eq!(err, "error: unknown subcommand 'pane'");
+    }
+
+    /// With nothing on stderr, whatever reached stdout is the only account of
+    /// the failure — a usage line, say, printed where the envelope was due.
+    #[test]
+    fn non_json_output_falls_back_to_stdout_when_stderr_is_silent() {
+        let err =
+            read_response(b"Usage: herdr <command>\n", b"").expect_err("non-JSON is a failure");
+        assert_eq!(err, "Usage: herdr <command>");
+    }
+
+    /// Both streams empty is its own case: without it the user is shown an
+    /// empty string, which reads as the palette having done nothing.
+    #[test]
+    fn a_silent_failure_still_says_something() {
+        let err = read_response(b"", b"").expect_err("no output is a failure");
+        assert_eq!(err, "herdr returned no output");
+    }
+
+    /// A well-formed envelope carrying neither half is not a success: taking it
+    /// as one would let a dispatch that did nothing report as having run.
+    #[test]
+    fn an_envelope_with_neither_result_nor_error_is_a_failure() {
+        let err = read_response(b"{}", b"").expect_err("an empty envelope is a failure");
+        assert_eq!(err, "herdr returned no result");
+    }
 
     fn workspaces() -> Vec<(String, String)> {
         vec![

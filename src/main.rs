@@ -47,35 +47,19 @@ fn run() -> Result<(), String> {
     // What the user was looking at when the palette opened. The pane process
     // receives no ids of its own, so this JSON is the only route to them (§8).
     let context = Context::from_env();
-    let scope = context.scope();
 
     let checked_against = catalog.checked_against.clone();
 
-    let mut candidates: Vec<Candidate> = catalog
-        .commands
-        .into_iter()
-        .filter(|c| c.available_in(scope) && context.can_satisfy(&c.args))
-        .map(|mut c| {
-            c.args = context.substitute(&c.args);
-            Candidate::from_command(c)
-        })
-        .collect();
-
-    // Plugin actions merge into the same list (§4). Their absence is not fatal:
-    // a palette of built-ins is still a working palette.
-    if let Ok(actions) = herdr.plugin_actions() {
-        let platform = herdr::current_platform();
-        candidates.extend(
-            actions
-                .into_iter()
-                // Our own `open` is what launched this palette; offering it
-                // inside itself only reaches `popup already open`.
-                .filter(|a| Some(&a.plugin_id) != plugin_id.as_ref())
-                .filter(|a| a.runs_on(platform))
-                .filter(|a| a.contexts.is_empty() || a.contexts.iter().any(|c| c == scope))
-                .map(Candidate::from_action),
-        );
-    }
+    // Defaulted rather than propagated because a palette of built-ins is still
+    // a working palette (§4).
+    let actions = herdr.plugin_actions().unwrap_or_default();
+    let candidates = assemble(
+        catalog.commands,
+        actions,
+        &context,
+        plugin_id.as_deref(),
+        herdr::current_platform(),
+    );
 
     if candidates.is_empty() {
         return Err(format!(
@@ -146,6 +130,41 @@ fn run() -> Result<(), String> {
     }
 }
 
+/// Everything the palette offers, from the two sources that feed it. What each
+/// filter drops is invisible once the list is drawn — an entry that should have
+/// been excluded looks exactly like one the user has not scrolled to.
+fn assemble(
+    commands: Vec<catalog::Command>,
+    actions: Vec<herdr::PluginAction>,
+    context: &Context,
+    own_plugin_id: Option<&str>,
+    platform: &str,
+) -> Vec<Candidate> {
+    let scope = context.scope();
+
+    let mut candidates: Vec<Candidate> = commands
+        .into_iter()
+        .filter(|c| c.available_in(scope) && context.can_satisfy(&c.args))
+        .map(|mut c| {
+            c.args = context.substitute(&c.args);
+            Candidate::from_command(c)
+        })
+        .collect();
+
+    candidates.extend(
+        actions
+            .into_iter()
+            // Excluded because our own `open` is what launched this palette, so
+            // offering it inside itself only reaches `popup already open`.
+            .filter(|a| Some(a.plugin_id.as_str()) != own_plugin_id)
+            .filter(|a| a.runs_on(platform))
+            .filter(|a| a.contexts.is_empty() || a.contexts.iter().any(|c| c == scope))
+            .map(Candidate::from_action),
+    );
+
+    candidates
+}
+
 enum Dispatched {
     Ran,
     Failed(ui::Screen, String),
@@ -201,6 +220,141 @@ fn argv(outcome: Outcome) -> (String, Vec<String>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn command(id: &str, args: &[&str], contexts: &[&str]) -> catalog::Command {
+        catalog::Command {
+            id: id.into(),
+            title: id.into(),
+            args: args.iter().map(|s| s.to_string()).collect(),
+            contexts: contexts.iter().map(|s| s.to_string()).collect(),
+            resolve: None,
+        }
+    }
+
+    fn action(
+        plugin: &str,
+        id: &str,
+        contexts: &[&str],
+        platforms: &[&str],
+    ) -> herdr::PluginAction {
+        herdr::PluginAction {
+            plugin_id: plugin.into(),
+            action_id: id.into(),
+            title: format!("{plugin}.{id}"),
+            contexts: contexts.iter().map(|s| s.to_string()).collect(),
+            platforms: platforms.iter().map(|s| s.to_string()).collect(),
+        }
+    }
+
+    fn in_a_pane() -> Context {
+        Context {
+            focused_pane_id: Some("w1:p1".into()),
+            tab_id: Some("w1:t1".into()),
+            workspace_id: Some("w1".into()),
+        }
+    }
+
+    fn ids(candidates: &[Candidate]) -> Vec<&str> {
+        candidates.iter().map(|c| c.id.as_str()).collect()
+    }
+
+    /// Offering our own opener inside the palette it opened reaches only
+    /// `popup already open`, and nothing downstream would report that as wrong.
+    #[test]
+    fn the_palettes_own_action_is_not_offered_inside_itself() {
+        let candidates = assemble(
+            Vec::new(),
+            vec![
+                action("command-palette", "open", &[], &[]),
+                action("notes", "capture", &[], &[]),
+            ],
+            &in_a_pane(),
+            Some("command-palette"),
+            "linux",
+        );
+        assert_eq!(ids(&candidates), ["notes.capture"]);
+    }
+
+    /// Without `HERDR_PLUGIN_ID` there is no id to compare against, so the
+    /// filter cannot fire — every action stands, including ours.
+    #[test]
+    fn an_unknown_own_id_excludes_nothing() {
+        let candidates = assemble(
+            Vec::new(),
+            vec![action("command-palette", "open", &[], &[])],
+            &in_a_pane(),
+            None,
+            "linux",
+        );
+        assert_eq!(ids(&candidates), ["command-palette.open"]);
+    }
+
+    /// The filters compose: an entry has to clear all of them, and each one
+    /// dropped here is dropped for exactly one reason, named in its id.
+    #[test]
+    fn an_entry_must_clear_every_filter_to_be_offered() {
+        let candidates = assemble(
+            vec![
+                command("pane.split", &["pane", "split", "{pane}"], &["pane"]),
+                command(
+                    "needs.absent.workspace.id",
+                    &["workspace", "close", "{workspace}"],
+                    &[],
+                ),
+                command("wrong.context", &["tab", "create"], &["tab"]),
+            ],
+            vec![
+                action("other", "wrong-platform", &[], &["windows"]),
+                action("other", "wrong-context", &["workspace"], &[]),
+                action("other", "offered", &["pane"], &["linux"]),
+            ],
+            &Context {
+                focused_pane_id: Some("w1:p1".into()),
+                tab_id: None,
+                workspace_id: None,
+            },
+            Some("command-palette"),
+            "linux",
+        );
+        assert_eq!(ids(&candidates), ["pane.split", "other.offered"]);
+    }
+
+    /// The ids the invocation carries are substituted at assembly time, so what
+    /// reaches `dispatch` is already the argv herdr runs.
+    #[test]
+    fn context_ids_are_substituted_into_the_argv() {
+        let candidates = assemble(
+            vec![command(
+                "pane.split",
+                &["pane", "split", "--pane", "{pane}"],
+                &["pane"],
+            )],
+            Vec::new(),
+            &in_a_pane(),
+            None,
+            "linux",
+        );
+        match &candidates[0].kind {
+            app::Kind::Command(c) => {
+                assert_eq!(c.args, ["pane", "split", "--pane", "w1:p1"]);
+            }
+            _ => panic!("expected a catalog command"),
+        }
+    }
+
+    /// A herdr that cannot list actions leaves the built-ins, which is why the
+    /// caller defaults the error away rather than propagating it.
+    #[test]
+    fn built_ins_stand_alone_when_no_actions_are_listed() {
+        let candidates = assemble(
+            vec![command("tab.create", &["tab", "create"], &[])],
+            Vec::new(),
+            &in_a_pane(),
+            Some("command-palette"),
+            "linux",
+        );
+        assert_eq!(ids(&candidates), ["tab.create"]);
+    }
 
     #[test]
     fn a_command_is_spawned_with_the_argv_it_carries() {
