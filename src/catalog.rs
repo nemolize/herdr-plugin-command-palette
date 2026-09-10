@@ -25,11 +25,19 @@ pub struct Command {
     /// Absent means the entry runs exactly as written.
     #[serde(default)]
     pub resolve: Option<String>,
+    /// The label to show above a free-text stage that fills the `{text}` in
+    /// `args`. Absent means the entry needs no typed argument.
+    #[serde(default)]
+    pub prompt: Option<String>,
 }
 
 impl Command {
     pub fn needs_target(&self) -> bool {
         self.resolve.is_some()
+    }
+
+    pub fn needs_text(&self) -> bool {
+        self.prompt.is_some()
     }
 
     pub fn available_in(&self, context: &str) -> bool {
@@ -58,6 +66,36 @@ pub fn load(path: &Path) -> Result<Catalog, String> {
     Ok(catalog)
 }
 
+/// Why an entry cannot be offered, or None when it is well-formed.
+///
+/// A catalog is user-replaceable, so these hold for hand-written entries too.
+/// Each is a mismatch that would otherwise surface as a rename applying the
+/// literal string `{text}`, or as a picked target being silently discarded —
+/// never as an error.
+pub fn rejection(c: &Command) -> Option<String> {
+    let texts = c.args.iter().filter(|a| *a == "{text}").count();
+    let ids = c.args.iter().filter(|a| *a == "{}").count();
+
+    if c.resolve.is_some() && c.prompt.is_some() {
+        return Some("`resolve` and `prompt` on one entry".into());
+    }
+    match (&c.prompt, texts) {
+        (Some(_), 0) => return Some("`prompt` without a `{text}` to fill".into()),
+        (Some(_), n) if n > 1 => {
+            return Some(format!("{n} `{{text}}` placeholders, expected 1"));
+        }
+        (None, n) if n > 0 => return Some("`{text}` without a `prompt` to fill it".into()),
+        _ => {}
+    }
+    match (&c.resolve, ids) {
+        (Some(_), n) if n != 1 => Some(format!(
+            "`resolve` with {n} `{{}}` placeholders, expected 1"
+        )),
+        (None, n) if n > 0 => Some("`{}` without a `resolve` to fill it".into()),
+        _ => None,
+    }
+}
+
 /// Compares dotted numeric versions, ignoring any trailing suffix. Returns None
 /// when either side is not parseable — an unreadable version is not evidence of
 /// a mismatch, so the caller stays quiet rather than warning on a guess.
@@ -82,7 +120,7 @@ pub fn is_older(actual: &str, required: &str) -> Option<bool> {
 
 #[cfg(test)]
 mod tests {
-    use super::{is_older, Catalog};
+    use super::{is_older, Catalog, Command};
 
     fn shipped() -> Catalog {
         // The file the plugin actually ships, not a fixture — a fixture would
@@ -132,6 +170,76 @@ mod tests {
         }
     }
 
+    /// `rejection` covers the placeholder pairing; this is the half it cannot
+    /// see — that the subject is a context id `main.rs` can read out of the argv.
+    #[test]
+    fn a_prompt_entry_names_its_subject_from_the_context() {
+        for e in shipped().commands.iter().filter(|e| e.prompt.is_some()) {
+            assert!(e.resolve.is_none(), "{}: prompt entry has a picker", e.id);
+            let subject = e.args.first().expect("entries have args");
+            assert_eq!(
+                e.args.get(2).map(String::as_str),
+                Some(format!("{{{subject}}}").as_str()),
+                "{}: `{}` must name its subject with {{{subject}}}",
+                e.id,
+                e.args.join(" ")
+            );
+        }
+    }
+
+    /// The shipped entries are the baseline the user's own catalog is judged
+    /// against, so none of them may trip the gate that drops an entry.
+    #[test]
+    fn every_shipped_entry_survives_the_rejection_gate() {
+        for e in &shipped().commands {
+            assert_eq!(super::rejection(e), None, "{}", e.id);
+        }
+    }
+
+    /// A hand-written catalog reaches `rejection` too, and each of these would
+    /// otherwise rename something to the literal `{text}` or drop a picked id.
+    #[test]
+    fn a_malformed_entry_is_rejected_with_its_reason() {
+        let entry = |args: &[&str], resolve: Option<&str>, prompt: Option<&str>| Command {
+            id: "x".into(),
+            title: "X".into(),
+            args: args.iter().map(|s| s.to_string()).collect(),
+            contexts: vec![],
+            resolve: resolve.map(str::to_owned),
+            prompt: prompt.map(str::to_owned),
+        };
+
+        let both = entry(
+            &["tab", "rename", "{}", "{text}"],
+            Some("tab list"),
+            Some("N"),
+        );
+        assert!(super::rejection(&both).unwrap().contains("one entry"));
+
+        let no_slot = entry(&["tab", "rename", "x", "y"], None, Some("N"));
+        assert!(super::rejection(&no_slot)
+            .unwrap()
+            .contains("without a `{text}`"));
+
+        let no_prompt = entry(&["tab", "rename", "x", "{text}"], None, None);
+        assert!(super::rejection(&no_prompt)
+            .unwrap()
+            .contains("without a `prompt`"));
+
+        let two_slots = entry(&["tab", "rename", "{text}", "{text}"], None, Some("N"));
+        assert!(super::rejection(&two_slots).unwrap().contains("expected 1"));
+
+        let orphan_id = entry(&["tab", "focus", "{}"], None, None);
+        assert!(super::rejection(&orphan_id)
+            .unwrap()
+            .contains("without a `resolve`"));
+
+        assert_eq!(
+            super::rejection(&entry(&["tab", "focus", "{}"], Some("tab list"), None)),
+            None
+        );
+    }
+
     /// `--current` resolves against the SERVER's focused pane. While the palette
     /// is up that is the popup, not the pane it was opened from, so an entry
     /// using it acts on the wrong pane — observed as pane entries doing nothing
@@ -170,6 +278,9 @@ mod tests {
             (&["pane", "swap"], 0),
             (&["pane", "close"], 1),
             (&["pane", "move"], 1),
+            // 2 is what an entry must supply, not what the CLI demands: pane's
+            // `[LABEL]...` is optional only because `--clear` shares the verb.
+            (&["pane", "rename"], 2),
             (&["tab", "create"], 0),
             (&["tab", "focus"], 1),
             (&["tab", "close"], 1),
@@ -177,6 +288,7 @@ mod tests {
             (&["workspace", "create"], 0),
             (&["workspace", "focus"], 1),
             (&["workspace", "close"], 1),
+            (&["workspace", "rename"], 2),
             (&["server", "reload-config"], 0),
         ];
 

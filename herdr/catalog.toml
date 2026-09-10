@@ -19,6 +19,15 @@ checked_against = "0.8.2"
 # substituted for the {} placeholder in `args`. Entries with no `resolve` key
 # run exactly as written.
 #
+# `prompt` marks an entry whose argument is typed rather than picked. Its value
+# labels the input, and the text replaces the {text} placeholder in `args`. The
+# input opens seeded with the current name of what the entry acts on, so
+# renaming is an edit rather than a retype.
+#
+# The typed text lands in ONE argv element whatever it contains, because
+# `<LABEL>...` is variadic: splitting on spaces would pass a name's second word
+# as a separate argument.
+#
 # {pane}, {tab} and {workspace} are the ids of what the user was looking at when
 # the palette opened. An entry naming one the invocation lacks is not offered.
 #
@@ -94,6 +103,14 @@ title = "Swap pane: right"
 args = ["pane", "swap", "--pane", "{pane}", "--direction", "right"]
 contexts = ["pane"]
 
+# No picker: the context already names the pane the palette was opened from.
+[[command]]
+id = "pane.rename"
+title = "Rename pane…"
+args = ["pane", "rename", "{pane}", "{text}"]
+prompt = "New pane name"
+contexts = ["pane"]
+
 # `pane close` takes its pane id positionally rather than behind --pane.
 [[command]]
 id = "pane.close"
@@ -133,9 +150,15 @@ args = ["tab", "focus", "{}"]
 resolve = "tab list"
 contexts = ["global", "workspace", "tab", "pane"]
 
-# `tab rename` is deliberately absent: it takes `<TAB_ID> <LABEL>...` with the
-# label a REQUIRED positional, and the palette has no free-text input stage to
-# supply one. It belongs here once such a stage exists.
+# Renames the tab the palette was opened from. No picker: renaming is about the
+# thing in front of you, and the context already names it.
+[[command]]
+id = "tab.rename"
+title = "Rename tab…"
+args = ["tab", "rename", "{tab}", "{text}"]
+prompt = "New tab name"
+contexts = ["tab", "pane"]
+
 [[command]]
 id = "tab.close"
 title = "Close tab…"
@@ -158,6 +181,13 @@ title = "Focus workspace…"
 args = ["workspace", "focus", "{}"]
 resolve = "workspace list"
 contexts = ["global", "workspace", "tab", "pane"]
+
+[[command]]
+id = "workspace.rename"
+title = "Rename workspace…"
+args = ["workspace", "rename", "{workspace}", "{text}"]
+prompt = "New workspace name"
+contexts = ["workspace", "tab", "pane"]
 
 [[command]]
 id = "workspace.close"

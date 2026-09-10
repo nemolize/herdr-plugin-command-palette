@@ -7,8 +7,10 @@ use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
 use crossterm::ExecutableCommand;
+use ratatui::buffer::CellWidth;
 use ratatui::prelude::*;
 use ratatui::widgets::{List, ListItem, Paragraph, Wrap};
+use unicode_segmentation::UnicodeSegmentation;
 
 use crate::app::{App, Stage, Step};
 
@@ -88,12 +90,10 @@ fn apply(app: &mut App, event: Event) -> Option<Step> {
     if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
         return Some(Step::Cancel);
     }
+    let typing = matches!(app.stage, Stage::Prompt { .. });
     Some(match key.code {
-        // From the target list Esc backs out to the commands rather than
-        // closing: picking a dynamic entry would otherwise be a one-way
-        // door out of the palette.
         KeyCode::Esc => {
-            if app.leave_targets() {
+            if app.leave_stage() {
                 Step::Continue
             } else {
                 Step::Cancel
@@ -108,15 +108,25 @@ fn apply(app: &mut App, event: Event) -> Option<Step> {
             Step::Continue
         }
         KeyCode::Enter => app.confirm(),
+        // The typing stage has no list to filter, so its keystrokes edit the
+        // argument being composed rather than the query.
         KeyCode::Backspace => {
-            app.pop();
+            if typing {
+                app.pop_text();
+            } else {
+                app.pop();
+            }
             Step::Continue
         }
         // Modifiers are excluded so a chord (Ctrl-A, Alt-f) is not typed
         // into the query as its bare letter. SHIFT is what produces capitals
         // and belongs in the text.
         KeyCode::Char(c) if (key.modifiers - KeyModifiers::SHIFT).is_empty() => {
-            app.push(c);
+            if typing {
+                app.push_text(c);
+            } else {
+                app.push(c);
+            }
             Step::Continue
         }
         _ => Step::Continue,
@@ -129,6 +139,12 @@ fn render(f: &mut Frame, app: &mut App) {
     let header = match &app.stage {
         Stage::Commands => None,
         Stage::Targets { command, .. } => Some(command.title.clone()),
+        Stage::Prompt { command, .. } => Some(
+            command
+                .prompt
+                .clone()
+                .unwrap_or_else(|| command.title.clone()),
+        ),
     };
 
     let status = app
@@ -152,36 +168,137 @@ fn render(f: &mut Frame, app: &mut App) {
         f.render_widget(Paragraph::new(title).bold(), chunks[0]);
     }
 
-    f.render_widget(Paragraph::new(format!("> {}", app.query)), chunks[1]);
+    if let Stage::Prompt { text, .. } = &app.stage {
+        render_input(f, text, chunks[1]);
+        match status {
+            Some(p) => f.render_widget(p, chunks[3]),
+            None => render_footer(f, app, chunks[3]),
+        }
+        return;
+    }
+
+    f.render_widget(Paragraph::new(format!("> {}", app.query())), chunks[1]);
 
     // Owned rather than borrowed: the list borrows `app` immutably while
-    // render_stateful_widget needs `app.state` mutably.
+    // render_stateful_widget needs `app.selection.state` mutably.
     let rows: Vec<String> = app.rows().into_iter().map(str::to_owned).collect();
+    let reason = app.selected_note().map(str::to_owned);
     if rows.is_empty() {
         f.render_widget(Paragraph::new("no matches").dim(), chunks[2]);
     } else {
+        // Rows stay ONE line each so the list's own navigation is untouched;
+        // the reason wraps in an area of its own instead of growing a row.
+        let (list_area, reason_area) = match &reason {
+            None => (chunks[2], None),
+            Some(_) => {
+                let split =
+                    Layout::vertical([Constraint::Min(1), Constraint::Length(2)]).split(chunks[2]);
+                (split[0], Some(split[1]))
+            }
+        };
+
         let items: Vec<ListItem> = rows.into_iter().map(ListItem::new).collect();
         f.render_stateful_widget(
             List::new(items).highlight_symbol("▶ "),
-            chunks[2],
-            &mut app.state,
+            list_area,
+            &mut app.selection.state,
         );
+        if let (Some(area), Some(why)) = (reason_area, reason) {
+            f.render_widget(Paragraph::new(why).wrap(Wrap { trim: true }).dim(), area);
+        }
     }
 
     match status {
         Some(p) => f.render_widget(p, chunks[3]),
-        None => {
-            let esc = match app.stage {
-                Stage::Commands => "esc to close",
-                Stage::Targets { .. } => "esc to go back",
-            };
-            let counts = format!("{}/{} · {esc}", app.shown(), app.total());
-            f.render_widget(
-                Paragraph::new(footer(&counts, chunks[3].width)).dim(),
-                chunks[3],
-            );
-        }
+        None => render_footer(f, app, chunks[3]),
     }
+}
+
+/// Columns the `> ` prefix takes from the input line.
+const PROMPT_COLUMNS: u16 = 2;
+
+/// Draws the typed name with a block cursor after it (docs/design.md §4).
+///
+/// The cursor is reserved a cell BEFORE the text is measured, which is what
+/// makes clipping it away with the text unreachable rather than a calculation
+/// to keep honest.
+fn render_input(f: &mut Frame, text: &str, area: Rect) {
+    const CURSOR: &str = "▏";
+
+    if area.width == 0 {
+        return;
+    }
+    // Dropped because `CellWidth` panics on one in a debug build, and a seeded
+    // name can carry one — herdr stores whatever was set.
+    let text: String = text.chars().filter(|c| !c.is_control()).collect();
+    let text = text.as_str();
+    // The cursor outranks the prefix when the pane cannot hold both: it is what
+    // says the field is live, and a lone `>` says nothing.
+    let (line, cursor_column) = match area.width.checked_sub(PROMPT_COLUMNS + 1) {
+        None => (String::new(), 0),
+        Some(room) => {
+            let shown = tail_within(text, room);
+            (format!("> {shown}"), PROMPT_COLUMNS + drawn_width(shown))
+        }
+    };
+
+    f.render_widget(Paragraph::new(line), area);
+    f.render_widget(
+        Paragraph::new(CURSOR),
+        Rect {
+            x: area.x + cursor_column,
+            y: area.y,
+            width: 1,
+            height: area.height,
+        },
+    );
+}
+
+/// Cells `text` occupies once drawn, per ratatui's own per-cell measurement.
+///
+/// `Line::width` is NOT this number — it reports 1 for `ｶ\u{FF9E}`, which the
+/// buffer lays out in 2. Summing scalars is wrong too, in both directions.
+fn drawn_width(text: &str) -> u16 {
+    text.graphemes(true)
+        .map(|cluster| cluster.cell_width())
+        .sum()
+}
+
+/// The end of `text` that fits in `room` columns, cut on a grapheme boundary.
+///
+/// Cutting on clusters keeps the clip out of the middle of a glyph, which
+/// renders as a DIFFERENT glyph rather than a shorter name.
+fn tail_within(text: &str, room: u16) -> &str {
+    let mut start = text.len();
+    let mut used = 0;
+    for (offset, cluster) in text.grapheme_indices(true).rev() {
+        let w = cluster.cell_width();
+        if used + w > room {
+            break;
+        }
+        // A zero-width cluster needs a base to attach to, so it may only ride
+        // along with one that fits, never open the clip on its own.
+        if start == text.len() && w == 0 {
+            break;
+        }
+        used += w;
+        start = offset;
+    }
+    &text[start..]
+}
+
+/// The counts row. Only reached when no status message has claimed the row.
+fn render_footer(f: &mut Frame, app: &App, area: Rect) {
+    let esc = match app.stage {
+        Stage::Commands => "esc to close",
+        Stage::Targets { .. } | Stage::Prompt { .. } => "esc to go back",
+    };
+    // The typing stage lists nothing, so counts there would read 0/0.
+    let counts = match app.stage {
+        Stage::Prompt { .. } => format!("enter to run · {esc}"),
+        _ => format!("{}/{} · {esc}", app.shown(), app.total()),
+    };
+    f.render_widget(Paragraph::new(footer(&counts, area.width)).dim(), area);
 }
 
 /// Measured by rendering because counting characters under-counts a word-wrapped
@@ -241,6 +358,7 @@ mod render_tests {
             args: vec!["noop".to_string()],
             contexts: Vec::new(),
             resolve: resolve.map(str::to_string),
+            prompt: None,
         }
     }
 
@@ -378,6 +496,196 @@ mod render_tests {
         );
     }
 
+    /// Herdr's pane title is static, so the prompt's own label is the only place
+    /// the user can read what the input is asking for.
+    #[test]
+    fn the_prompt_stage_names_what_it_is_asking_for() {
+        let mut picked = command("tab.rename", "Rename tab…", None);
+        picked.args = vec![
+            "tab".into(),
+            "rename".into(),
+            "w3Y:t1".into(),
+            "{text}".into(),
+        ];
+        picked.prompt = Some("New tab name".into());
+        let mut app = app_with(vec![picked.clone()]);
+        app.enter_prompt(picked, "editor".into());
+
+        let lines = draw(&mut app, 36, 8);
+        assert_eq!(lines[0], "New tab name", "{lines:#?}");
+        assert!(lines[1].starts_with("> editor"), "seeded: {lines:#?}");
+        assert!(
+            lines
+                .last()
+                .unwrap()
+                .starts_with("enter to run · esc to go back"),
+            "{lines:#?}"
+        );
+    }
+
+    /// Expectations are FIXED cell coordinates and symbols: keep them literal.
+    /// An expectation computed from the code under test cannot fail when that
+    /// code under-counts, which is how two earlier versions of this test passed
+    /// while the bug was live.
+    #[test]
+    fn the_input_line_lands_where_it_is_expected() {
+        let cases: &[(&str, &str, u16, &[&str])] = &[
+            (
+                "short name",
+                "ab",
+                8,
+                &[">", " ", "a", "b", "▏", " ", " ", " "],
+            ),
+            (
+                "clipped to the tail, cursor after it",
+                "abcdef",
+                6,
+                &[">", " ", "d", "e", "f", "▏"],
+            ),
+            (
+                "a wide glyph owns two cells, the second its continuation",
+                "あい",
+                8,
+                &[">", " ", "あ", " ", "い", " ", "▏", " "],
+            ),
+            (
+                "clipped between wide glyphs, never inside one",
+                "あいう",
+                6,
+                &[">", " ", "う", " ", "▏", " "],
+            ),
+            (
+                "one cluster of width 2 — the case Line::width reports as 1",
+                "ｶﾞ",
+                6,
+                &[">", " ", "ｶﾞ", " ", "▏", " "],
+            ),
+            (
+                "the cursor glyph typed as a name is still just text",
+                "▏▏",
+                8,
+                &[">", " ", "▏", "▏", "▏", " ", " ", " "],
+            ),
+            (
+                "a combining mark rides with the letter it sits on",
+                "e\u{301}",
+                8,
+                &[">", " ", "e\u{301}", "▏", " ", " ", " ", " "],
+            ),
+            (
+                "a variation selector rides with its base — round 5's U+FE01",
+                "\u{2018}\u{FE01}",
+                8,
+                &[">", " ", "‘\u{FE01}", " ", "▏", " ", " ", " "],
+            ),
+            (
+                "a ZWJ sequence is one cluster — round 4's family emoji",
+                "\u{1F469}\u{200D}\u{1F4BB}",
+                8,
+                &[">", " ", "👩\u{200D}💻", " ", "▏", " ", " ", " "],
+            ),
+            (
+                "a skin tone rides with its base — round 4's bare swatch",
+                "\u{1F44D}\u{1F3FD}",
+                8,
+                &[">", " ", "👍🏽", " ", "▏", " ", " ", " "],
+            ),
+            (
+                "a flag is one cluster, never half a letter",
+                "\u{1F1EF}\u{1F1F5}",
+                8,
+                &[">", " ", "🇯🇵", " ", "▏", " ", " ", " "],
+            ),
+            (
+                "emoji presentation is drawn wide — round 3's U+FE0F",
+                "\u{2764}\u{FE0F}",
+                8,
+                &[">", " ", "❤\u{FE0F}", " ", "▏", " ", " ", " "],
+            ),
+            (
+                "a control character has no width and is not drawn",
+                "a\tb",
+                8,
+                &[">", " ", "a", "b", "▏", " ", " ", " "],
+            ),
+        ];
+
+        for (what, name, width, expected) in cases {
+            let mut picked = command("tab.rename", "Rename tab…", None);
+            picked.args = vec!["tab".into(), "rename".into(), "t1".into(), "{text}".into()];
+            picked.prompt = Some("N".into());
+            let mut app = app_with(vec![picked.clone()]);
+            app.enter_prompt(picked, name.to_string());
+
+            let mut terminal = Terminal::new(TestBackend::new(*width, 8)).unwrap();
+            terminal.draw(|f| render(f, &mut app)).unwrap();
+            let buffer = terminal.backend().buffer();
+            let row: Vec<&str> = (0..*width).map(|x| buffer[(x, 1)].symbol()).collect();
+
+            assert_eq!(&row, expected, "{what}: {name:?} at width {width}");
+        }
+    }
+
+    /// The cursor is what says the field is live, so it outranks the prefix when
+    /// the pane is too narrow for both.
+    #[test]
+    fn a_pane_too_narrow_for_the_prefix_still_shows_a_cursor() {
+        for width in 1..=3u16 {
+            let mut picked = command("tab.rename", "Rename tab…", None);
+            picked.args = vec!["tab".into(), "rename".into(), "t1".into(), "{text}".into()];
+            picked.prompt = Some("N".into());
+            let mut app = app_with(vec![picked.clone()]);
+            app.enter_prompt(picked, "abc".into());
+
+            let mut terminal = Terminal::new(TestBackend::new(width, 8)).unwrap();
+            terminal.draw(|f| render(f, &mut app)).unwrap();
+            let buffer = terminal.backend().buffer();
+            let row: String = (0..width).map(|x| buffer[(x, 1)].symbol()).collect();
+
+            assert!(row.contains('▏'), "width {width} drew no cursor: {row:?}");
+        }
+    }
+
+    /// The reason has to be READABLE, not merely stored: two earlier attempts
+    /// put it somewhere one line wide and cut it mid-word. Asserted against the
+    /// painted buffer, with every word of the longest real reason present.
+    #[test]
+    fn a_skipped_entrys_reason_is_readable_in_full() {
+        let why = "`resolve` with 0 `{}` placeholders, expected 1";
+        let mut app = App::new(
+            vec![Candidate::note("workspace.rename", why)],
+            Frecency::load(Path::new("/nonexistent")),
+        );
+        app.move_selection(0);
+
+        let painted = draw(&mut app, 36, 8).join(" ");
+        for word in why.split_whitespace() {
+            assert!(
+                painted.contains(word),
+                "{word:?} was cut from the reason: {painted:?}"
+            );
+        }
+    }
+
+    /// The typing stage lists nothing, so the counts the other stages show would
+    /// read `0/0` here — an empty result rather than a stage with no list.
+    #[test]
+    fn the_prompt_stage_shows_no_counts() {
+        let mut picked = command("pane.rename", "Rename pane…", None);
+        picked.args = vec![
+            "pane".into(),
+            "rename".into(),
+            "w3Y:p1".into(),
+            "{text}".into(),
+        ];
+        picked.prompt = Some("New pane name".into());
+        let mut app = app_with(vec![picked.clone()]);
+        app.enter_prompt(picked, String::new());
+
+        let lines = draw(&mut app, 36, 8);
+        assert!(!lines.last().unwrap().contains("0/0"), "{lines:#?}");
+    }
+
     /// A status message is the row's whole content — right-aligning the version
     /// against it would cost the message the columns it needs.
     #[test]
@@ -504,6 +812,7 @@ mod wiring_tests {
             args: args.iter().map(|s| s.to_string()).collect(),
             contexts: Vec::new(),
             resolve: resolve.map(str::to_string),
+            prompt: None,
         }
     }
 
@@ -660,6 +969,7 @@ mod wiring_tests {
             Some(Step::Continue) => "Continue".into(),
             Some(Step::Cancel) => "Cancel".into(),
             Some(Step::NeedsTargets(c)) => format!("NeedsTargets({})", c.id),
+            Some(Step::NeedsPrompt(c)) => format!("NeedsPrompt({})", c.id),
             Some(Step::Run(Outcome::Command { id, args })) => {
                 format!("Run({id}: {})", args.join(" "))
             }

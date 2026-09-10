@@ -262,6 +262,63 @@ contexts = ["global", "workspace", "tab", "pane"]
 
 An entry with no `resolve` key runs exactly as written.
 
+Entries needing an argument no listing can supply — a new name — carry a `prompt`
+key instead, whose value labels a free-text stage filling a `{text}` placeholder.
+
+Renaming names its subject with a context id (`{tab}`, `{workspace}`, `{pane}`)
+rather than a picker. Renaming is about the thing in front of you, and the
+invocation already knows what that is, so a list to choose from is a step that
+only ever has one right answer. The input opens seeded with that thing's current
+name, which makes the common edit a few keystrokes rather than a retype; the seed
+is looked up by id from the same listing `resolve` would have used, and is the
+row's own `label`, never its id — an id offered as the suggested new name would
+be submitted by a bare Enter.
+
+The typed text becomes exactly one argv element. All three rename commands take
+`<LABEL>...` variadically, so splitting on spaces would pass a name's second word
+as a separate argument.
+
+Two edges were settled by measuring 0.9.0 rather than reasoning about clap:
+
+- **A name is sent untrimmed.** herdr stores surrounding spaces verbatim, so
+  trimming what is dispatched would rewrite a seeded `"  a  "` to `"a"` on a bare
+  Enter. Only the blank check trims; an all-space name holds at the stage, since
+  `LABEL` is required and the CLI would answer with usage on stderr.
+- **`--clear` is refused for a pane, and only there.** `pane rename --clear`
+  deletes the name and exits 0, so submitting it reads as a rename that did
+  nothing. Every other `-`-leading name (`-x`, `--unknown-flag`, `-`, `--`) is
+  stored verbatim by all three commands — the guard names the one real case
+  rather than rejecting a leading `-` on principle.
+
+### The input line scrolls, and the cursor owns a cell
+
+A name can be longer than the popup, so the input shows its END: the tail is
+where the typing is happening, and clipping from the right would hide both the
+cursor and every character just typed.
+
+The cursor is drawn into a **reserved cell of its own**, after the text rather
+than appended to it. That is the design, not an implementation detail. Four
+review rounds found this line wrong, and every one of them was the same shape —
+the clip took the cursor away with the text, because the cursor was part of the
+string being measured. Reserving the cell first makes that outcome unreachable
+instead of dependent on the arithmetic being right. Where the pane cannot hold
+both the `> ` prefix and the cursor, the cursor wins: it is what says the field
+is live.
+
+Width comes from ratatui's own `CellWidth`, per grapheme cluster. Nothing local
+computes it. The rounds above each found a *different* scalar that a local rule
+got wrong — `U+FE0F`, `U+FE01`, the halfwidth voiced marks, a ZWJ sequence a
+backspace had broken — and the last of them is the reason to distrust the
+obvious alternatives too: `Line::width` reports 1 for `ｶ` + `U+FF9E`, which the
+buffer lays out in 2. Clusters come from `unicode-segmentation`, so a clip never
+lands inside a glyph, which would render as a different glyph rather than a
+shorter name.
+
+The tests assert **fixed cell coordinates and fixed symbols**, with no width
+function in the expectation. Two earlier tests passed while the bug was live:
+one computed its expectation with the code under test, the other used an input
+where the defect happened to be invisible. A literal can do neither.
+
 A second, simpler substitution covers the ids the invocation already knows:
 `{pane}`, `{tab}` and `{workspace}` resolve from `HERDR_PLUGIN_CONTEXT_JSON`
 (§8). That is how `pane.close` names the current pane without a picker. An entry
