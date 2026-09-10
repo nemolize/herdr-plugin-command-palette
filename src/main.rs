@@ -146,8 +146,6 @@ fn run() -> Result<(), String> {
     }
 }
 
-/// What a dispatch attempt leaves behind: nothing on success, and on failure
-/// the reopened palette plus the message it has to show.
 enum Dispatched {
     Ran,
     Failed(ui::Screen, String),
@@ -204,8 +202,6 @@ fn argv(outcome: Outcome) -> (String, Vec<String>) {
 mod tests {
     use super::*;
 
-    /// A catalog entry is spawned as written — anything inserted or dropped
-    /// here reaches herdr as a different command than the palette listed.
     #[test]
     fn a_command_is_spawned_with_the_argv_it_carries() {
         let (id, args) = argv(Outcome::Command {

@@ -19,13 +19,25 @@ pub struct Screen {
 }
 
 impl Screen {
+    /// Each failure undoes what it got through, because `Drop` restores the
+    /// terminal only once a `Screen` exists — a bare `?` after raw mode is on
+    /// would return leaving the pane raw with nothing left to reset it.
     pub fn enter() -> Result<Self, String> {
         enable_raw_mode().map_err(|e| e.to_string())?;
-        stdout()
-            .execute(EnterAlternateScreen)
-            .map_err(|e| e.to_string())?;
-        let terminal = Terminal::new(CrosstermBackend::new(stdout())).map_err(|e| e.to_string())?;
-        Ok(Screen { terminal })
+
+        if let Err(e) = stdout().execute(EnterAlternateScreen) {
+            let _ = disable_raw_mode();
+            return Err(e.to_string());
+        }
+
+        match Terminal::new(CrosstermBackend::new(stdout())) {
+            Ok(terminal) => Ok(Screen { terminal }),
+            Err(e) => {
+                let _ = stdout().execute(LeaveAlternateScreen);
+                let _ = disable_raw_mode();
+                Err(e.to_string())
+            }
+        }
     }
 
     pub fn draw(&mut self, app: &mut App) -> Result<(), String> {
@@ -120,10 +132,14 @@ fn render(f: &mut Frame, app: &mut App) {
         Stage::Targets { command, .. } => Some(command.title.clone()),
     };
 
-    // Given more than one line because a dispatch failure carries herdr's own
-    // message, which runs past the popup's 60 columns and loses its cause.
-    let status_height = match &app.status {
-        Some(msg) => wrapped_height(msg, f.area().width),
+    // Built before the layout because a dispatch failure carries herdr's own
+    // message, whose wrapped height is what the status row has to be given.
+    let status = app
+        .status
+        .as_ref()
+        .map(|msg| Paragraph::new(msg.clone()).wrap(Wrap { trim: false }).dim());
+    let status_height = match &status {
+        Some(p) => wrapped_height(p, f.area()),
         None => 1,
     };
 
@@ -155,11 +171,8 @@ fn render(f: &mut Frame, app: &mut App) {
         );
     }
 
-    match &app.status {
-        Some(msg) => f.render_widget(
-            Paragraph::new(msg.clone()).wrap(Wrap { trim: false }).dim(),
-            chunks[3],
-        ),
+    match status {
+        Some(p) => f.render_widget(p, chunks[3]),
         None => {
             let esc = match app.stage {
                 Stage::Commands => "esc to close",
@@ -174,14 +187,25 @@ fn render(f: &mut Frame, app: &mut App) {
     }
 }
 
-/// Lines a status message needs at this width, uncapped — the layout trims a
-/// `Length` larger than the pane, so a candidate row survives even a message
-/// asking for more lines than exist (`a_long_status_leaves_the_list_a_row`).
-fn wrapped_height(msg: &str, width: u16) -> u16 {
-    if width == 0 {
+/// Rows the status fills at this width, measured by rendering it into a scratch
+/// buffer as tall as the pane. Counting characters instead under-counts a
+/// message that word-wraps, and the row cut off is the one naming the cause;
+/// ratatui's own `line_count` is behind an unstable feature, so this asks the
+/// renderer the same question through the API that is stable.
+fn wrapped_height(status: &Paragraph, area: Rect) -> u16 {
+    if area.width == 0 || area.height == 0 {
         return 1;
     }
-    (msg.chars().count().div_ceil(width as usize) as u16).max(1)
+    let probe = Rect::new(0, 0, area.width, area.height);
+    let mut buffer = Buffer::empty(probe);
+    status.render(probe, &mut buffer);
+
+    let used = (0..probe.height)
+        .rev()
+        .find(|&y| (0..probe.width).any(|x| buffer[(x, y)].symbol().trim() != ""))
+        .map(|y| y + 1)
+        .unwrap_or(1);
+    used.max(1)
 }
 
 /// The counts on the left, the running version flush right. Herdr can hand the
@@ -373,6 +397,7 @@ mod render_tests {
     /// popup's width. Truncated to one line it loses the half naming the cause,
     /// which leaves the user where the silent failure did — knowing only that
     /// nothing happened.
+
     #[test]
     fn a_dispatch_failure_is_readable_in_full() {
         let message =
@@ -388,6 +413,29 @@ mod render_tests {
             .collect::<Vec<_>>()
             .join(" ");
         assert_eq!(shown, message, "{lines:#?}");
+    }
+
+    /// Word-wrapping breaks a line before a word rather than at the column, so
+    /// a message needs more rows than its length divided by the width. Counting
+    /// characters gave this one two rows where it wraps to three, and the row
+    /// lost was the one naming the cause.
+    #[test]
+    fn a_failure_that_word_wraps_is_not_cut_short() {
+        let message = "`pane.move.tab` failed: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+        let mut app = app_with(vec![command("pane.move.tab", "Move pane to tab", None)]);
+        app.status = Some(message.to_string());
+
+        let lines = draw(&mut app, 60, 12);
+        let shown: String = lines
+            .iter()
+            .map(|l| l.trim())
+            .filter(|l| !l.is_empty())
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert!(
+            shown.ends_with("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"),
+            "the wrapped tail was cut: {lines:#?}"
+        );
     }
 
     /// `wrapped_height` grows with the message and has no cap of its own, so
@@ -482,8 +530,6 @@ mod wiring_tests {
         })
     }
 
-    /// Types a string, then whatever keys follow, returning the first Step that
-    /// is not `Continue` — what the event loop in `main` would break on.
     fn press(app: &mut App, typed: &str, keys: &[KeyCode]) -> Option<Step> {
         let codes = typed.chars().map(KeyCode::Char).chain(keys.iter().copied());
         for code in codes {
@@ -555,10 +601,10 @@ mod wiring_tests {
         }
     }
 
-    /// An action's argv is assembled in `main` rather than carried on the
-    /// Outcome, so this asserts on the argv that assembly produces.
+    /// Stops at the Outcome because the argv is assembled in `main`, out of
+    /// this module's reach; `argv`'s own test there covers that half.
     #[test]
-    fn a_plugin_action_leaves_as_an_invoke_argv() {
+    fn a_plugin_action_leaves_with_the_ids_its_invoke_needs() {
         let action = PluginAction {
             plugin_id: "notes".into(),
             action_id: "capture".into(),
@@ -570,20 +616,14 @@ mod wiring_tests {
 
         match press(&mut app, "capture", &[KeyCode::Enter]) {
             Some(Step::Run(Outcome::Action {
+                id,
                 plugin_id,
                 action_id,
-                ..
-            })) => assert_eq!(
-                [
-                    "plugin".to_string(),
-                    "action".to_string(),
-                    "invoke".to_string(),
-                    "--plugin".to_string(),
-                    plugin_id,
-                    action_id
-                ],
-                ["plugin", "action", "invoke", "--plugin", "notes", "capture"]
-            ),
+            })) => {
+                assert_eq!(id, "notes.capture");
+                assert_eq!(plugin_id, "notes");
+                assert_eq!(action_id, "capture");
+            }
             other => panic!("the action did not run: {}", describe(&other)),
         }
     }
