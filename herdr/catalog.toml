@@ -36,11 +36,27 @@ checked_against = "0.8.2"
 # is up is the popup rather than the pane it was opened from.
 #
 # `contexts` uses the manifest's vocabulary: global | workspace | tab | pane.
+#
+# `binding` names the `[keys]` action in herdr's config.toml that performs the
+# same operation, so the palette can show the key reaching the entry without it.
+# The names are a separate vocabulary from the argv (`tab rename` is
+# `rename_tab`), so nothing derives this. It asserts the two do the SAME thing:
+# an entry whose counterpart is only approximate carries none, because a blank
+# key column costs a reminder while a wrong one teaches the wrong shortcut.
+#
+# The key itself is read from the running herdr — `herdr --default-config` for
+# the defaults, the user's config.toml for overrides — so a rebound key shows as
+# rebound and no default is copied here to drift.
 
 
 # ─── Panes: splitting ────────────────────────────────────────────────────────
 # `pane split --direction` accepts right and down only. There is no left or up,
 # so the palette offers the two that exist rather than four that read evenly.
+#
+# No `binding`: nothing in herdr's CLI, config template or docs says which of
+# right/down `split_vertical` and `split_horizontal` each produce, and both
+# readings are current in terminal multiplexers — so the pairing needs an
+# observation rather than a guess.
 
 [[command]]
 id = "pane.split.right"
@@ -63,27 +79,33 @@ id = "pane.focus.left"
 title = "Focus pane: left"
 args = ["pane", "focus", "--pane", "{pane}", "--direction", "left"]
 contexts = ["pane"]
+binding = "focus_pane_left"
 
 [[command]]
 id = "pane.focus.right"
 title = "Focus pane: right"
 args = ["pane", "focus", "--pane", "{pane}", "--direction", "right"]
 contexts = ["pane"]
+binding = "focus_pane_right"
 
 [[command]]
 id = "pane.focus.up"
 title = "Focus pane: up"
 args = ["pane", "focus", "--pane", "{pane}", "--direction", "up"]
 contexts = ["pane"]
+binding = "focus_pane_up"
 
 [[command]]
 id = "pane.focus.down"
 title = "Focus pane: down"
 args = ["pane", "focus", "--pane", "{pane}", "--direction", "down"]
 contexts = ["pane"]
+binding = "focus_pane_down"
 
 
 # ─── Panes: arranging ────────────────────────────────────────────────────────
+# Swap carries no `binding`: herdr's binary names `swap_pane_*` actions but its
+# config template documents no key for them, so there is none to teach.
 
 [[command]]
 id = "pane.zoom.toggle"
@@ -110,6 +132,7 @@ title = "Rename pane…"
 args = ["pane", "rename", "{pane}", "{text}"]
 prompt = "New pane name"
 contexts = ["pane"]
+binding = "rename_pane"
 
 # `pane close` takes its pane id positionally rather than behind --pane.
 [[command]]
@@ -117,6 +140,7 @@ id = "pane.close"
 title = "Close pane"
 args = ["pane", "close", "{pane}"]
 contexts = ["pane"]
+binding = "close_pane"
 
 # Moving a pane needs a destination the user picks. `--tab` is one of three
 # mutually exclusive destination forms, and the tab form additionally requires
@@ -142,6 +166,7 @@ id = "tab.create"
 title = "New tab"
 args = ["tab", "create", "--focus"]
 contexts = ["global", "workspace", "tab", "pane"]
+binding = "new_tab"
 
 [[command]]
 id = "tab.focus"
@@ -158,6 +183,7 @@ title = "Rename tab…"
 args = ["tab", "rename", "{tab}", "{text}"]
 prompt = "New tab name"
 contexts = ["tab", "pane"]
+binding = "rename_tab"
 
 [[command]]
 id = "tab.close"
@@ -174,6 +200,7 @@ id = "workspace.create"
 title = "New workspace"
 args = ["workspace", "create", "--focus"]
 contexts = ["global", "workspace", "tab", "pane"]
+binding = "new_workspace"
 
 [[command]]
 id = "workspace.focus"
@@ -188,6 +215,7 @@ title = "Rename workspace…"
 args = ["workspace", "rename", "{workspace}", "{text}"]
 prompt = "New workspace name"
 contexts = ["workspace", "tab", "pane"]
+binding = "rename_workspace"
 
 [[command]]
 id = "workspace.close"
@@ -207,3 +235,4 @@ id = "server.reload-config"
 title = "Reload config"
 args = ["server", "reload-config"]
 contexts = ["global", "workspace", "tab", "pane"]
+binding = "reload_config"

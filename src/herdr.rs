@@ -53,6 +53,20 @@ impl Herdr {
         text.split_whitespace().last().map(str::to_owned)
     }
 
+    /// The config template herdr ships, whose `[keys]` block carries every
+    /// action's default binding. Like `version`, it is plain text rather than
+    /// JSON and so does not go through `call`.
+    ///
+    /// None on any failure: a keys column the palette cannot fill is a column
+    /// it leaves empty, never a reason to refuse to open.
+    pub fn default_config(&self) -> Option<String> {
+        let out = Proc::new(&self.bin).arg("--default-config").output().ok()?;
+        if !out.status.success() {
+            return None;
+        }
+        String::from_utf8(out.stdout).ok()
+    }
+
     /// Runs a catalog entry. Surfaces a failure verbatim so a drifted entry
     /// reports itself the first time it is used rather than silently doing
     /// nothing (§4) — the caller names the command id alongside this.

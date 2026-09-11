@@ -6,6 +6,7 @@ mod context;
 mod frecency;
 mod fuzzy;
 mod herdr;
+mod keys;
 mod selection;
 mod ui;
 
@@ -73,12 +74,22 @@ fn run() -> Result<(), String> {
     // Defaulted rather than propagated because a palette of built-ins is still
     // a working palette (§4).
     let actions = herdr.plugin_actions().unwrap_or_default();
+    // Both halves default away because a palette that cannot name the
+    // shortcuts is still a working palette (§4).
+    let bindings = keys::resolve(
+        &herdr.default_config().unwrap_or_default(),
+        keys::config_path()
+            .and_then(|p| std::fs::read_to_string(p).ok())
+            .as_deref(),
+    );
+
     let (mut candidates, rejected) = assemble(
         catalog.commands,
         actions,
         &context,
         plugin_id.as_deref(),
         herdr::current_platform(),
+        &bindings,
     );
 
     if candidates.is_empty() {
@@ -189,6 +200,7 @@ fn assemble(
     context: &Context,
     own_plugin_id: Option<&str>,
     platform: &str,
+    bindings: &keys::Bindings,
 ) -> (Vec<Candidate>, Vec<(String, String)>) {
     let scope = context.scope();
     let mut rejected: Vec<(String, String)> = Vec::new();
@@ -205,7 +217,10 @@ fn assemble(
         .filter(|c| c.available_in(scope) && context.can_satisfy(&c.args))
         .map(|mut c| {
             c.args = context.substitute(&c.args);
-            Candidate::from_command(c)
+            let key = shown_key(bindings.for_action(c.binding.as_deref()));
+            let mut candidate = Candidate::from_command(c);
+            candidate.key = key;
+            candidate
         })
         .collect();
 
@@ -217,10 +232,27 @@ fn assemble(
             .filter(|a| Some(a.plugin_id.as_str()) != own_plugin_id)
             .filter(|a| a.runs_on(platform))
             .filter(|a| a.contexts.is_empty() || a.contexts.iter().any(|c| c == scope))
-            .map(Candidate::from_action),
+            .map(|a| {
+                let mut candidate = Candidate::from_action(a);
+                candidate.key = shown_key(bindings.for_plugin_action(&candidate.id));
+                candidate
+            }),
     );
 
     (candidates, rejected)
+}
+
+/// What the keys column shows for a lookup.
+///
+/// `Unbound` earns its own word because a blank column means "nothing here
+/// knows of a shortcut", and an action herdr ships bindable but unbound is a
+/// key the user could set — which is worth saying, and is not the same claim.
+fn shown_key(binding: keys::Binding<'_>) -> String {
+    match binding {
+        keys::Binding::Key(key) => key.to_string(),
+        keys::Binding::Unbound => "unbound".to_string(),
+        keys::Binding::Unknown => String::new(),
+    }
 }
 
 enum Dispatched {
@@ -287,7 +319,14 @@ mod tests {
             contexts: contexts.iter().map(|s| s.to_string()).collect(),
             resolve: None,
             prompt: None,
+            binding: None,
         }
+    }
+
+    /// Nothing bound anywhere — what the filter tests want, since a key column
+    /// is not what any of them are asserting on.
+    fn no_bindings() -> keys::Bindings {
+        keys::Bindings::default()
     }
 
     fn action(
@@ -330,6 +369,7 @@ mod tests {
             &in_a_pane(),
             Some("command-palette"),
             "linux",
+            &no_bindings(),
         );
         assert_eq!(ids(&candidates), ["notes.capture"]);
     }
@@ -344,6 +384,7 @@ mod tests {
             &in_a_pane(),
             None,
             "linux",
+            &no_bindings(),
         );
         assert_eq!(ids(&candidates), ["command-palette.open"]);
     }
@@ -374,6 +415,7 @@ mod tests {
             },
             Some("command-palette"),
             "linux",
+            &no_bindings(),
         );
         assert_eq!(ids(&candidates), ["pane.split", "other.offered"]);
     }
@@ -392,6 +434,7 @@ mod tests {
             &in_a_pane(),
             None,
             "linux",
+            &no_bindings(),
         );
         match &candidates[0].kind {
             app::Kind::Command(c) => {
@@ -399,6 +442,57 @@ mod tests {
             }
             _ => panic!("expected a catalog command"),
         }
+    }
+
+    /// Issue #52, both halves at once: a built-in reaches its key through the
+    /// `binding` it declares, a plugin action through the id it already has.
+    /// An entry declaring no counterpart stays blank rather than borrowing the
+    /// key of whichever entry happened to resolve before it.
+    #[test]
+    fn each_candidate_carries_the_key_that_also_reaches_it() {
+        let mut renames = command("tab.rename", &["tab", "rename"], &[]);
+        renames.binding = Some("rename_tab".into());
+
+        let (candidates, _) = assemble(
+            vec![renames, command("tab.create", &["tab", "create"], &[])],
+            vec![action("reviewr", "toggle", &[], &[])],
+            &in_a_pane(),
+            Some("command-palette"),
+            "linux",
+            &keys::resolve(
+                "[keys]\n# rename_tab = \"prefix+shift+t\"\n",
+                Some("[[keys.command]]\nkey = \"prefix+r\"\ntype = \"plugin_action\"\ncommand = \"reviewr.toggle\"\n"),
+            ),
+        );
+
+        let key = |id: &str| {
+            candidates
+                .iter()
+                .find(|c| c.id == id)
+                .map(|c| c.key.as_str())
+                .unwrap()
+        };
+        assert_eq!(key("tab.rename"), "prefix+shift+t");
+        assert_eq!(key("reviewr.toggle"), "prefix+r");
+        assert_eq!(key("tab.create"), "");
+    }
+
+    /// An action herdr ships bindable but unbound says so, because a blank
+    /// column already means "nothing knows of a shortcut for this".
+    #[test]
+    fn an_unbound_action_is_named_rather_than_left_blank() {
+        let mut entry = command("worktree.open", &["worktree", "open"], &[]);
+        entry.binding = Some("open_worktree".into());
+
+        let (candidates, _) = assemble(
+            vec![entry],
+            Vec::new(),
+            &in_a_pane(),
+            None,
+            "linux",
+            &keys::resolve("[keys]\n# open_worktree = \"\"\n", None),
+        );
+        assert_eq!(candidates[0].key, "unbound");
     }
 
     /// A herdr that cannot list actions leaves the built-ins, which is why the
@@ -411,6 +505,7 @@ mod tests {
             &in_a_pane(),
             Some("command-palette"),
             "linux",
+            &no_bindings(),
         );
         assert_eq!(ids(&candidates), ["tab.create"]);
     }

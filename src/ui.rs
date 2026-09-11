@@ -182,6 +182,7 @@ fn render(f: &mut Frame, app: &mut App) {
     // Owned rather than borrowed: the list borrows `app` immutably while
     // render_stateful_widget needs `app.selection.state` mutably.
     let rows: Vec<String> = app.rows().into_iter().map(str::to_owned).collect();
+    let keys: Vec<String> = app.row_keys().into_iter().map(str::to_owned).collect();
     let reason = app.selected_note().map(str::to_owned);
     if rows.is_empty() {
         f.render_widget(Paragraph::new("no matches").dim(), chunks[2]);
@@ -197,7 +198,11 @@ fn render(f: &mut Frame, app: &mut App) {
             }
         };
 
-        let items: Vec<ListItem> = rows.into_iter().map(ListItem::new).collect();
+        let items: Vec<ListItem> = rows
+            .iter()
+            .zip(keys.iter())
+            .map(|(title, key)| ListItem::new(row_line(title, key, list_area.width)))
+            .collect();
         f.render_stateful_widget(
             List::new(items).highlight_symbol("▶ "),
             list_area,
@@ -216,6 +221,41 @@ fn render(f: &mut Frame, app: &mut App) {
 
 /// Columns the `> ` prefix takes from the input line.
 const PROMPT_COLUMNS: u16 = 2;
+
+/// Columns the list's own `▶ ` highlight symbol takes from every row.
+const HIGHLIGHT_COLUMNS: u16 = 2;
+
+/// Blank columns between a title and the key flush right, so the two read as
+/// separate columns rather than one run-on string.
+const KEY_GAP: u16 = 2;
+
+/// One list row: the title, and the key dimmed flush right when it fits.
+///
+/// The key is dropped whole rather than clipped, the way §5's footer drops the
+/// version: a half-written chord is a chord that does not work, and a title the
+/// user cannot read costs more than a shortcut they are not yet looking for.
+fn row_line(title: &str, key: &str, width: u16) -> Line<'static> {
+    let title_span = Span::raw(title.to_string());
+    if key.is_empty() || width == 0 {
+        return Line::from(title_span);
+    }
+
+    // The highlight symbol indents every row, so the columns a row may use are
+    // fewer than the area's own width and a key sized against it would wrap.
+    let Some(room) = width.checked_sub(HIGHLIGHT_COLUMNS) else {
+        return Line::from(title_span);
+    };
+    let needed = drawn_width(title) + KEY_GAP + drawn_width(key);
+    let Some(gap) = room.checked_sub(needed).map(|slack| slack + KEY_GAP) else {
+        return Line::from(title_span);
+    };
+
+    Line::from(vec![
+        title_span,
+        Span::raw(" ".repeat(gap as usize)),
+        Span::raw(key.to_string()).dim(),
+    ])
+}
 
 /// Draws the typed name with a block cursor after it (docs/design.md §4).
 ///
@@ -359,12 +399,20 @@ mod render_tests {
             contexts: Vec::new(),
             resolve: resolve.map(str::to_string),
             prompt: None,
+            binding: None,
         }
     }
 
     fn app_with(commands: Vec<Command>) -> App {
         let candidates = commands.into_iter().map(Candidate::from_command).collect();
         App::new(candidates, Frecency::load(Path::new("/nonexistent")))
+    }
+
+    /// One entry carrying the key it is also reachable by.
+    fn app_with_key(title: &str, key: &str) -> App {
+        let mut candidate = Candidate::from_command(command("entry", title, None));
+        candidate.key = key.to_string();
+        App::new(vec![candidate], Frecency::load(Path::new("/nonexistent")))
     }
 
     /// Draws into the region Herdr hands the plugin and returns it as lines.
@@ -381,6 +429,83 @@ mod render_tests {
                     .to_string()
             })
             .collect()
+    }
+
+    /// Issue #52: the key is what the row teaches, and it is only legible flush
+    /// right, clear of a title whose length varies row to row.
+    #[test]
+    fn an_entrys_key_is_shown_flush_right_of_its_title() {
+        let mut app = app_with_key("New tab", "prefix+c");
+        let lines = draw(&mut app, 36, 8);
+        let row = lines.iter().find(|l| l.contains("New tab")).unwrap();
+        assert!(row.starts_with("▶ New tab"), "{lines:#?}");
+        assert!(row.ends_with("prefix+c"), "{lines:#?}");
+        assert_eq!(row.chars().count(), 36, "{row:?} in {lines:#?}");
+    }
+
+    /// An entry nothing binds gets no column at all — a blank one would still
+    /// pad the row and read as a key that failed to render.
+    #[test]
+    fn an_entry_with_no_key_is_drawn_as_the_title_alone() {
+        let mut app = app_with_key("New tab", "");
+        let lines = draw(&mut app, 36, 8);
+        let row = lines.iter().find(|l| l.contains("New tab")).unwrap();
+        assert_eq!(row, "▶ New tab", "{lines:#?}");
+
+        // The drawn row cannot tell padding from absence — a buffer trims its
+        // trailing blanks either way — so the line's own spans are the oracle.
+        assert_eq!(row_line("New tab", "", 36).spans.len(), 1);
+    }
+
+    /// §5's footer drops the version rather than truncate the counts, and the
+    /// key answers to the same rule: a half-drawn chord is not a chord, while
+    /// the title is what the user is searching by.
+    #[test]
+    fn a_row_too_narrow_for_both_drops_the_key_not_the_title() {
+        let mut app = app_with_key("Rename workspace…", "prefix+shift+w");
+        let lines = draw(&mut app, 24, 8);
+        let row = lines.iter().find(|l| l.contains("Rename")).unwrap();
+        assert!(!row.contains("prefix"), "key survived a clip: {lines:#?}");
+        assert!(row.starts_with("▶ Rename workspace…"), "{lines:#?}");
+    }
+
+    /// The key must clear the title by the full gap rather than abut it, or the
+    /// two read as one string at exactly the width where the row is fullest.
+    #[test]
+    fn a_key_that_only_just_fits_still_clears_the_title() {
+        let exact = HIGHLIGHT_COLUMNS + drawn_width("New tab") + KEY_GAP + drawn_width("prefix+c");
+
+        let mut app = app_with_key("New tab", "prefix+c");
+        let lines = draw(&mut app, exact, 8);
+        let row = lines.iter().find(|l| l.contains("New tab")).unwrap();
+        assert_eq!(row, "▶ New tab  prefix+c", "{lines:#?}");
+
+        let mut app = app_with_key("New tab", "prefix+c");
+        let lines = draw(&mut app, exact - 1, 8);
+        let row = lines.iter().find(|l| l.contains("New tab")).unwrap();
+        assert_eq!(row, "▶ New tab", "{lines:#?}");
+    }
+
+    /// A target has no shortcut of its own, so the stage that picks one must
+    /// not carry the keys of the command list it came from.
+    #[test]
+    fn the_targets_stage_shows_no_keys() {
+        let picked = command("focus.tab", "Focus tab…", Some("tabs"));
+        let mut candidate = Candidate::from_command(picked.clone());
+        candidate.key = "prefix+shift+t".to_string();
+        let mut app = App::new(vec![candidate], Frecency::load(Path::new("/nonexistent")));
+        app.enter_targets(
+            picked,
+            vec![Target {
+                id: "1".into(),
+                label: "editor".into(),
+            }],
+        );
+        let lines = draw(&mut app, 36, 8);
+        assert!(
+            !lines.iter().any(|l| l.contains("prefix")),
+            "a key reached the target list: {lines:#?}"
+        );
     }
 
     /// The regression #31 fixed: a bordered Block here landed inside Herdr's
@@ -813,6 +938,7 @@ mod wiring_tests {
             contexts: Vec::new(),
             resolve: resolve.map(str::to_string),
             prompt: None,
+            binding: None,
         }
     }
 

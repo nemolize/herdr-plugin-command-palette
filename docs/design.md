@@ -212,6 +212,9 @@ args = ["pane", "split", "--direction", "right"]
 contexts = ["pane"]
 ```
 
+An entry may also carry a `binding`, naming the `[keys]` action that performs
+the same operation so the palette can show its key (§10).
+
 The risk is honest and worth stating plainly: **this catalog drifts when Herdr
 changes its CLI.** Three mitigations:
 
@@ -652,9 +655,53 @@ it exists in the binary and shipped plugins use it, but a user reading the
 documented config will not find it. The README has to spell this out, because a
 palette nobody can bind is a palette nobody uses.
 
-A related gap: **no API reports the user's keybindings**, so the palette cannot
-display "this command is bound to prefix+s" beside an entry. Doing so would mean
-parsing `config.toml` directly, which is out of scope for the first version.
+### Showing each entry's own key (#52)
+
+**No API reports the user's keybindings** — the schema's only `keys` are
+`pane.send_keys` and `agent.send_keys` — so the palette reads the two files
+herdr itself reads, and shows the key dimmed flush right of each title.
+
+The defaults come from **`herdr --default-config`**, whose `[keys]` block lists
+every action commented out at its shipped value (`# rename_tab =
+"prefix+shift+t"`). Reading them from the running binary is what keeps a copy of
+herdr's defaults out of this repository, where it would be a second thing to
+re-check on every release. Being commented out, they are parsed line-wise: as
+TOML the block is empty.
+
+The user's own file overrides them, located the way herdr locates it —
+`HERDR_CONFIG_PATH`, else `$XDG_CONFIG_HOME/herdr/config.toml`, else
+`~/.config/herdr/config.toml` (verified against 0.9.0 on both legs). A cleared
+binding (`new_tab = ""`) reads as **unbound** rather than as the shipped key, and
+shows that word: blank already means "nothing here knows of a shortcut", and a
+key the user could set is a different thing to say.
+
+The two halves differ in how much can drift:
+
+- **Plugin actions** are `[[keys.command]]` blocks whose `command` is
+  `<plugin>.<action>` — already the id `Candidate::from_action` builds. No table
+  stands between them, so this half cannot drift. The `type = "plugin_action"`
+  check matters: shell/pane/popup blocks share the field, and a block running
+  `lazygit` would otherwise claim the key of a like-named action.
+- **Built-ins** are named `[keys]` actions whose vocabulary is not the catalog's
+  argv (`tab rename` is `rename_tab`), so each entry states its counterpart in a
+  `binding` key — the one new drift surface, and it lives in `catalog.toml`
+  beside the entry a correction would edit (§4). `every_binding_names_an_action_the_running_herdr_declares`
+  holds every one against the running herdr, because a `binding` naming an action
+  herdr does not have shows a blank column, which is also what a correct entry
+  with no counterpart looks like. It caught `swap_pane_*` — present in the
+  binary's symbols, absent from the documented `[keys]`, and so not a key to
+  teach.
+
+A `binding` asserts the two do the **same** thing, so an entry whose counterpart
+is only approximate carries none: `tab.close` picks a tab while `close_tab` acts
+on the current one. The splits carry none for a different reason — nothing in
+herdr's CLI, template or docs says which of right/down `split_vertical` and
+`split_horizontal` produce, and both readings are current in terminal
+multiplexers.
+
+Width follows §5's footer rule: the key is dropped whole rather than clipped,
+because a half-drawn chord is not a chord while the title is what the user
+searches by.
 
 ## 11. Distribution
 

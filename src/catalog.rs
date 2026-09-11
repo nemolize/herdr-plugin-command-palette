@@ -29,6 +29,12 @@ pub struct Command {
     /// `args`. Absent means the entry needs no typed argument.
     #[serde(default)]
     pub prompt: Option<String>,
+    /// The `[keys]` action name this entry runs the same operation as, so the
+    /// palette can show the key that reaches it without the palette. Herdr's
+    /// action names are a separate vocabulary from the argv, so nothing derives
+    /// this — it is stated here, beside the entry a correction would edit.
+    #[serde(default)]
+    pub binding: Option<String>,
 }
 
 impl Command {
@@ -207,6 +213,7 @@ mod tests {
             contexts: vec![],
             resolve: resolve.map(str::to_owned),
             prompt: prompt.map(str::to_owned),
+            binding: None,
         };
 
         let both = entry(
@@ -342,6 +349,37 @@ mod tests {
                 "{}: `{}` needs {needed} positional(s), supplies {supplied}",
                 e.id,
                 e.args.join(" ")
+            );
+        }
+    }
+
+    /// A `binding` naming an action herdr does not have shows no key at all,
+    /// and the miss is invisible — a blank column is also what an entry with no
+    /// counterpart looks like. Held against the names in the running herdr's
+    /// own template, so a renamed action fails here rather than going quiet.
+    ///
+    /// Skipped where no herdr is installed: CI has none, and a missing binary
+    /// is not evidence of a drifted catalog.
+    #[test]
+    fn every_binding_names_an_action_the_running_herdr_declares() {
+        let Some(defaults) = std::process::Command::new("herdr")
+            .arg("--default-config")
+            .output()
+            .ok()
+            .filter(|out| out.status.success())
+            .and_then(|out| String::from_utf8(out.stdout).ok())
+        else {
+            return;
+        };
+
+        let bindings = crate::keys::resolve(&defaults, None);
+        for e in shipped().commands.iter().filter(|e| e.binding.is_some()) {
+            assert_ne!(
+                bindings.for_action(e.binding.as_deref()),
+                crate::keys::Binding::Unknown,
+                "{}: `{}` is not a [keys] action in the running herdr",
+                e.id,
+                e.binding.as_deref().unwrap()
             );
         }
     }
