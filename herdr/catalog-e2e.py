@@ -240,18 +240,28 @@ def report_unknown_bindings(entries: list[dict], home: Path) -> list[tuple[str, 
     if not named:
         return []
 
+    # The verdict is an ABSENCE of warnings, which a crashed or reworded herdr
+    # produces too — so a name it cannot know must come back flagged.
+    sentinel = "zzz_not_a_herdr_action"
     config = home / "herdr" / "config.toml"
     config.parent.mkdir(parents=True, exist_ok=True)
     lines = "\n".join(f'{action} = "prefix+z"' for _, action in named)
-    config.write_text(f"onboarding = false\n[keys]\n{lines}\n")
+    config.write_text(f'onboarding = false\n[keys]\n{lines}\n{sentinel} = "prefix+z"\n')
 
     proc = herdr("config", "check", home=home, check=False)
     warned = proc.stdout + proc.stderr
-    return [
-        (entry_id, action)
-        for entry_id, action in named
-        if f"keys.{action};" in warned or f"keys.{action} " in warned
-    ]
+
+    def flagged(action: str) -> bool:
+        return f"keys.{action};" in warned or f"keys.{action} " in warned
+
+    if not flagged(sentinel):
+        raise RuntimeError(
+            "`herdr config check` did not flag the sentinel "
+            f"`{sentinel}`, so its silence proves nothing about the real "
+            f"bindings. Output was:\n{warned.strip() or '(nothing)'}"
+        )
+
+    return [(entry_id, action) for entry_id, action in named if flagged(action)]
 
 
 def main() -> int:
@@ -277,6 +287,9 @@ def main() -> int:
     bindings_home = Path(tempfile.mkdtemp(dir=FIXTURE_ROOT))
     try:
         unknown_bindings = report_unknown_bindings(entries, bindings_home)
+    except RuntimeError as e:
+        print(f"binding check could not run: {e}", file=sys.stderr)
+        return 1
     finally:
         shutil.rmtree(bindings_home, ignore_errors=True)
     for entry_id, action in unknown_bindings:
