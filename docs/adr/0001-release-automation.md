@@ -33,11 +33,12 @@ Three candidates were compared.
 | changesets | Adds a `.changeset/*.md` per pull request — new manual work, to remove manual work |
 
 The deciding argument against changesets is that it is a tool for deciding a
-**package's** version under SemVer, and nothing downstream reads this
-version as a contract in the way `pnpm add` reads one. `install.sh` resolves
-whatever the manifest names, and the plugin is not depended on by anything that
-pins a range. Where the major/minor/patch judgement carries no information,
-paying a per-PR file to make it deliberately is cost without return.
+**package's** version under SemVer, and nothing here consumes the version that
+way. `herdr/install.sh` reads it out of the manifest and interpolates it into a
+download URL — no parse, no range check — and no package manager resolves this
+plugin against a version range. Where the major/minor/patch judgement reaches
+nothing that acts on it, paying a per-PR file to make it deliberately is cost
+without return.
 
 release-please derives the same judgement from commit messages the repository
 already writes (`feat:`, `fix:`), so it costs nothing per pull request.
@@ -100,10 +101,12 @@ and the bypass is what remains available when it cannot be.
   invocation. Moving asset builds behind something that must be triggered as an
   event would bring back the constraint, and with it the credential decision 2
   avoided.
-- Commit messages are load-bearing. A release's version and changelog are both
-  derived from them, and `chore:` counts toward neither: a `feat:` written as
-  `chore:` opens no release PR on its own, and alongside a `fix:` it ships as a
-  patch with the feature missing from the changelog.
+- Commit messages are load-bearing, and the version and the changelog read them
+  by different rules. Anything neither breaking nor `feat:` bumps the patch, so
+  a `feat:` written as `chore:` costs the minor bump; but `chore:` writes no
+  changelog entry, and a release whose notes come out empty is skipped
+  altogether. Mislabel the only feature in a cycle and it ships as a patch
+  nobody can see, or does not ship at all.
 
 ## Provenance
 
