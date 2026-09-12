@@ -14,19 +14,19 @@ automatically, and a changelog written without hand-editing one.
 
 Two GitHub behaviours constrain every option:
 
-- A tag or pull request the default `GITHUB_TOKEN` writes **starts no workflow
-  run**. Whatever cuts the tag cannot, by that route alone, make the five
-  release assets build.
-- Workflow runs on a pull request that token opens are created in an
-  approval-required state. They exist, but sit behind a click.
+- A tag the default `GITHUB_TOKEN` pushes **starts no workflow run**. Whatever
+  cuts the tag cannot, by that route alone, make the five release assets build.
+- A pull request it opens is the documented exception, and only a partial one:
+  the runs are created, then held in an approval-required state. They exist, but
+  sit behind a click.
 
-The first of these is what most of the decision turns on.
+The first shapes decision 2, the second decision 3.
 
 ## Decision 1 — release-please over changesets
 
 Three candidates were compared.
 
-| Option | Rejected because |
+| Option | Outcome |
 |---|---|
 | Date-stamped tag from a `workflow_dispatch` button | Cuts a tag but writes no changelog, which was half the goal |
 | **release-please** | **Chosen** |
@@ -42,6 +42,12 @@ without return.
 
 release-please derives the same judgement from commit messages the repository
 already writes (`feat:`, `fix:`), so it costs nothing per pull request.
+
+The comparison came from a JavaScript repository (see Provenance), so the
+Rust-native tools — `release-plz`, `cargo-release`, `cargo-dist` — were never
+weighed against it. That is an open question rather than a closed one: nothing
+here rejects them, and the argument above (a version nothing resolves by range)
+would have to be re-made for whichever of them a proposal picks.
 
 ## Decision 2 — `workflow_call`, not a PAT and not a GitHub App
 
