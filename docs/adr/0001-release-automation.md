@@ -51,13 +51,16 @@ restriction above does not apply to it, and no second credential is needed.
 
 `banaris/website` faced the same restriction and resolved it with a GitHub App,
 after weighing a PAT (ties the release to one person's account and expires) and
-relaxing the branch ruleset (lowers what protects `main`). **That repository had
-no alternative**: its tag has to start `deploy.yml`, a separate workflow, and
-only a real event does that.
+relaxing the branch ruleset (lowers what protects `main`). What made the
+credential hard to avoid there is that its tag has to start a deployment, and a
+deployment triggered by an event cannot be reached by an invocation.
 
-Here the build is the same workflow's own job, so it can be called directly.
-The constraint that forced a credential there is absent, which is why this
-repository holds no App registration, no secret, and no expiry to renew.
+`Release` is a separate workflow file here too, but it was written to accept
+`workflow_call`, so `Release-Please` invokes it rather than waiting for an event
+that will not arrive. That is the axis the comparison turns on — not how many
+files there are, but whether the thing to be started is callable at all. Which
+is why this repository holds no App registration, no secret, and no expiry to
+renew.
 
 Rejected alongside: teaching `Release` to accept `repository_dispatch` (the same
 indirection, with the tag-manifest agreement harder to assert), and having
@@ -79,10 +82,12 @@ rejected:
 
 The click is treated as the release's own review step. A release PR is the one
 pull request nobody else reviews, so a deliberate human action before the assets
-build is not an imposition on the flow — it is the only one there is.
+build is not an imposition on the flow — it is the only one the flow has.
 
-The admin role can bypass the ruleset via pull request, which is how a release
-PR merges once its checks are green.
+The admin role can bypass the ruleset via pull request, which would let a
+release PR merge with its runs never approved. Decision 3 is the choice not to
+take that route routinely: approving the runs and merging on green is the flow,
+and the bypass is what remains available when it cannot be.
 
 ## Consequences
 
@@ -91,11 +96,14 @@ PR merges once its checks are green.
   proposing to remove it should be read against decision 3 first.
 - No credential exists to rotate, expire, or leak, and no organisation-level App
   registration is required to fork this configuration into another repository.
-- The `workflow_call` route only holds while the build lives in this repository.
-  Moving asset builds to a workflow that must be triggered as an event would
-  bring back the constraint, and with it the credential decision 2 avoided.
-- Commit messages are load-bearing. A release's version and changelog are
-  derived from them, so a `feat:` written as `chore:` silently ships as a patch.
+- The `workflow_call` route holds only while the build is reachable by
+  invocation. Moving asset builds behind something that must be triggered as an
+  event would bring back the constraint, and with it the credential decision 2
+  avoided.
+- Commit messages are load-bearing. A release's version and changelog are both
+  derived from them, and `chore:` counts toward neither: a `feat:` written as
+  `chore:` opens no release PR on its own, and alongside a `fix:` it ships as a
+  patch with the feature missing from the changelog.
 
 ## Provenance
 
