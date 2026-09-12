@@ -58,16 +58,20 @@ restriction above does not apply to it, and no second credential is needed.
 
 `banaris/website` faced the same restriction and resolved it with a GitHub App,
 after weighing a PAT (ties the release to one person's account and expires) and
-relaxing the branch ruleset (lowers what protects `main`). What made the
-credential hard to avoid there is that its tag has to start a deployment, and a
-deployment triggered by an event cannot be reached by an invocation.
+relaxing the branch ruleset (lowers what protects `main`). Its tag has to start a
+deployment in a separate workflow, which an invocation cannot reach — but that
+ruled out `workflow_call`, not a credential-free release. A `workflow_dispatch`
+at the tag makes `github.ref` read `refs/tags/…`, so the deployment's own
+ref-keyed expressions select production unchanged, and that repository now cuts
+releases on `GITHUB_TOKEN` too (`banaris/website#116`).
 
 `Release` is a separate workflow file here too, but it was written to accept
 `workflow_call`, so `Release-Please` invokes it rather than waiting for an event
-that will not arrive. That is the axis the comparison turns on — not how many
-files there are, but whether the thing to be started is callable at all. Which
-is why this repository holds no App registration, no secret, and no expiry to
-renew.
+that will not arrive. A callee that reads `github.ref` would need the dispatch
+form instead, since a called workflow reports the caller's ref; `Release` takes
+its tag as an input, which is what makes the cheaper form available here. Either
+way the credential is avoidable — which is why this repository holds no App
+registration, no secret, and no expiry to renew.
 
 Rejected alongside: teaching `Release` to accept `repository_dispatch` (the same
 indirection, with the tag-manifest agreement harder to assert), and having
@@ -105,8 +109,9 @@ and the bypass is what remains available when it cannot be.
   registration is required to fork this configuration into another repository.
 - The `workflow_call` route holds only while the build is reachable by
   invocation. Moving asset builds behind something that must be triggered as an
-  event would bring back the constraint, and with it the credential decision 2
-  avoided.
+  event costs the invocation, not the credential — `workflow_dispatch` at the
+  tag is the replacement, and it needs the callee to carry that trigger at the
+  ref being dispatched, which a tag cut before the trigger existed does not.
 - Commit messages are load-bearing, and the version and the changelog read them
   by different rules. Anything neither breaking nor `feat:` bumps the patch, so
   a `feat:` written as `chore:` costs the minor bump; but `chore:` writes no
@@ -120,3 +125,6 @@ Decision 1's option comparison and decision 2's credential weighing were worked
 through for `banaris/website` on 2026-08-26 and 2026-08-28, and are reused here
 rather than re-derived; the `workflow_call` route is this repository's own and
 its reasoning is recorded in `docs/ci.md` under "Cutting a release".
+
+Decision 2's account of that repository was corrected on 2026-09-12: it had read
+the App as unavoidable there, and the dispatch route removed it.
