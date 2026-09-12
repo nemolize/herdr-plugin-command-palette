@@ -64,17 +64,26 @@ reach them is added.
 
 ## The blocking model
 
-**Nothing blocks, by design.** There is no branch protection and no required
-check, so a red X reports without preventing a merge.
+**`Lint`, `Test` and `Build` block; `Audit` reports.** A ruleset on the default
+branch requires those three check runs and holds the merge until each is green.
+`Audit` is deliberately outside that set, so it reports without preventing a
+merge.
+
+The ruleset also requires a pull request, forbids deletion and non-fast-forward
+pushes, and asks for no approving review — a repository with one maintainer
+would otherwise block on a review nobody can give. It lets the admin role bypass
+via pull request, which is the release PR's escape hatch when the check runs sit
+unapproved (below) rather than a routine merge route.
 
 `continue-on-error` appears nowhere and should not be added: it turns the commit
 status green, which hides a failure rather than making it advisory.
 
 The intended reading of a red `Lint`, `Test` or `Build` is *the diff broke
-something* — each fails only for a reason present in the change. `Audit` is kept
-in its own workflow precisely so it cannot dilute that: it is the one job that
-can fail for reasons outside the diff, and if a required-check ruleset is ever
-added, the three CI jobs can be required and `Audit` left out.
+something* — each fails only for a reason present in the change, which is what
+makes them safe to require. `Audit` is kept in its own workflow precisely so it
+cannot dilute that: it is the one job that can fail for reasons outside the diff,
+so requiring it would block a merge on an advisory published against an unchanged
+lockfile.
 
 On a scheduled failure `Audit` opens (or comments on) an issue, because a red
 cron run on a repo with one maintainer otherwise reaches nobody. That step is not
