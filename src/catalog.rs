@@ -29,6 +29,12 @@ pub struct Command {
     /// `args`. Absent means the entry needs no typed argument.
     #[serde(default)]
     pub prompt: Option<String>,
+    /// The `[keys]` action name this entry runs the same operation as, so the
+    /// palette can show the key that reaches it without the palette. Herdr's
+    /// action names are a separate vocabulary from the argv, so nothing derives
+    /// this — it is stated here, beside the entry a correction would edit.
+    #[serde(default)]
+    pub binding: Option<String>,
 }
 
 impl Command {
@@ -207,6 +213,7 @@ mod tests {
             contexts: vec![],
             resolve: resolve.map(str::to_owned),
             prompt: prompt.map(str::to_owned),
+            binding: None,
         };
 
         let both = entry(
@@ -342,6 +349,27 @@ mod tests {
                 "{}: `{}` needs {needed} positional(s), supplies {supplied}",
                 e.id,
                 e.args.join(" ")
+            );
+        }
+    }
+
+    /// A `binding` is checked against a real herdr by `herdr/catalog-e2e.py`,
+    /// not here: this test binary runs in a CI job with no herdr, so the check
+    /// would pass by skipping — indistinguishable from having run. The shape
+    /// this file CAN hold is that the name is well-formed.
+    #[test]
+    fn every_binding_is_a_plausible_action_name() {
+        for e in shipped().commands.iter() {
+            let Some(binding) = e.binding.as_deref() else {
+                continue;
+            };
+            assert!(
+                !binding.is_empty()
+                    && binding
+                        .chars()
+                        .all(|c| c.is_ascii_lowercase() || c == '_' || c.is_ascii_digit()),
+                "{}: `{binding}` is not a [keys] action name",
+                e.id
             );
         }
     }

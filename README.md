@@ -131,6 +131,8 @@ what correcting a catalog means. Start from
   opens seeded with the current name of what the entry acts on. The text becomes
   a single argument, so a name with spaces is not split.
 - `contexts` limits where the entry is offered.
+- `binding` names the `[keys]` action in **your** `config.toml` that does the
+  same thing, so the palette can show the key beside the entry (see below).
 
 Popup size and placement live in the manifest (`herdr-plugin.toml`), not here —
 `herdr plugin pane open` has no `--width` / `--height` flags, so the action hop
@@ -138,6 +140,42 @@ cannot pass a size. The shipped values are 60 columns by 45% of the rows, sized
 against the **keyboard-up** state: on a phone, raising the keyboard is what using
 the palette means, and sizing against the idle state loses about a third of the
 box exactly when it matters.
+
+## Each entry shows the key that reaches it
+
+An entry you can also reach by a keybinding shows that key, dimmed, to the right
+of its title — so using the palette is also how you learn the shortcut that makes
+it unnecessary.
+
+```
+▶ Split pane: right                                 prefix+v
+  Split pane: down                              prefix+minus
+  Focus pane: left                                  prefix+h
+  Zoom pane: toggle                                 prefix+z
+  Swap pane: left
+  Rename pane…                                prefix+shift+p
+  Move pane to tab…
+27/27 · esc to close                                  v0.2.0
+```
+
+The key shown is **your** key. Herdr's shipped defaults come from
+`herdr --default-config`, and anything you set in `config.toml` overrides them —
+a plain string or a list, of which the first is shown — so a rebound action shows
+what you bound it to. An action you deliberately cleared (`new_tab = ""`) reads
+`unbound`, which is a different thing from the blank shown when nothing claims to
+know of a shortcut at all.
+
+Your own plugin actions need no setup: a `[[keys.command]]` block with
+`type = "plugin_action"` is matched by its `command`, which is already the id the
+palette uses. Built-ins need the `binding` key above, because Herdr's action
+names are a separate vocabulary from the argv the catalog runs — `tab rename` is
+`rename_tab`.
+
+A blank key means one of two things, both deliberate. Some entries are not the
+same command as any bound action — `Close tab…` picks a tab while Herdr's
+`close_tab` closes the current one — so claiming its key would be a lie. Others
+name an action Herdr binds but does not list in `herdr --default-config`
+(`Swap pane: …`); set one yourself and it appears.
 
 ## The catalog drifts, and says so when it does
 

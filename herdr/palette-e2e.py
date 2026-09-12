@@ -49,6 +49,7 @@ READY_MARKER = "esc to close"
 
 STUB = """#!/bin/sh
 if [ "$1" = "--version" ]; then echo "herdr 0.8.2"; exit 0; fi
+if [ "$1" = "--default-config" ]; then exit 0; fi
 if [ "$1" = "plugin" ]; then echo '{"result":{"actions":[]}}'; exit 0; fi
 echo "$@" >> "$HERDR_STUB_LOG"
 %s

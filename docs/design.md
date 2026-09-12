@@ -212,6 +212,9 @@ args = ["pane", "split", "--direction", "right"]
 contexts = ["pane"]
 ```
 
+An entry may also carry a `binding`, naming the `[keys]` action that performs
+the same operation so the palette can show its key (§10).
+
 The risk is honest and worth stating plainly: **this catalog drifts when Herdr
 changes its CLI.** Three mitigations:
 
@@ -652,9 +655,71 @@ it exists in the binary and shipped plugins use it, but a user reading the
 documented config will not find it. The README has to spell this out, because a
 palette nobody can bind is a palette nobody uses.
 
-A related gap: **no API reports the user's keybindings**, so the palette cannot
-display "this command is bound to prefix+s" beside an entry. Doing so would mean
-parsing `config.toml` directly, which is out of scope for the first version.
+### Showing each entry's own key (#52)
+
+**No API reports the user's keybindings** — the schema's only `keys` are
+`pane.send_keys` and `agent.send_keys` — so the palette reads the two files
+herdr itself reads, and shows the key dimmed flush right of each title.
+
+The defaults come from **`herdr --default-config`**, whose `[keys]` block lists
+every action commented out at its shipped value (`# rename_tab =
+"prefix+shift+t"`). Reading them from the running binary is what keeps a copy of
+herdr's defaults out of this repository, where it would be a second thing to
+re-check on every release. Being commented out, they are parsed line-wise: as
+TOML the block is empty — and the same is true of the block's *headers*, so the
+scan ends `[keys]` on a commented `# [[keys.command]]` too. Testing the bare `[`
+alone leaves the block open and lands that example's `command = "lazygit"` as an
+action; measured on 0.9.0, eight non-actions were admitted that way.
+
+**The template under-reports.** It omits `swap_pane_*`, which herdr does bind by
+default (`prefix+shift+h/j/k/l` per its keyboard doc), so absence from the
+template is not evidence that an action has no key — only that this file cannot
+show it. Those entries carry their `binding` regardless, so a user's own
+override still displays.
+
+The user's own file overrides them, located the way herdr locates it —
+`HERDR_CONFIG_PATH`, else `$XDG_CONFIG_HOME/herdr/config.toml`, else
+`~/.config/herdr/config.toml` (verified against 0.9.0 on both legs). A variable
+that is *set but empty* reads as unset, because herdr treats it that way;
+honouring it would drop the user's whole config while the built-in defaults kept
+rendering, which is a loss nothing on screen would show.
+
+A binding may be a list as well as a string — `new_tab = ["prefix+c",
+"ctrl+alt+c"]` binds both — and the first element is the one shown. Keeping only
+the string form would display the shipped default beside a key the user had
+replaced, which is the wrong-shortcut outcome §4 warns about. A cleared binding
+(`new_tab = ""`, or an empty list) reads as **unbound** and shows that word,
+which a blank column does not say.
+
+The two halves differ in how much can drift:
+
+- **Plugin actions** are `[[keys.command]]` blocks whose `command` is
+  `<plugin>.<action>` — already the id `Candidate::from_action` builds. No table
+  stands between them, so this half cannot drift. The `type = "plugin_action"`
+  check matters: shell/pane/popup blocks share the field, and a block running
+  `lazygit` would otherwise claim the key of a like-named action.
+- **Built-ins** are named `[keys]` actions whose vocabulary is not the catalog's
+  argv (`tab rename` is `rename_tab`), so each entry states its counterpart in a
+  `binding` key — the one new drift surface, and it lives in `catalog.toml`
+  beside the entry a correction would edit (§4).
+
+A wrong `binding` is invisible: it shows a blank key column, which is also what a
+correct entry with no counterpart shows. So `herdr/catalog-e2e.py` checks every
+one against a real herdr, writing them all into one config and reading back
+`herdr config check`'s warnings. That is herdr's own verdict rather than the
+template's, which matters because the template under-reports (above). It lives
+there and not in `cargo test` because the CI job running the unit tests installs
+no herdr — a check that skips passes, and a pass that skipped is indistinguishable
+from one that ran.
+
+A `binding` asserts the two do the **same** thing, so an entry whose counterpart
+is only approximate carries none: `tab.close` picks a tab while `close_tab` acts
+on the current one, and `new_tab` asks for a name first (`prompt_new_tab_name`
+defaults to true) where `tab create --focus` does not.
+
+Width follows §5's footer rule: the key is dropped whole rather than clipped,
+because a half-drawn chord is not a chord while the title is what the user
+searches by.
 
 ## 11. Distribution
 

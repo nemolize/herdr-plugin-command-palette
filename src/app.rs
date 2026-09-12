@@ -20,6 +20,10 @@ pub struct Candidate {
     pub id: String,
     pub title: String,
     pub kind: Kind,
+    /// The key this entry is also reachable by, empty when none is known. Held
+    /// beside the title rather than inside it because the two are laid out in
+    /// separate columns and the title alone is what the filter matches.
+    pub key: String,
 }
 
 impl Candidate {
@@ -28,6 +32,7 @@ impl Candidate {
             id: c.id.clone(),
             title: c.title.clone(),
             kind: Kind::Command(c),
+            key: String::new(),
         }
     }
 
@@ -36,6 +41,7 @@ impl Candidate {
             id: format!("{}.{}", a.plugin_id, a.action_id),
             title: a.title.clone(),
             kind: Kind::Action(a),
+            key: String::new(),
         }
     }
 
@@ -46,6 +52,7 @@ impl Candidate {
             id: id.to_string(),
             title: format!("skipped `{id}`"),
             kind: Kind::Note(why.to_string()),
+            key: String::new(),
         }
     }
 }
@@ -154,6 +161,20 @@ impl App {
             .visible()
             .iter()
             .map(|&i| self.row_title(i))
+            .collect()
+    }
+
+    /// The key beside each visible row, aligned with `rows`. Empty for a row
+    /// with none, and for every row of a stage that is picking an argument
+    /// rather than a command — a target has no shortcut of its own.
+    pub fn row_keys(&self) -> Vec<&str> {
+        self.selection
+            .visible()
+            .iter()
+            .map(|&i| match &self.stage {
+                Stage::Commands => self.candidates[i].key.as_str(),
+                _ => "",
+            })
             .collect()
     }
 
@@ -376,6 +397,7 @@ mod tests {
             contexts: vec![],
             resolve: resolve.map(str::to_owned),
             prompt: None,
+            binding: None,
         }
     }
 

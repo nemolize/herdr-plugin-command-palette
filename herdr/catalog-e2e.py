@@ -225,6 +225,45 @@ def report_broken(broken: list[tuple[str, str]]) -> None:
         print(file=sys.stderr)
 
 
+def report_unknown_bindings(entries: list[dict], home: Path) -> list[tuple[str, str]]:
+    """Every `binding` herdr does not recognise as a `[keys]` action.
+
+    The oracle is `herdr config check` rather than `--default-config`, because
+    the template under-reports: it omits `swap_pane_*`, which herdr binds by
+    default, so a template-based check calls a working action unknown. Writing
+    every binding into one config and reading the warnings asks herdr itself.
+
+    A wrong `binding` is otherwise invisible — it shows a blank key column,
+    which is also what a correct entry with no counterpart shows.
+    """
+    named = [(e["id"], e["binding"]) for e in entries if e.get("binding")]
+    if not named:
+        return []
+
+    # The verdict is an ABSENCE of warnings, which a crashed or reworded herdr
+    # produces too — so a name it cannot know must come back flagged.
+    sentinel = "zzz_not_a_herdr_action"
+    config = home / "herdr" / "config.toml"
+    config.parent.mkdir(parents=True, exist_ok=True)
+    lines = "\n".join(f'{action} = "prefix+z"' for _, action in named)
+    config.write_text(f'onboarding = false\n[keys]\n{lines}\n{sentinel} = "prefix+z"\n')
+
+    proc = herdr("config", "check", home=home, check=False)
+    warned = proc.stdout + proc.stderr
+
+    def flagged(action: str) -> bool:
+        return f"keys.{action};" in warned or f"keys.{action} " in warned
+
+    if not flagged(sentinel):
+        raise RuntimeError(
+            "`herdr config check` did not flag the sentinel "
+            f"`{sentinel}`, so its silence proves nothing about the real "
+            f"bindings. Output was:\n{warned.strip() or '(nothing)'}"
+        )
+
+    return [(entry_id, action) for entry_id, action in named if flagged(action)]
+
+
 def main() -> int:
     if HERDR is None:
         print(
@@ -244,6 +283,17 @@ def main() -> int:
     FIXTURE_ROOT.mkdir(parents=True, exist_ok=True)
     rejected: list[tuple[str, list[str], int, str]] = []
     broken: list[tuple[str, str]] = []
+
+    bindings_home = Path(tempfile.mkdtemp(dir=FIXTURE_ROOT))
+    try:
+        unknown_bindings = report_unknown_bindings(entries, bindings_home)
+    except RuntimeError as e:
+        print(f"binding check could not run: {e}", file=sys.stderr)
+        return 1
+    finally:
+        shutil.rmtree(bindings_home, ignore_errors=True)
+    for entry_id, action in unknown_bindings:
+        print(f"FAIL {entry_id}: binding `{action}`", file=sys.stderr)
 
     for entry in entries:
         home = Path(tempfile.mkdtemp(dir=FIXTURE_ROOT))
@@ -276,7 +326,15 @@ def main() -> int:
         report_rejected(rejected)
     if broken:
         report_broken(broken)
-    if rejected or broken:
+    if unknown_bindings:
+        print(
+            f"\n{len(unknown_bindings)} catalog `binding` value(s) herdr does not "
+            "know as a [keys] action — each shows a blank key column:\n",
+            file=sys.stderr,
+        )
+        for entry_id, action in unknown_bindings:
+            print(f"  {entry_id}: binding = \"{action}\"", file=sys.stderr)
+    if rejected or broken or unknown_bindings:
         return 1
 
     print(
