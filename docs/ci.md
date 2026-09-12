@@ -143,6 +143,10 @@ same standard.
 
 ## Cutting a release
 
+Why release-please rather than changesets, and why no PAT or GitHub App is
+involved, is recorded in `docs/adr/0001-release-automation.md` along with what
+was rejected — read it before proposing a credential or a relaxed ruleset here.
+
 Merging the release PR release-please keeps open cuts the release: it writes the
 version into `Cargo.toml`, `Cargo.lock` and `herdr-plugin.toml`, then opens a
 **draft** GitHub Release on the merge commit. `Release-Please` calls `Release`
