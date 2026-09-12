@@ -4,13 +4,12 @@
 //! actions under `[keys]`; plugin actions are `[[keys.command]]` blocks whose
 //! `command` is already the palette's own candidate id.
 use std::collections::HashMap;
+use std::ffi::OsString;
 use std::path::PathBuf;
 
 use serde::Deserialize;
 
-/// What a lookup found, kept apart from "" because the two want different
-/// words: an action herdr ships unbound has no shortcut to teach, while one
-/// the user cleared is a binding they removed.
+/// What a lookup found.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Binding<'a> {
     /// The key to show.
@@ -88,14 +87,35 @@ struct CommandKey {
 /// keys column simply stays empty rather than the palette reporting a file the
 /// user never asked it to read.
 pub fn config_path() -> Option<PathBuf> {
-    if let Some(path) = std::env::var_os("HERDR_CONFIG_PATH") {
+    resolve_path(
+        non_empty("HERDR_CONFIG_PATH"),
+        non_empty("XDG_CONFIG_HOME"),
+        non_empty("HOME"),
+    )
+}
+
+/// The chain itself, taking its three inputs rather than reading the
+/// environment, so the precedence is testable without a process-wide mutation
+/// that races every other test in the binary.
+fn resolve_path(
+    explicit: Option<OsString>,
+    xdg: Option<OsString>,
+    home: Option<OsString>,
+) -> Option<PathBuf> {
+    if let Some(path) = explicit {
         return Some(PathBuf::from(path));
     }
-    let dir = match std::env::var_os("XDG_CONFIG_HOME") {
+    let dir = match xdg {
         Some(xdg) => PathBuf::from(xdg),
-        None => PathBuf::from(std::env::var_os("HOME")?).join(".config"),
+        None => PathBuf::from(home?).join(".config"),
     };
     Some(dir.join("herdr").join("config.toml"))
+}
+
+/// A set-but-empty variable reads as unset, because herdr treats it that way —
+/// honouring it would drop the user's config while the defaults still render.
+fn non_empty(key: &str) -> Option<OsString> {
+    std::env::var_os(key).filter(|v| !v.is_empty())
 }
 
 /// Resolves the defaults herdr ships against the user's own overrides.
@@ -118,10 +138,8 @@ pub fn resolve(defaults: &str, user: Option<&str>) -> Bindings {
             };
         };
         for (action, value) in config.keys.actions {
-            // A non-string is a subtable (`[keys.indexed]`), which would reach
-            // the display as a TOML fragment printed beside a title.
-            if let Some(key) = value.as_str() {
-                actions.insert(action, key.to_string());
+            if let Some(key) = binding_key(&value) {
+                actions.insert(action, key);
             }
         }
         for block in config.keys.command {
@@ -137,6 +155,26 @@ pub fn resolve(defaults: &str, user: Option<&str>) -> Bindings {
     }
 }
 
+/// The chord to show for one `[keys]` value, or None when the value binds no
+/// key at all.
+///
+/// Herdr accepts a bare string and a list — `new_tab = ["prefix+c",
+/// "ctrl+alt+c"]` binds both, so the first element is the one to teach. A
+/// non-string, non-list value is a subtable (`[keys.indexed]`), which would
+/// otherwise reach the display as a TOML fragment beside a title.
+fn binding_key(value: &toml::Value) -> Option<String> {
+    match value {
+        toml::Value::String(key) => Some(key.clone()),
+        toml::Value::Array(keys) => match keys.first() {
+            // An empty list is how a list-form binding is cleared, and clearing
+            // is what `Unbound` reports — so it maps to "" like `key = ""`.
+            None => Some(String::new()),
+            Some(first) => first.as_str().map(str::to_owned),
+        },
+        _ => None,
+    }
+}
+
 /// The `action = "key"` pairs from the `[keys]` block of a default config.
 ///
 /// Parsed line-wise rather than as TOML because every pair is commented out —
@@ -147,19 +185,18 @@ fn default_actions(defaults: &str) -> HashMap<String, String> {
 
     for line in defaults.lines() {
         let trimmed = line.trim();
-        // `[[keys.command]]` is an example binding rather than a default, so
-        // any header ends the block — not only one leaving `[keys]` entirely.
-        if trimmed.starts_with('[') {
-            in_keys = trimmed == "[keys]";
+        // A header is commented too (`# [[keys.command]]`), so testing the bare
+        // `[` never closes the block and `command = "lazygit"` lands as action.
+        let commented = trimmed.strip_prefix("# ");
+        let body = commented.unwrap_or(trimmed);
+        if body.starts_with('[') {
+            in_keys = body == "[keys]";
             continue;
         }
-        if !in_keys {
-            continue;
-        }
-        let Some(body) = trimmed.strip_prefix("# ") else {
-            continue;
-        };
-        let Some((name, rest)) = body.split_once(" = ") else {
+        let Some((name, rest)) = commented
+            .filter(|_| in_keys)
+            .and_then(|c| c.split_once(" = "))
+        else {
             continue;
         };
         // Prose wrapped in the comment block reaches here too, and a sentence
@@ -209,6 +246,10 @@ mod tests {
 # [[keys.command]]
 # key = "prefix+alt+g"
 # command = "lazygit"
+# width = "80%"
+
+# [keys.indexed]
+# tabs = ""
 
 [server]
 # headless_cols = 120
@@ -341,5 +382,80 @@ tabs = "ctrl"
     fn no_defaults_at_all_leaves_every_action_unknown() {
         let b = resolve("", None);
         assert_eq!(b.for_action(Some("new_tab")), Binding::Unknown);
+    }
+
+    /// Mirrors herdr's own lookup, which is what makes the displayed key the
+    /// one that fires.
+    #[test]
+    fn the_config_path_chain_prefers_explicit_then_xdg_then_home() {
+        let own = |s: &str| Some(std::ffi::OsString::from(s));
+        assert_eq!(
+            super::resolve_path(own("/tmp/x.toml"), own("/xdg"), own("/home")),
+            Some(std::path::PathBuf::from("/tmp/x.toml"))
+        );
+        assert_eq!(
+            super::resolve_path(None, own("/xdg"), own("/home")),
+            Some(std::path::PathBuf::from("/xdg/herdr/config.toml"))
+        );
+        assert_eq!(
+            super::resolve_path(None, None, own("/home")),
+            Some(std::path::PathBuf::from("/home/.config/herdr/config.toml"))
+        );
+        assert_eq!(super::resolve_path(None, None, None), None);
+    }
+
+    /// Measured: with either variable set to "", every plugin-action key and
+    /// user override vanished while the built-in defaults still rendered — so
+    /// the loss was invisible. Herdr itself falls back in that case.
+    #[test]
+    fn a_set_but_empty_variable_reads_as_unset() {
+        let key = "HERDR_PALETTE_EMPTY_VAR_PROBE";
+        // SAFETY: a name no other test uses, so the process-wide write races
+        // nothing; `remove_var` restores the environment either way.
+        unsafe { std::env::set_var(key, "") };
+        let empty = super::non_empty(key);
+        unsafe { std::env::set_var(key, "/real") };
+        let set = super::non_empty(key);
+        unsafe { std::env::remove_var(key) };
+
+        assert_eq!(empty, None, "an empty value must not name a path");
+        assert_eq!(set, Some(std::ffi::OsString::from("/real")));
+    }
+
+    /// The template's own example blocks are commented, so a scan that ends the
+    /// block on a bare `[` never leaves `[keys]` — and `command = "lazygit"`
+    /// becomes an action. Measured on 0.9.0: 8 non-actions were admitted.
+    #[test]
+    fn a_commented_example_block_contributes_no_actions() {
+        let b = resolve(DEFAULTS, None);
+        for leaked in ["command", "key", "type", "width", "height", "tabs"] {
+            assert_eq!(
+                b.for_action(Some(leaked)),
+                Binding::Unknown,
+                "`{leaked}` leaked out of a commented example block"
+            );
+        }
+    }
+
+    /// Herdr binds a list as well as a string, and the palette teaching the
+    /// shipped default while the user's own list-form key is what fires is the
+    /// wrong-shortcut outcome the catalog warns about.
+    #[test]
+    fn a_list_binding_shows_its_first_key() {
+        let user = r#"
+[keys]
+new_tab = ["ctrl+alt+t", "prefix+c"]
+"#;
+        let b = resolve(DEFAULTS, Some(user));
+        assert_eq!(b.for_action(Some("new_tab")), Binding::Key("ctrl+alt+t"));
+    }
+
+    /// An empty list is how a list-form binding is cleared, so it reports what
+    /// `key = ""` reports rather than falling back to the shipped default.
+    #[test]
+    fn an_empty_list_binding_is_unbound() {
+        let user = "\n[keys]\nnew_tab = []\n";
+        let b = resolve(DEFAULTS, Some(user));
+        assert_eq!(b.for_action(Some("new_tab")), Binding::Unbound);
     }
 }

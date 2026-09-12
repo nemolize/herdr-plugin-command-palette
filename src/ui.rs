@@ -299,7 +299,10 @@ fn render_input(f: &mut Frame, text: &str, area: Rect) {
 /// `Line::width` is NOT this number — it reports 1 for `ｶ\u{FF9E}`, which the
 /// buffer lays out in 2. Summing scalars is wrong too, in both directions.
 fn drawn_width(text: &str) -> u16 {
+    // Dropped rather than measured because `CellWidth` panics on one in a debug
+    // build, and a catalog title is user-written (`render_input` does the same).
     text.graphemes(true)
+        .filter(|cluster| !cluster.chars().any(char::is_control))
         .map(|cluster| cluster.cell_width())
         .sum()
 }
@@ -467,6 +470,15 @@ mod render_tests {
         let row = lines.iter().find(|l| l.contains("Rename")).unwrap();
         assert!(!row.contains("prefix"), "key survived a clip: {lines:#?}");
         assert!(row.starts_with("▶ Rename workspace…"), "{lines:#?}");
+    }
+
+    /// A catalog is user-editable and a plugin's title is another author's, so
+    /// a control char reaches this measurement — where `CellWidth` panics in a
+    /// debug build. `render_input` filters them for the same reason.
+    #[test]
+    fn a_control_char_in_a_title_is_measured_rather_than_panicking() {
+        let line = row_line("New\ttab", "prefix+c", 36);
+        assert!(!line.spans.is_empty());
     }
 
     /// The key must clear the title by the full gap rather than abut it, or the

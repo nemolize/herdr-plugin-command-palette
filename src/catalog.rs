@@ -353,33 +353,23 @@ mod tests {
         }
     }
 
-    /// A `binding` naming an action herdr does not have shows no key at all,
-    /// and the miss is invisible — a blank column is also what an entry with no
-    /// counterpart looks like. Held against the names in the running herdr's
-    /// own template, so a renamed action fails here rather than going quiet.
-    ///
-    /// Skipped where no herdr is installed: CI has none, and a missing binary
-    /// is not evidence of a drifted catalog.
+    /// A `binding` is checked against a real herdr by `herdr/catalog-e2e.py`,
+    /// not here: this test binary runs in a CI job with no herdr, so the check
+    /// would pass by skipping — indistinguishable from having run. The shape
+    /// this file CAN hold is that the name is well-formed.
     #[test]
-    fn every_binding_names_an_action_the_running_herdr_declares() {
-        let Some(defaults) = std::process::Command::new("herdr")
-            .arg("--default-config")
-            .output()
-            .ok()
-            .filter(|out| out.status.success())
-            .and_then(|out| String::from_utf8(out.stdout).ok())
-        else {
-            return;
-        };
-
-        let bindings = crate::keys::resolve(&defaults, None);
-        for e in shipped().commands.iter().filter(|e| e.binding.is_some()) {
-            assert_ne!(
-                bindings.for_action(e.binding.as_deref()),
-                crate::keys::Binding::Unknown,
-                "{}: `{}` is not a [keys] action in the running herdr",
-                e.id,
-                e.binding.as_deref().unwrap()
+    fn every_binding_is_a_plausible_action_name() {
+        for e in shipped().commands.iter() {
+            let Some(binding) = e.binding.as_deref() else {
+                continue;
+            };
+            assert!(
+                !binding.is_empty()
+                    && binding
+                        .chars()
+                        .all(|c| c.is_ascii_lowercase() || c == '_' || c.is_ascii_digit()),
+                "{}: `{binding}` is not a [keys] action name",
+                e.id
             );
         }
     }

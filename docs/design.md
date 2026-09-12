@@ -666,14 +666,30 @@ every action commented out at its shipped value (`# rename_tab =
 "prefix+shift+t"`). Reading them from the running binary is what keeps a copy of
 herdr's defaults out of this repository, where it would be a second thing to
 re-check on every release. Being commented out, they are parsed line-wise: as
-TOML the block is empty.
+TOML the block is empty — and the same is true of the block's *headers*, so the
+scan ends `[keys]` on a commented `# [[keys.command]]` too. Testing the bare `[`
+alone leaves the block open and lands that example's `command = "lazygit"` as an
+action; measured on 0.9.0, eight non-actions were admitted that way.
+
+**The template under-reports.** It omits `swap_pane_*`, which herdr does bind by
+default (`prefix+shift+h/j/k/l` per its keyboard doc), so absence from the
+template is not evidence that an action has no key — only that this file cannot
+show it. Those entries carry their `binding` regardless, so a user's own
+override still displays.
 
 The user's own file overrides them, located the way herdr locates it —
 `HERDR_CONFIG_PATH`, else `$XDG_CONFIG_HOME/herdr/config.toml`, else
-`~/.config/herdr/config.toml` (verified against 0.9.0 on both legs). A cleared
-binding (`new_tab = ""`) reads as **unbound** rather than as the shipped key, and
-shows that word: blank already means "nothing here knows of a shortcut", and a
-key the user could set is a different thing to say.
+`~/.config/herdr/config.toml` (verified against 0.9.0 on both legs). A variable
+that is *set but empty* reads as unset, because herdr treats it that way;
+honouring it would drop the user's whole config while the built-in defaults kept
+rendering, which is a loss nothing on screen would show.
+
+A binding may be a list as well as a string — `new_tab = ["prefix+c",
+"ctrl+alt+c"]` binds both — and the first element is the one shown. Keeping only
+the string form would display the shipped default beside a key the user had
+replaced, which is the wrong-shortcut outcome §4 warns about. A cleared binding
+(`new_tab = ""`, or an empty list) reads as **unbound** and shows that word,
+which a blank column does not say.
 
 The two halves differ in how much can drift:
 
@@ -685,19 +701,21 @@ The two halves differ in how much can drift:
 - **Built-ins** are named `[keys]` actions whose vocabulary is not the catalog's
   argv (`tab rename` is `rename_tab`), so each entry states its counterpart in a
   `binding` key — the one new drift surface, and it lives in `catalog.toml`
-  beside the entry a correction would edit (§4). `every_binding_names_an_action_the_running_herdr_declares`
-  holds every one against the running herdr, because a `binding` naming an action
-  herdr does not have shows a blank column, which is also what a correct entry
-  with no counterpart looks like. It caught `swap_pane_*` — present in the
-  binary's symbols, absent from the documented `[keys]`, and so not a key to
-  teach.
+  beside the entry a correction would edit (§4).
+
+A wrong `binding` is invisible: it shows a blank key column, which is also what a
+correct entry with no counterpart shows. So `herdr/catalog-e2e.py` checks every
+one against a real herdr, writing them all into one config and reading back
+`herdr config check`'s warnings. That is herdr's own verdict rather than the
+template's, which matters because the template under-reports (above). It lives
+there and not in `cargo test` because the CI job running the unit tests installs
+no herdr — a check that skips passes, and a pass that skipped is indistinguishable
+from one that ran.
 
 A `binding` asserts the two do the **same** thing, so an entry whose counterpart
 is only approximate carries none: `tab.close` picks a tab while `close_tab` acts
-on the current one. The splits carry none for a different reason — nothing in
-herdr's CLI, template or docs says which of right/down `split_vertical` and
-`split_horizontal` produce, and both readings are current in terminal
-multiplexers.
+on the current one, and `new_tab` asks for a name first (`prompt_new_tab_name`
+defaults to true) where `tab create --focus` does not.
 
 Width follows §5's footer rule: the key is dropped whole rather than clipped,
 because a half-drawn chord is not a chord while the title is what the user

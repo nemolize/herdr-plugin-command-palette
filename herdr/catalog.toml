@@ -53,22 +53,22 @@ checked_against = "0.8.2"
 # `pane split --direction` accepts right and down only. There is no left or up,
 # so the palette offers the two that exist rather than four that read evenly.
 #
-# No `binding`: nothing in herdr's CLI, config template or docs says which of
-# right/down `split_vertical` and `split_horizontal` each produce, and both
-# readings are current in terminal multiplexers — so the pairing needs an
-# observation rather than a guess.
+# The names alone do not settle which is which; herdr's keyboard doc tabulates
+# `Split right / down | prefix+v / prefix+minus`, so vertical is right.
 
 [[command]]
 id = "pane.split.right"
 title = "Split pane: right"
 args = ["pane", "split", "--pane", "{pane}", "--direction", "right"]
 contexts = ["pane"]
+binding = "split_vertical"
 
 [[command]]
 id = "pane.split.down"
 title = "Split pane: down"
 args = ["pane", "split", "--pane", "{pane}", "--direction", "down"]
 contexts = ["pane"]
+binding = "split_horizontal"
 
 
 # ─── Panes: moving focus ─────────────────────────────────────────────────────
@@ -104,26 +104,29 @@ binding = "focus_pane_down"
 
 
 # ─── Panes: arranging ────────────────────────────────────────────────────────
-# Swap carries no `binding`: herdr's binary names `swap_pane_*` actions but its
-# config template documents no key for them, so there is none to teach.
+# `swap_pane_*` is bound by default (`prefix+shift+h/j/k/l`) yet omitted from
+# `--default-config`, so a key shows here only once the user sets one.
 
 [[command]]
 id = "pane.zoom.toggle"
 title = "Zoom pane: toggle"
 args = ["pane", "zoom", "--pane", "{pane}", "--toggle"]
 contexts = ["pane"]
+binding = "zoom"
 
 [[command]]
 id = "pane.swap.left"
 title = "Swap pane: left"
 args = ["pane", "swap", "--pane", "{pane}", "--direction", "left"]
 contexts = ["pane"]
+binding = "swap_pane_left"
 
 [[command]]
 id = "pane.swap.right"
 title = "Swap pane: right"
 args = ["pane", "swap", "--pane", "{pane}", "--direction", "right"]
 contexts = ["pane"]
+binding = "swap_pane_right"
 
 # No picker: the context already names the pane the palette was opened from.
 [[command]]
@@ -161,12 +164,13 @@ contexts = ["pane"]
 
 # ─── Tabs ────────────────────────────────────────────────────────────────────
 
+# No `binding`: `prompt_new_tab_name` defaults to true, so `new_tab` asks for a
+# name first while this entry creates one outright — not the same operation.
 [[command]]
 id = "tab.create"
 title = "New tab"
 args = ["tab", "create", "--focus"]
 contexts = ["global", "workspace", "tab", "pane"]
-binding = "new_tab"
 
 [[command]]
 id = "tab.focus"

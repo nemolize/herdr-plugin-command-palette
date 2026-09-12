@@ -148,21 +148,22 @@ of its title — so using the palette is also how you learn the shortcut that ma
 it unnecessary.
 
 ```
-▶ Split pane: right
+▶ Split pane: right                                 prefix+v
+  Split pane: down                              prefix+minus
   Focus pane: left                                  prefix+h
-  Focus pane: right                                 prefix+l
+  Zoom pane: toggle                                 prefix+z
+  Swap pane: left
   Rename pane…                                prefix+shift+p
-  Close pane                                        prefix+x
   Move pane to tab…
-  New tab                                           prefix+c
 27/27 · esc to close                                  v0.2.0
 ```
 
 The key shown is **your** key. Herdr's shipped defaults come from
-`herdr --default-config`, and anything you set in `config.toml` overrides them,
-so a rebound action shows what you bound it to. An action you deliberately
-cleared (`new_tab = ""`) reads `unbound`, which is a different thing from the
-blank shown when nothing claims to know of a shortcut at all.
+`herdr --default-config`, and anything you set in `config.toml` overrides them —
+a plain string or a list, of which the first is shown — so a rebound action shows
+what you bound it to. An action you deliberately cleared (`new_tab = ""`) reads
+`unbound`, which is a different thing from the blank shown when nothing claims to
+know of a shortcut at all.
 
 Your own plugin actions need no setup: a `[[keys.command]]` block with
 `type = "plugin_action"` is matched by its `command`, which is already the id the
@@ -170,9 +171,11 @@ palette uses. Built-ins need the `binding` key above, because Herdr's action
 names are a separate vocabulary from the argv the catalog runs — `tab rename` is
 `rename_tab`.
 
-An entry shows no key where the shipped catalog claims none. That is deliberate
-rather than missing: `Close tab…` picks a tab while Herdr's `close_tab` closes
-the current one, so they are not the same command and one key would be a lie.
+A blank key means one of two things, both deliberate. Some entries are not the
+same command as any bound action — `Close tab…` picks a tab while Herdr's
+`close_tab` closes the current one — so claiming its key would be a lie. Others
+name an action Herdr binds but does not list in `herdr --default-config`
+(`Swap pane: …`); set one yourself and it appears.
 
 ## The catalog drifts, and says so when it does
 

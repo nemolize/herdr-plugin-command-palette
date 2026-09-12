@@ -37,10 +37,6 @@ CONTEXT = '{"focused_pane_id":"w1:p1","tab_id":"w1:t1","workspace_id":"w1"}'
 
 FAILURE = "pane cannot be moved into the tab it already occupies"
 
-# What the palette asks herdr before the user has picked anything, so a check
-# for "nothing was dispatched" can tell a startup read from a real dispatch.
-STARTUP_CALLS = {"--default-config"}
-
 # Generous because they bound a hang, not a wait: every wait below returns as
 # soon as its condition holds, so a fast machine never spends them.
 READY_TIMEOUT = 30.0
@@ -53,6 +49,7 @@ READY_MARKER = "esc to close"
 
 STUB = """#!/bin/sh
 if [ "$1" = "--version" ]; then echo "herdr 0.8.2"; exit 0; fi
+if [ "$1" = "--default-config" ]; then exit 0; fi
 if [ "$1" = "plugin" ]; then echo '{"result":{"actions":[]}}'; exit 0; fi
 echo "$@" >> "$HERDR_STUB_LOG"
 %s
@@ -409,11 +406,7 @@ def esc_closes_the_palette(scratch: Path) -> bool:
         )
         passed &= check(
             "esc dispatched nothing",
-            all(
-                line in STARTUP_CALLS
-                for line in log.read_text().splitlines()
-                if line.strip()
-            ),
+            log.read_text() == "",
             f"stub log: {log.read_text()!r}",
         )
         return passed
