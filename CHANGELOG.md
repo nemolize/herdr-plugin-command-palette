@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.3.0](https://github.com/nemolize/herdr-plugin-command-palette/compare/v0.2.0...v0.3.0) (2026-09-12)
+
+
+### Features
+
+* rename workspaces, tabs and panes from the palette ([2c981c3](https://github.com/nemolize/herdr-plugin-command-palette/commit/2c981c3ee1593972ef688d38839968d2529c40d8))
+* rename workspaces, tabs and panes from the palette ([5226ecf](https://github.com/nemolize/herdr-plugin-command-palette/commit/5226ecf9efe56ec676b796d81079cf294de22290))
+* show each command's keybinding beside it in the palette ([1473210](https://github.com/nemolize/herdr-plugin-command-palette/commit/14732101fc698dc69ea7dbcddb40bebaf8caf576))
+* show each command's keybinding beside it in the palette ([9fada86](https://github.com/nemolize/herdr-plugin-command-palette/commit/9fada865138050e89c3c99414957d46c6157950e))
+
+
+### Bug Fixes
+
+* count the status row by rendering it, and drive the harness on conditions ([9d5e5a6](https://github.com/nemolize/herdr-plugin-command-palette/commit/9d5e5a612384ad68737d12297073b5dae06a73ab))
+* judge the palette's exit status and liveness, not just that it ended ([837202c](https://github.com/nemolize/herdr-plugin-command-palette/commit/837202cc0b6aa868fd8d10b309eac0280f434bba))
+* read the keys herdr actually binds, not the ones its template lists ([737435f](https://github.com/nemolize/herdr-plugin-command-palette/commit/737435f8113feebe05ca5056fc1af49efe5f011f))
+* report a failed dispatch in the palette, and test the path that runs a pick ([a37ad1c](https://github.com/nemolize/herdr-plugin-command-palette/commit/a37ad1c3a8a5166feeb75db4836e4986f2bcc34e))
+* sweep the whole process group on close, and trim restating comments ([d192927](https://github.com/nemolize/herdr-plugin-command-palette/commit/d1929271e00a41826d0e3990d8a7fcf9aea363d8))
+
 ## [0.2.0](https://github.com/nemolize/herdr-plugin-command-palette/compare/v0.1.0...v0.2.0) (2026-09-05)
 
 
