@@ -70,10 +70,10 @@ reach them is added.
 
 ## The blocking model
 
-**`Lint`, `Test` and `Build` block; `Audit` reports.** A ruleset on the default
-branch requires those three check runs and holds the merge until each is green.
-`Audit` is deliberately outside that set, so it reports without preventing a
-merge.
+**`Lint`, `Test`, `E2ETests` and `Build` block; `Audit` reports.** A ruleset on
+the default branch requires those four check runs and holds the merge until each
+is green. `Audit` is deliberately outside that set, so it reports without
+preventing a merge.
 
 The ruleset also requires a pull request, forbids deletion and non-fast-forward
 pushes, and asks for no approving review — a repository with one maintainer
@@ -86,7 +86,12 @@ status green, which hides a failure rather than making it advisory.
 
 The intended reading of a red `Lint`, `Test` or `Build` is *the diff broke
 something* — each fails only for a reason present in the change, which is what
-makes them safe to require. `Audit` is kept in its own workflow precisely so it
+makes them safe to require. `E2ETests` is required on a weaker version of that
+property: it resolves a herdr release rather than pinning one, so a constraint
+herdr adds can turn it red against an unchanged catalog. That is the point of
+the job — a silent catalog drift is exactly what issue #24 was opened about —
+but it means a red `E2ETests` is worth reading before assuming the diff caused
+it. `Audit` is kept in its own workflow precisely so it
 cannot dilute that: it is the one job that can fail for reasons outside the diff,
 so requiring it would block a merge on an advisory published against an unchanged
 lockfile.
