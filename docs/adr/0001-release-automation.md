@@ -73,6 +73,15 @@ its tag as an input, which is what makes the cheaper form available here. Either
 way the credential is avoidable — which is why this repository holds no App
 registration, no secret, and no expiry to renew.
 
+The two repositories are therefore asymmetric on purpose, and one word reads
+across them in opposite senses: a `workflow_dispatch` of `Release` here builds
+without publishing — the input carries `ref` and no `tag`, so `PUBLISHING` stays
+false — while a dispatch of the sibling's `Deploy` at a tag *is* the production
+release. Aligning them was weighed and dropped: `Deploy` selects environment,
+URL, concurrency group and wrangler command from `github.ref`, so accepting a
+call there would leave the release path input-driven and the staging and preview
+paths ref-driven, two selection mechanisms in the file that ships production.
+
 Rejected alongside: teaching `Release` to accept `repository_dispatch` (the same
 indirection, with the tag-manifest agreement harder to assert), and having
 release-please write a draft release for a human to publish (a second manual
