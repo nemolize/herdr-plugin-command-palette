@@ -87,7 +87,7 @@ jobs:
           [ -x "$clang" ] || { echo "::error::pinned NDK missing: $clang"; exit 1; }
           echo "CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=$clang" >> "$GITHUB_ENV"
 
-      - uses: taiki-e/install-action@9534c84618278caac52cb373bb164ed464dbd8af # v2.87.11
+      - uses: taiki-e/install-action@3f74d7c16a4242f1c95561e98edc25d36adb4375 # v2.87.12
         with:
           tool: just@1.58.0
 
