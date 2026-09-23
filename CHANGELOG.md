@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.1](https://github.com/nemolize/herdr-plugin-command-palette/compare/v0.3.0...v0.3.1) (2026-09-23)
+
+
+### Bug Fixes
+
+* pass --plugin after the action id on plugin action invoke ([936e267](https://github.com/nemolize/herdr-plugin-command-palette/commit/936e267426e42de1235b10517f4fc42ca83b7db3))
+* pass --plugin after the action id on plugin action invoke ([bab2c4d](https://github.com/nemolize/herdr-plugin-command-palette/commit/bab2c4d1a9b3411ea2f844c809ff58183e8b3496))
+
 ## [0.3.0](https://github.com/nemolize/herdr-plugin-command-palette/compare/v0.2.0...v0.3.0) (2026-09-12)
 
 
