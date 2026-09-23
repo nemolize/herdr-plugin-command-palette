@@ -299,7 +299,7 @@ fn argv(outcome: Outcome) -> (String, Vec<String>) {
         } => (
             id,
             [
-                "plugin", "action", "invoke", "--plugin", &plugin_id, &action_id,
+                "plugin", "action", "invoke", &action_id, "--plugin", &plugin_id,
             ]
             .map(str::to_owned)
             .to_vec(),
@@ -520,8 +520,8 @@ mod tests {
         assert_eq!(args, ["tab", "create"]);
     }
 
-    /// The flag name and the operand order are herdr's, not ours: `--plugin`
-    /// takes the plugin and the action id follows as a positional.
+    /// Order is herdr's, not ours: the action id is the positional and `--plugin`
+    /// follows it — put first, herdr rejects it with `unknown option` (#80).
     #[test]
     fn an_action_is_spawned_as_plugin_action_invoke() {
         let (id, args) = argv(Outcome::Action {
@@ -532,7 +532,7 @@ mod tests {
         assert_eq!(id, "notes.capture");
         assert_eq!(
             args,
-            ["plugin", "action", "invoke", "--plugin", "notes", "capture"]
+            ["plugin", "action", "invoke", "capture", "--plugin", "notes"]
         );
     }
 }
