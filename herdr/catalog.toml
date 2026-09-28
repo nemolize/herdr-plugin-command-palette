@@ -128,6 +128,20 @@ args = ["pane", "swap", "--pane", "{pane}", "--direction", "right"]
 contexts = ["pane"]
 binding = "swap_pane_right"
 
+[[command]]
+id = "pane.swap.up"
+title = "Swap pane: up"
+args = ["pane", "swap", "--pane", "{pane}", "--direction", "up"]
+contexts = ["pane"]
+binding = "swap_pane_up"
+
+[[command]]
+id = "pane.swap.down"
+title = "Swap pane: down"
+args = ["pane", "swap", "--pane", "{pane}", "--direction", "down"]
+contexts = ["pane"]
+binding = "swap_pane_down"
+
 # No picker: the context already names the pane the palette was opened from.
 [[command]]
 id = "pane.rename"
