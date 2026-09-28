@@ -5,7 +5,6 @@
 
 ### Features
 
-* add vertical pane swaps to the command palette ([11f95d1](https://github.com/nemolize/herdr-plugin-command-palette/commit/11f95d1eb799eba43b8f597afdc77f948fe2e0d4))
 * add vertical pane swaps to the command palette ([335ec60](https://github.com/nemolize/herdr-plugin-command-palette/commit/335ec605267aa4884c7fdd1f91b12fcfe01cdd47))
 
 ## [0.3.1](https://github.com/nemolize/herdr-plugin-command-palette/compare/v0.3.0...v0.3.1) (2026-09-23)
