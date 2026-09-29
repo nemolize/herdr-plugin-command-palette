@@ -79,7 +79,7 @@ preventing a merge.
 The ruleset also requires a pull request, forbids deletion and non-fast-forward
 pushes, and asks for no approving review — a repository with one maintainer
 would otherwise block on a review nobody can give. It lets the admin role bypass
-via pull request, which is the release PR's escape hatch when the check runs sit
+via pull request, which is the version PR's escape hatch when the check runs sit
 unapproved (below) rather than a routine merge route.
 
 `continue-on-error` appears nowhere and should not be added: it turns the commit
@@ -222,8 +222,9 @@ bump is involved. A failure the draft's commit will always hit (a code or
 build-config fault) cannot be retried away: ship the fix with a changeset as
 the next version, and restate the stuck version's changelog entries in that
 changeset's note — its own section reaches no published release. Until the
-fix's version PR merges, each run rebuilds the broken draft and fails again; afterwards nothing targets the old version, so delete
-its draft (`gh release delete <tag>`) and it stays unreleased. An in-progress
+fix's version PR merges, each run rebuilds the broken draft and fails again;
+afterwards nothing targets the old version, so delete its draft
+(`gh release delete <tag>`) and it stays unreleased. An in-progress
 run is never cancelled, so a push landing mid-build waits and then sees the
 published release or the draft to retry.
 

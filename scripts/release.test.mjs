@@ -6,8 +6,9 @@ import { join } from "node:path";
 import { after, before, describe, test } from "node:test";
 import { fileURLToPath } from "node:url";
 
+import { assertDraft } from "./assert-draft.mjs";
 import { releaseNotes } from "./release-notes.mjs";
-import { planRelease } from "./release-plan.mjs";
+import { planRelease, versionCommit } from "./release-plan.mjs";
 import { checkVersions, readPackageVersion } from "./sync-version.mjs";
 
 const repo = fileURLToPath(new URL("..", import.meta.url));
@@ -158,5 +159,76 @@ describe("release plan", () => {
 
   test("refuses a tag that has no release", () => {
     assert.throws(() => plan([], true), /exists without a release/);
+  });
+});
+
+describe("version commit", () => {
+  let dir;
+  let bump;
+
+  const commitPackage = (message, edit) => {
+    const file = join(dir, "package.json");
+    writeFileSync(file, `${JSON.stringify(edit(JSON.parse(readFileSync(file, "utf8"))), null, 2)}\n`);
+    git(dir, "commit", "-qam", message);
+    return git(dir, "rev-parse", "HEAD").trim();
+  };
+
+  before(() => {
+    dir = mkdtempSync(join(tmpdir(), "version-commit-"));
+    git(dir, "init", "-q", "-b", "main");
+    // Enough unchanged keys between version and devDependencies to merge cleanly.
+    const baseline = { name: "x", version: "0.4.0", private: true, type: "module", license: "MIT", description: "", devDependencies: {} };
+    writeFileSync(join(dir, "package.json"), `${JSON.stringify(baseline, null, 2)}\n`);
+    git(dir, "add", "-A");
+    git(dir, "commit", "-qm", "baseline");
+    git(dir, "switch", "-qc", "changeset-release/main");
+    bump = commitPackage("Version Packages", (pkg) => ({ ...pkg, version: "0.5.0" }));
+    git(dir, "switch", "-q", "main");
+    commitPackage("chore: add a dev dependency", (pkg) => ({ ...pkg, devDependencies: { a: "1.0.0" } }));
+    git(dir, "merge", "--no-ff", "-q", "changeset-release/main", "-m", "Merge pull request #2 from changeset-release/main");
+    commitPackage("chore: bump the dev dependency", (pkg) => ({ ...pkg, devDependencies: { a: "1.0.1" } }));
+  });
+
+  after(() => rmSync(dir, { recursive: true, force: true }));
+
+  test("names the version PR's commit, not the merge or a later package.json edit", () => {
+    assert.equal(versionCommit(dir), bump);
+  });
+
+  test("refuses a shallow clone", () => {
+    const shallow = mkdtempSync(join(tmpdir(), "version-commit-shallow-"));
+    try {
+      git(tmpdir(), "clone", "-q", "--depth", "1", `file://${dir}`, shallow);
+      assert.throws(() => versionCommit(shallow), /shallow/);
+    } finally {
+      rmSync(shallow, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("draft assertion before publishing", () => {
+  const ref = "a".repeat(40);
+  const other = "b".repeat(40);
+  const check = (releases) => () => assertDraft({ tag: "v0.5.0", ref, releases });
+
+  test("passes for one draft at the commit being published", () => {
+    assert.doesNotThrow(check([{ tag_name: "v0.5.0", draft: true, target_commitish: ref }]));
+  });
+
+  test("fails when the draft is gone", () => {
+    assert.throws(check([]), /found: none/);
+  });
+
+  test("fails when the draft targets another commit", () => {
+    assert.throws(check([{ tag_name: "v0.5.0", draft: true, target_commitish: other }]), new RegExp(`found: ${other}`));
+  });
+
+  test("fails when only a published release carries the tag", () => {
+    assert.throws(check([{ tag_name: "v0.5.0", draft: false, target_commitish: ref }]), /found: none/);
+  });
+
+  test("fails on two drafts for the tag", () => {
+    const draft = { tag_name: "v0.5.0", draft: true, target_commitish: ref };
+    assert.throws(check([draft, draft]), /found: /);
   });
 });
