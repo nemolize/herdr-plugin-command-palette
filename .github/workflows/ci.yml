@@ -51,6 +51,13 @@ jobs:
       # Rides this job rather than E2ETests: it stubs herdr instead of fetching
       # one, so it needs nothing the toolchain above has not installed.
       - run: just palette-e2e
+      # Rides this required job so a manifest version drifting from package.json,
+      # which the release publishes from, blocks the merge that caused it.
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+      - run: npm ci --ignore-scripts
+      - run: just release-test
 
   # The unit tests check the catalog against a transcribed `--help` table, which
   # goes stale silently; this runs every entry against a real herdr (issue #24).

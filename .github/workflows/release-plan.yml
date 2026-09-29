@@ -1,0 +1,104 @@
+name: Release Plan
+
+on:
+  push:
+    branches: [main]
+  # Retries a failed release without waiting for the next push to main.
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  # No cancel-in-progress: a run stopped mid-publish leaves a half-uploaded draft.
+  group: release-plan
+
+jobs:
+  Version-PR:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The changelog names the commit that added each changeset.
+          fetch-depth: 0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+      - run: npm ci --ignore-scripts
+      # Opens or updates the one version PR while changesets are pending, and
+      # does nothing once they are consumed — no publish-script is given.
+      - uses: changesets/action@ae32849d5ba541f9ae29e40e22a623bc13562f51 # v2.1.2
+        with:
+          version-script: npm run version-packages
+
+  # Pending changesets do not gate this: they change only the version PR's
+  # branch, never the version on main that a draft is for.
+  Draft-Release:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    outputs:
+      action: ${{ steps.plan.outputs.action }}
+      tag: ${{ steps.plan.outputs.tag }}
+      sha: ${{ steps.plan.outputs.sha }}
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+
+      - id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=$(node -p 'JSON.parse(require("fs").readFileSync("package.json", "utf8")).version')
+          # The version PR's own commit, not the pushed head: later merges carrying
+          # pending changesets belong to the next version.
+          version_commit=$(git log -1 --format=%H -G '^[[:space:]]*"version":' -- package.json)
+          # Exit 2 is ls-remote's "no such ref"; any other failure stops here.
+          if git ls-remote --exit-code --tags origin "refs/tags/v$version" > /dev/null; then
+            tag_exists=true
+          else
+            rc=$?
+            [ "$rc" -eq 2 ] || exit "$rc"
+            tag_exists=false
+          fi
+          gh api "repos/$GITHUB_REPOSITORY/releases" --paginate \
+            --jq '.[] | {tag_name, draft, target_commitish}' > "$RUNNER_TEMP/releases.ndjson"
+          node scripts/release-plan.mjs --version "$version" --commit "$version_commit" --tag-exists "$tag_exists" \
+            < "$RUNNER_TEMP/releases.ndjson" > "$RUNNER_TEMP/plan"
+          tee -a "$GITHUB_OUTPUT" < "$RUNNER_TEMP/plan"
+
+      - if: steps.plan.outputs.action == 'create'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.plan.outputs.tag }}
+          SHA: ${{ steps.plan.outputs.sha }}
+        run: |
+          node scripts/release-notes.mjs "${TAG#v}" > "$RUNNER_TEMP/notes.md"
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --draft --target "$SHA" \
+            --title "$TAG" --notes-file "$RUNNER_TEMP/notes.md"
+
+  # Called rather than left to the tag's own push event (docs/ci.md).
+  Assets:
+    needs: Draft-Release
+    if: contains(fromJSON('["create", "retry"]'), needs.Draft-Release.outputs.action)
+    uses: ./.github/workflows/release.yml
+    permissions:
+      contents: write
+    with:
+      # The draft's commit, not the branch: main can move on while the five
+      # platforms build, and a retry must rebuild what was drafted.
+      ref: ${{ needs.Draft-Release.outputs.sha }}
+      tag: ${{ needs.Draft-Release.outputs.tag }}

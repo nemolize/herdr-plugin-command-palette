@@ -1,6 +1,8 @@
 # ADR 0001 — Cutting releases with release-please, without a PAT or a GitHub App
 
-Status: accepted (2026-09-05)
+Status: accepted (2026-09-05). Decision 1 and the commit-message consequence are
+superseded by ADR 0002 (`docs/adr/0002-changesets-release-planning.md`);
+decisions 2 and 3 stand, with `Release Plan` in the role `Release-Please` had.
 
 `docs/ci.md` describes how releases are cut today. This records what was
 rejected on the way there, which that document does not carry and a reader
@@ -22,7 +24,7 @@ Two GitHub behaviours constrain every option:
 
 The first shapes decision 2, the second decision 3.
 
-## Decision 1 — release-please over changesets
+## Decision 1 — release-please over changesets (superseded by ADR 0002)
 
 Three candidates were compared.
 
@@ -121,7 +123,8 @@ and the bypass is what remains available when it cannot be.
   event costs the invocation, not the credential — `workflow_dispatch` at the
   tag is the replacement, and it needs the callee to carry that trigger at the
   ref being dispatched, which a tag cut before the trigger existed does not.
-- Commit messages are load-bearing, and the version and the changelog read them
+- *(Superseded by ADR 0002 — versions and notes now come from changeset files.)*
+  Commit messages are load-bearing, and the version and the changelog read them
   by different rules. Anything neither breaking nor `feat:` bumps the patch, so
   a `feat:` written as `chore:` costs the minor bump; but `chore:` writes no
   changelog entry, and a release whose notes come out empty is skipped

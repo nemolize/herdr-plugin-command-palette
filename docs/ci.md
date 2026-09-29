@@ -23,6 +23,7 @@ Two facts shape every choice here:
 | `cargo clippy --locked --all-targets -- -D warnings` | `Lint` | The default lint group is a correctness floor, and the tree already passes at `-D warnings`, so adopting it costs nothing today and catches real bug classes later. |
 | `cargo test --locked` | `Test` | The unit tests, which were being run by hand until now. |
 | `python3 herdr/palette-e2e.py` | `Test` | The unit tests stop at the seams: `Screen` needs a real terminal, so nothing in-process sees a pick become a running command. This drives the built binary through a PTY against a stubbed herdr, and asserts that a rejected dispatch is readable in the pane rather than printed to a stderr the closing popup takes with it — the shape of "I picked it and nothing happened". |
+| `just release-test` | `Test` | The release publishes from `package.json`'s version while `install.sh` reads `herdr-plugin.toml`'s, and `Cargo.toml`/`Cargo.lock` carry a third copy; a disagreement surfaces only at publish, where fixing it costs a version. This asserts all four agree, and runs the Changesets version step on a fixture repository — bump, one changelog entry per changeset, every manifest synced, changeset consumed — plus the release-planning decisions ("Cutting a release"). |
 | `python3 herdr/catalog-e2e.py` | `E2ETests` | The catalog hand-writes argv for every entry, and the unit tests check it against a `--help` table transcribed at one herdr version, which goes stale silently — three entries shipped broken that way, the last one valid in flags and arity and wrong only in combination (issue #24). This fetches a real herdr and runs every entry against it, so a constraint herdr adds is caught by the tool that added it rather than by a user whose pick does nothing. |
 | `cargo build --release --locked` for both musl targets | `Build` | `cargo test` compiles the test profile only. This is the sole check that exercises `[profile.release]` (LTO, `opt-level = "z"`, strip) and the per-target `rust-lld` pins in `.cargo/config.toml` — breakage that would otherwise surface for the first time at a release tag. It covers the two release assets a Linux runner can build unaided; the macOS and Android assets need another host or the NDK, so `Release` is the only thing that compiles them. |
 | `cargo deny --locked check` | `Audit` | See the group table below. |
@@ -131,8 +132,8 @@ diverge the CI cache from every local build. Clippy's `-D warnings` is passed
 per-invocation instead, where it is scoped to this crate.
 
 `justfile` holds the check definitions and each CI job runs one recipe
-(`just lint`, `just test` plus `just palette-e2e`, `just build-musl`,
-`just deny`), so the commands exist
+(`just lint`, `just test` plus `just palette-e2e` and `just release-test`,
+`just build-musl`, `just deny`), so the commands exist
 once rather than as lists kept in sync by discipline. `just ci` runs the three CI
 jobs' recipes together, reproducing a CI failure locally with no push — given the
 two tools CI pins and installs for itself:
@@ -148,23 +149,59 @@ exists to prevent. `brew install just` is fine for everyday use and is what most
 setups already have; it just tracks the current formula rather than 1.58.0, so
 reach for the pinned install when a CI result and a local one disagree.
 
+`just release-test` also needs Node — `.node-version` names the major CI
+installs — and `npm ci --ignore-scripts` for the Changesets CLI that
+`package-lock.json` pins.
+
 Every action is pinned by full commit SHA. A tag is mutable, and a repo that
 audits its Rust dependencies should hold its own workflow supply chain to the
 same standard.
 
 ## Cutting a release
 
-Why release-please rather than changesets, and why no PAT or GitHub App is
-involved, is recorded in `docs/adr/0001-release-automation.md` along with what
-was rejected — read it before proposing a credential or a relaxed ruleset here.
+Why Changesets, and why no PAT or GitHub App is involved, is recorded in
+`docs/adr/0002-changesets-release-planning.md` and
+`docs/adr/0001-release-automation.md` along with what was rejected — read them
+before proposing a credential or a relaxed ruleset here.
 
-Merging the release PR release-please keeps open cuts the release: it writes the
-version into `Cargo.toml`, `Cargo.lock` and `herdr-plugin.toml`, then opens a
-**draft** GitHub Release on the merge commit. `Release-Please` calls `Release`
-directly rather than leaving a tag to trigger it — a tag the default
-`GITHUB_TOKEN` writes starts no workflow run, so the five assets would never
-build, and `workflow_call` is an invocation rather than an event, which is what
-keeps this working without a PAT or a GitHub App.
+Release intent is written down, not inferred. A pull request with a
+user-visible change adds a file under `.changeset/` naming the bump and the
+changelog line (`.changeset/README.md` says when one is needed and how to add
+it). Nothing reads commit messages or tags to decide the next version, so a
+merge commit repeating its PR's subject cannot add a second changelog entry
+(#41), and a release still being built cannot make its own changes look
+unreleased (#43).
+
+`Release Plan` runs on every push to `main`:
+
+1. **`Version-PR`** — while changesets are pending, `changesets/action` opens or
+   updates the single `Version Packages` pull request (branch
+   `changeset-release/main`). Its commit runs `npm run version-packages`:
+   `changeset version` consumes the pending files, bumps `package.json` and
+   writes `CHANGELOG.md`, then `scripts/sync-version.mjs` copies the version
+   into `Cargo.toml`, `Cargo.lock` and `herdr-plugin.toml`. With nothing
+   pending the job does nothing.
+2. **`Draft-Release`** — on every push, pending changesets or not: they change
+   only the version PR's branch, never the version on `main`.
+   `scripts/release-plan.mjs` compares `package.json`'s version with the
+   repository's releases, drafts included: a published release means nothing
+   to do; no release means draft one at the commit that set the version — the
+   version PR's own commit, not whatever `main` has moved on to — with that
+   version's `CHANGELOG.md` section as its notes; an existing draft means an
+   earlier build failed, so rebuild the commit the draft targets. A tag with no
+   release, or a tag beside a draft, stops the run rather than publishing onto
+   whatever commit the tag names.
+3. **`Assets`** — calls `Release` with the draft's commit and tag. A tag the
+   default `GITHUB_TOKEN` writes starts no workflow run, so the five assets
+   would never build if a tag were left to trigger them; `workflow_call` is an
+   invocation rather than an event, which is what keeps this working without a
+   PAT or a GitHub App.
+
+`package.json` exists only for this: it is `private`, publishes nothing to npm,
+and holds the version Changesets bumps, which is the official route for
+non-npm packages. `just release-test` asserts every manifest agrees with it and
+runs the whole version step on a throwaway fixture repository; it rides the
+required `Test` job, so a drifted version blocks the merge that caused it.
 
 The draft is what makes the publish all-or-nothing in time as well as in asset
 count. A public release with no binaries yet would 404 for anyone installing in
@@ -176,28 +213,40 @@ tag comes into existence**, only at that point. Nothing in `Release` reads the
 tag from git: both jobs check out the release commit by SHA, and the manifest
 assertion compares the tag as a string.
 
+**Retrying a failed release.** A failed target leaves the draft unpublished
+and untagged, so nothing is public. Either re-run the failed jobs of that
+`Release Plan` run, or run `Release Plan` by hand (`gh workflow run
+release-plan.yml`) — any later push to `main` does the same. Each rebuilds the
+commit the draft targets under the same version; no new changeset or version
+bump is involved. A failure the draft's commit will always hit (a code or
+build-config fault) cannot be retried away: ship the fix with a changeset as
+the next version, and restate the stuck version's changelog entries in that
+changeset's note — its own section reaches no published release. Until the
+fix's version PR merges, each run rebuilds the broken draft and fails again; afterwards nothing targets the old version, so delete
+its draft (`gh release delete <tag>`) and it stays unreleased. An in-progress
+run is never cancelled, so a push landing mid-build waits and then sees the
+published release or the draft to retry.
+
 None of this starts without a repository setting no file here can carry:
 **Settings → Actions → General → "Allow GitHub Actions to create and approve
-pull requests"**. With it off, release-please cannot open the release PR at all
-— the run fails with `GitHub Actions is not permitted to create or approve pull
-requests`, and nothing in the workflow itself points at the cause. It is off by
+pull requests"**. With it off, `changesets/action` cannot open the version PR
+at all, and nothing in the workflow itself points at the cause. It is off by
 default, so it is the one prerequisite a fresh clone of this configuration does
 not inherit.
 
-The release PR's own checks need one click before they run. A pull request the
+The version PR's own checks need one click before they run. A pull request the
 default `GITHUB_TOKEN` opens creates its workflow runs in an approval-required
 state — the one thing that token can trigger, and only that far — so `Lint`,
-`Test` and `Build` sit behind "Approve workflows to run" on every release PR and
-on every re-sync as `main` moves. Approving is the release's own review step
-rather than an extra one, which is why this is accepted rather than worked
-around.
+`Test`, `E2ETests` and `Build` sit behind "Approve workflows to run" on every
+version PR and on every update as changesets land. Approving is the release's
+own review step rather than an extra one, which is why this is accepted rather
+than worked around.
 
 Pushing a tag matching `v[0-9]*.[0-9]*.[0-9]*` by hand still publishes, so a
-release can be cut when release-please cannot. That route writes no changelog and
-leaves `.release-please-manifest.json` behind, from which the next release PR
-computes its version — so a hand-cut release means editing the manifest to match
-in the same breath as `herdr-plugin.toml`, which the publish already asserts
-against the tag. Either way the same matrix builds the five assets of §11 with
+release can be cut when `Release Plan` cannot. That route writes no changelog,
+and the version it tags must already be in `package.json` and every manifest
+`just release-test` checks — the publish asserts `herdr-plugin.toml` against the
+tag. Either way the same matrix builds the five assets of §11 with
 `fail-fast: false`. Three properties are worth stating because each fails
 silently otherwise:
 
