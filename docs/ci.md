@@ -181,14 +181,16 @@ unreleased (#43).
    writes `CHANGELOG.md`, then `scripts/sync-version.mjs` copies the version
    into `Cargo.toml`, `Cargo.lock` and `herdr-plugin.toml`. With nothing
    pending the job does nothing.
-2. **`Draft-Release`** — only when nothing is pending, i.e. on the push that
-   merged the version PR and on every later one. `scripts/release-plan.mjs`
-   compares `package.json`'s version with the repository's releases, drafts
-   included: a published release means nothing to do; no release means draft
-   one at the pushed commit, with that version's `CHANGELOG.md` section as its
-   notes; an existing draft means an earlier build failed, so rebuild the
-   commit the draft targets. A tag with no release stops the run rather than
-   publishing onto whatever commit the tag names.
+2. **`Draft-Release`** — on every push, pending changesets or not: they change
+   only the version PR's branch, never the version on `main`.
+   `scripts/release-plan.mjs` compares `package.json`'s version with the
+   repository's releases, drafts included: a published release means nothing
+   to do; no release means draft one at the commit that set the version — the
+   version PR's own commit, not whatever `main` has moved on to — with that
+   version's `CHANGELOG.md` section as its notes; an existing draft means an
+   earlier build failed, so rebuild the commit the draft targets. A tag with no
+   release, or a tag beside a draft, stops the run rather than publishing onto
+   whatever commit the tag names.
 3. **`Assets`** — calls `Release` with the draft's commit and tag. A tag the
    default `GITHUB_TOKEN` writes starts no workflow run, so the five assets
    would never build if a tag were left to trigger them; `workflow_call` is an
@@ -216,9 +218,14 @@ and untagged, so nothing is public. Either re-run the failed jobs of that
 `Release Plan` run, or run `Release Plan` by hand (`gh workflow run
 release-plan.yml`) — any later push to `main` does the same. Each rebuilds the
 commit the draft targets under the same version; no new changeset or version
-bump is involved. The workflow's runs queue rather than cancel one another, so
-a push landing mid-build waits and then sees the published release or the
-draft to retry.
+bump is involved. A failure the draft's commit will always hit (a code or
+build-config fault) cannot be retried away: ship the fix with a changeset as
+the next version, and restate the stuck version's changelog entries in that
+changeset's note — its own section reaches no published release. Until the
+fix's version PR merges, each run rebuilds the broken draft and fails again; afterwards nothing targets the old version, so delete
+its draft (`gh release delete <tag>`) and it stays unreleased. An in-progress
+run is never cancelled, so a push landing mid-build waits and then sees the
+published release or the draft to retry.
 
 None of this starts without a repository setting no file here can carry:
 **Settings → Actions → General → "Allow GitHub Actions to create and approve

@@ -11,7 +11,7 @@ import { planRelease } from "./release-plan.mjs";
 import { checkVersions, readPackageVersion } from "./sync-version.mjs";
 
 const repo = fileURLToPath(new URL("..", import.meta.url));
-const TRACKED = [
+const FIXTURE_FILES = [
   "package.json",
   ".changeset/config.json",
   ".changeset/README.md",
@@ -50,7 +50,7 @@ describe("changeset version on a fixture repository", () => {
 
   before(() => {
     dir = mkdtempSync(join(tmpdir(), "changesets-fixture-"));
-    for (const file of TRACKED) cpSync(join(repo, file), join(dir, file), { recursive: true });
+    for (const file of FIXTURE_FILES) cpSync(join(repo, file), join(dir, file), { recursive: true });
     symlinkSync(join(repo, "node_modules"), join(dir, "node_modules"), "dir");
     writeFileSync(join(dir, ".gitignore"), "node_modules\n");
     git(dir, "init", "-q", "-b", "main");
@@ -114,9 +114,9 @@ describe("release notes", () => {
 });
 
 describe("release plan", () => {
-  const head = "a".repeat(40);
+  const commit = "a".repeat(40);
   const draftSha = "b".repeat(40);
-  const plan = (releases, tagExists = false) => planRelease({ version: "0.5.0", head, tagExists, releases });
+  const plan = (releases, tagExists = false) => planRelease({ version: "0.5.0", commit, tagExists, releases });
 
   test("a published release means nothing to do", () => {
     assert.deepEqual(plan([{ tag_name: "v0.5.0", draft: false, target_commitish: "main" }], true), {
@@ -127,7 +127,7 @@ describe("release plan", () => {
 
   // #43: while the assets build, the release is a draft and its tag does not
   // exist yet; a push in that window must neither draft again nor move on.
-  test("a draft is rebuilt at its own commit, not the pushed one", () => {
+  test("a draft is rebuilt at its own commit", () => {
     assert.deepEqual(plan([{ tag_name: "v0.5.0", draft: true, target_commitish: draftSha }]), {
       action: "retry",
       tag: "v0.5.0",
@@ -135,11 +135,11 @@ describe("release plan", () => {
     });
   });
 
-  test("an unreleased version is drafted at the pushed commit", () => {
+  test("an unreleased version is drafted at the commit that set it", () => {
     assert.deepEqual(plan([{ tag_name: "v0.4.0", draft: false, target_commitish: "main" }]), {
       action: "create",
       tag: "v0.5.0",
-      sha: head,
+      sha: commit,
     });
   });
 
@@ -150,6 +150,10 @@ describe("release plan", () => {
   test("refuses two releases for one version", () => {
     const draft = { tag_name: "v0.5.0", draft: true, target_commitish: draftSha };
     assert.throws(() => plan([draft, draft]), /2 releases carry v0.5.0/);
+  });
+
+  test("refuses a draft whose tag already exists", () => {
+    assert.throws(() => plan([{ tag_name: "v0.5.0", draft: true, target_commitish: draftSha }], true), /both exist/);
   });
 
   test("refuses a tag that has no release", () => {

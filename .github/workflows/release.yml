@@ -214,6 +214,21 @@ jobs:
       # and build provenance as still uncovered.
       - run: cd dist && sha256sum "$BIN_NAME"-* > SHA256SUMS && cat SHA256SUMS
 
+      # Without its draft, the upload below would create a public release tagged
+      # at the default branch's head rather than at the commit these assets are.
+      - if: inputs.tag != ''
+        name: Assert the tag's draft still targets this commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REF: ${{ inputs.ref }}
+        run: |
+          target=$(gh api "repos/$GITHUB_REPOSITORY/releases" --paginate \
+            --jq ".[] | select(.draft and .tag_name == \"$PUBLISH_TAG\") | .target_commitish")
+          [ "$target" = "$REF" ] || {
+            echo "::error::no draft $PUBLISH_TAG targeting $REF (found: ${target:-none})"
+            exit 1
+          }
+
       - if: env.PUBLISHING == 'true'
         uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:

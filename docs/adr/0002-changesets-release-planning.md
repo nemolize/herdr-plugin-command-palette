@@ -63,7 +63,9 @@ from commit subjects — without changing the merge policy.
 - **Node joins the toolchain** for release work and for `just release-test`.
 - **Rust-native versioning is given up.** release-please edited `Cargo.toml`
   and `Cargo.lock` itself; here a small script does, and it knows only the
-  root crate.
+  root crate. The Rust-native tools ADR 0001 left unweighed — `release-plz`,
+  `cargo-release`, `cargo-dist` — were not weighed here either; that question
+  stays open.
 - **A forgotten changeset ships nothing.** A user-visible change merged without
   one reaches no release until a later changeset does. This is the price of
   declared intent; review is what catches it.
