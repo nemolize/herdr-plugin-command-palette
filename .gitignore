@@ -10,3 +10,6 @@ prototypes/go/palette-go*
 # herdr/install.sh, or built locally into bin/ for the `plugin link` loop.
 /target/
 /bin/
+
+# Release tooling (package.json). Nothing here is published to npm.
+/node_modules/

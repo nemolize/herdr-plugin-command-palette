@@ -164,7 +164,7 @@ jobs:
     env:
       # A dispatch can select a tag as its ref, so the tag route is gated on the
       # event as well; the call route cannot use the event at all, since a called
-      # workflow reports the caller's, which for release-please is a push to main.
+      # workflow reports the caller's event — for Release Plan, a push or a dispatch.
       PUBLISHING: ${{ inputs.tag != '' || (github.event_name == 'push' && github.ref_type == 'tag') }}
       PUBLISH_TAG: ${{ inputs.tag || github.ref_name }}
 
@@ -220,6 +220,6 @@ jobs:
           tag_name: ${{ env.PUBLISH_TAG }}
           files: dist/*
           fail_on_unmatched_files: true
-          # release-please is the only caller passing a tag, and it has already
-          # written the notes from the changelog.
+          # Release Plan is the only caller passing a tag, and its draft already
+          # carries the notes from the changelog.
           generate_release_notes: ${{ !inputs.tag }}

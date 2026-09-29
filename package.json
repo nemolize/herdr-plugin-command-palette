@@ -1,0 +1,16 @@
+{
+  "name": "herdr-command-palette",
+  "version": "0.4.0",
+  "private": true,
+  "description": "Release tooling only: Changesets reads this version, and scripts/sync-version.mjs copies it into the Rust and herdr manifests. Nothing is published to npm.",
+  "type": "module",
+  "scripts": {
+    "version-packages": "changeset version && node scripts/sync-version.mjs"
+  },
+  "devDependencies": {
+    "@changesets/cli": "3.0.3"
+  },
+  "engines": {
+    "node": ">=22.11"
+  }
+}
