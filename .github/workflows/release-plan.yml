@@ -63,9 +63,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           version=$(node -p 'JSON.parse(require("fs").readFileSync("package.json", "utf8")).version')
-          # The version PR's own commit, not the pushed head: later merges carrying
-          # pending changesets belong to the next version.
-          version_commit=$(git log -1 --format=%H -G '^[[:space:]]*"version":' -- package.json)
           # Exit 2 is ls-remote's "no such ref"; any other failure stops here.
           if git ls-remote --exit-code --tags origin "refs/tags/v$version" > /dev/null; then
             tag_exists=true
@@ -76,7 +73,7 @@ jobs:
           fi
           gh api "repos/$GITHUB_REPOSITORY/releases" --paginate \
             --jq '.[] | {tag_name, draft, target_commitish}' > "$RUNNER_TEMP/releases.ndjson"
-          node scripts/release-plan.mjs --version "$version" --commit "$version_commit" --tag-exists "$tag_exists" \
+          node scripts/release-plan.mjs --version "$version" --tag-exists "$tag_exists" \
             < "$RUNNER_TEMP/releases.ndjson" > "$RUNNER_TEMP/plan"
           tee -a "$GITHUB_OUTPUT" < "$RUNNER_TEMP/plan"
 

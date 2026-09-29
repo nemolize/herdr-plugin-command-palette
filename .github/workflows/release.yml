@@ -214,20 +214,19 @@ jobs:
       # and build provenance as still uncovered.
       - run: cd dist && sha256sum "$BIN_NAME"-* > SHA256SUMS && cat SHA256SUMS
 
-      # Without its draft, the upload below would create a public release tagged
-      # at the default branch's head rather than at the commit these assets are.
+      - if: inputs.tag != ''
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
       - if: inputs.tag != ''
         name: Assert the tag's draft still targets this commit
         env:
           GH_TOKEN: ${{ github.token }}
           REF: ${{ inputs.ref }}
         run: |
-          target=$(gh api "repos/$GITHUB_REPOSITORY/releases" --paginate \
-            --jq ".[] | select(.draft and .tag_name == \"$PUBLISH_TAG\") | .target_commitish")
-          [ "$target" = "$REF" ] || {
-            echo "::error::no draft $PUBLISH_TAG targeting $REF (found: ${target:-none})"
-            exit 1
-          }
+          gh api "repos/$GITHUB_REPOSITORY/releases" --paginate \
+            --jq '.[] | {tag_name, draft, target_commitish}' > "$RUNNER_TEMP/releases.ndjson"
+          node scripts/assert-draft.mjs --tag "$PUBLISH_TAG" --ref "$REF" < "$RUNNER_TEMP/releases.ndjson"
 
       - if: env.PUBLISHING == 'true'
         uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
