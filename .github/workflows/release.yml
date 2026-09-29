@@ -214,10 +214,22 @@ jobs:
       # and build provenance as still uncovered.
       - run: cd dist && sha256sum "$BIN_NAME"-* > SHA256SUMS && cat SHA256SUMS
 
+      # This file runs at the caller's commit but the tree above is the draft's,
+      # which may predate the guard script; take the script from the caller's.
+      - if: inputs.tag != ''
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          path: .release-tooling
+          persist-credentials: false
+          sparse-checkout: |
+            scripts
+            .node-version
+          sparse-checkout-cone-mode: false
       - if: inputs.tag != ''
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version-file: .node-version
+          node-version-file: .release-tooling/.node-version
       - if: inputs.tag != ''
         name: Assert the tag's draft still targets this commit
         env:
@@ -226,7 +238,8 @@ jobs:
         run: |
           gh api "repos/$GITHUB_REPOSITORY/releases" --paginate \
             --jq '.[] | {tag_name, draft, target_commitish}' > "$RUNNER_TEMP/releases.ndjson"
-          node scripts/assert-draft.mjs --tag "$PUBLISH_TAG" --ref "$REF" < "$RUNNER_TEMP/releases.ndjson"
+          node .release-tooling/scripts/assert-draft.mjs --tag "$PUBLISH_TAG" --ref "$REF" \
+            < "$RUNNER_TEMP/releases.ndjson"
 
       - if: env.PUBLISHING == 'true'
         uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
