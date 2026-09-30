@@ -457,10 +457,9 @@ error, and they want opposite responses:
 | Our own palette | Close it — the keypress reads as a toggle |
 | Another plugin's popup | Report it, change nothing |
 
-Only the second row is reachable on 0.8.2, for the reason the next section
-gives; the first is what a later release would restore.
+Only the second row is reachable, for the reason the next section gives.
 
-### The API forbids both, on 0.8.2 — the toggle is not buildable
+### The API forbids both — the toggle is not buildable
 
 This section was written from the API schema and is **wrong about what the
 running server does**. Building the plugin (#9) established the following
@@ -493,17 +492,17 @@ palette dismiss another plugin's UI as a side effect of a keypress meant for us.
 On `popup already open`: report it and exit without touching anything.
 
 That is case 2 of the table, applied to both rows — not because a stranger's
-popup and ours deserve the same response, but because on 0.8.2 they cannot be
-told apart. It is the safe direction the table already argued for: the worst
+popup and ours deserve the same response, but because herdr gives no way to
+tell them apart. It is the safe direction the table already argued for: the worst
 outcome is one redundant message, where the alternative risks closing someone
 else's window.
 
-**Toggling is deferred, not dropped** — tracked as #12, so the condition has a
-home outside this prose. It needs `plugin.pane.open` to return the pane id it
-already declares in the schema. When a herdr release ships that, the
-id is recorded in `$HERDR_PLUGIN_STATE_DIR` (it must survive between the two
-separate processes an invocation spans, §3), and case 1 becomes buildable
-exactly as first written.
+**Toggling is dropped** — #12 re-checked all four routes through herdr 0.9.3,
+found none reopened, and was closed as not planned. It would need
+`plugin.pane.open` to return the pane id it already declares in the schema; the
+id would then be recorded in `$HERDR_PLUGIN_STATE_DIR` (it must survive between
+the two separate processes an invocation spans, §3), and case 1 would become
+buildable exactly as first written.
 
 Note what this costs: the palette's binding opens but does not close it, so
 dismissal is `Esc` alone — which is what the click-outside section below now
@@ -837,7 +836,7 @@ build entry ran.
    requires one, the plugin pane is absent from `pane.list`, and the pane
    process receives no id of its own — so our own popup cannot be named, and the
    only primitive that would close it is parameterless `popup.close`, which
-   would dismiss another plugin's UI. Deferred until a release returns the id.
+   would dismiss another plugin's UI. Still true on 0.9.3; dropped (#12).
 5. ~~**Implementation language**~~ — **settled: Rust + ratatui**, by building a
    prototype in each (#4) and then testing the one axis that decision rested on
    (#5). #4 picked Go because Rust could not cross-compile the

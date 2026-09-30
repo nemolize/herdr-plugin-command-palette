@@ -60,7 +60,7 @@ case "$error_message" in
 esac
 
 # A popup is up, and this is where §6's toggle was to go. It cannot be built on
-# herdr 0.8.2 (tracked as #12):
+# herdr through 0.9.3, and #12 dropped it:
 #
 #   - `plugin.pane.close` and `plugin.pane.focus` both REQUIRE a pane_id.
 #   - `plugin.pane.open` returns only {"type":"ok"} — the PluginPaneInfo the
