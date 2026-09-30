@@ -88,13 +88,8 @@ A name longer than the popup scrolls: the input shows its end, so the cursor and
 whatever you just typed stay on screen. Wide characters and emoji are measured as
 the terminal draws them, and a clip never lands inside a glyph.
 
-**Dismissal is `Esc`, `Ctrl-C`, or picking an entry.** Pressing the palette's own
-key again does not close it — herdr (checked through 0.9.3) gives a plugin no way
-to name its own popup, so closing "ours" specifically is not expressible; the
-alternative would risk dismissing another plugin's window. Closed as not planned
-in [#12](https://github.com/nemolize/herdr-plugin-command-palette/issues/12).
-There is no click-outside-to-dismiss either: no mouse events reach a plugin at
-all.
+**Dismissal is `Esc`, `Ctrl-C`, or picking an entry.** There is no
+click-outside-to-dismiss: no mouse events reach a plugin at all.
 
 Ordering is frecency — entries you run often and recently rise to the top.
 

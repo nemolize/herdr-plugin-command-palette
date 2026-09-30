@@ -59,23 +59,6 @@ case "$error_message" in
     ;;
 esac
 
-# A popup is up, and this is where §6's toggle was to go. It cannot be built on
-# herdr through 0.9.3, and #12 dropped it:
-#
-#   - `plugin.pane.close` and `plugin.pane.focus` both REQUIRE a pane_id.
-#   - `plugin.pane.open` returns only {"type":"ok"} — the PluginPaneInfo the
-#     schema defines is not what the running server sends, over the CLI or the
-#     raw socket.
-#   - The plugin pane does not appear in `pane.list`, and the pane process
-#     receives no HERDR_PANE_ID of its own.
-#
-# So our own popup cannot be named, and the only primitive that would close it
-# is parameterless `popup.close` — which closes whatever is up regardless of
-# owner. §6 rejects that on purpose: it would let a keypress meant for us
-# dismiss another plugin's UI.
-#
-# Reporting is therefore the whole behaviour for now. It is §6's safe direction
-# — the worst outcome is one redundant message, where the alternative risks
-# closing someone else's window. Dismissal stays Esc, which the palette has.
+# Report only, never close: the popup may be another plugin's (docs/design.md §6).
 printf 'command palette: a popup is already open (press Esc in it to close)\n' >&2
 exit 1
