@@ -146,10 +146,11 @@ fn apply(app: &mut App, event: Event, drawn_rows: u16) -> Option<Step> {
     })
 }
 
-/// The fewest pane rows at which every stage still shows two candidates — the
-/// Commands stage with a skip reason is the tallest: query, two rows, a
-/// two-row reason, footer. Herdr's manifest has no size floor, so the palette
-/// enforces it (docs/design.md §5).
+/// The height of the palette's own terminal below which it draws only the
+/// too-short message. 6 is the fewest rows at which every stage lists two
+/// candidates while the footer takes one row — the Commands stage with a skip
+/// reason is the tallest: query, two rows, a two-row reason, footer. Herdr's
+/// manifest has no size floor, so the palette enforces it (docs/design.md §5).
 const MIN_ROWS: u16 = 6;
 
 fn render(f: &mut Frame, app: &mut App) {
@@ -1207,7 +1208,7 @@ mod wiring_tests {
     /// Esc closes outright rather than stepping back a stage: the stage it
     /// would return to is just as invisible.
     #[test]
-    fn esc_and_ctrl_c_close_a_too_short_palette_from_any_stage() {
+    fn esc_and_ctrl_c_close_a_too_short_palette_from_the_targets_stage() {
         let entry = command("tab.focus", "Focus tab", &["tab", "focus", "{}"], None);
         let mut app = app_with(vec![entry.clone()]);
         app.enter_targets(
