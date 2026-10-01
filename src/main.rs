@@ -144,8 +144,8 @@ fn run() -> Result<(), String> {
     let mut screen = ui::Screen::enter()?;
 
     loop {
-        screen.draw(&mut app)?;
-        match ui::next_step(&mut app)? {
+        let drawn_rows = screen.draw(&mut app)?;
+        match ui::next_step(&mut app, drawn_rows)? {
             Step::Continue => {}
             Step::Cancel => return Ok(()),
             Step::NeedsTargets(command) => {

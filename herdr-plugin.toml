@@ -17,7 +17,8 @@ command = ["sh", "herdr/install.sh"]
 
 # popup is the only placement that accepts width/height (docs/design.md §5), and
 # these are the only place they can be set — `herdr plugin pane open` has no
-# --width/--height flags, so the action hop cannot pass a size.
+# --width/--height flags, so the action hop cannot pass a size. There is no key
+# for §5's floors; the palette enforces the height one itself.
 [[panes]]
 id = "palette"
 title = "Command Palette"

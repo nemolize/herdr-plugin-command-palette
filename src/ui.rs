@@ -41,10 +41,11 @@ impl Screen {
         }
     }
 
-    pub fn draw(&mut self, app: &mut App) -> Result<(), String> {
+    /// Returns the height drawn at, which is what the user is looking at.
+    pub fn draw(&mut self, app: &mut App) -> Result<u16, String> {
         self.terminal
             .draw(|f| render(f, app))
-            .map(|_| ())
+            .map(|frame| frame.area.height)
             .map_err(|e| e.to_string())
     }
 }
@@ -59,10 +60,14 @@ impl Drop for Screen {
 /// Dismissal is Esc or picking an entry — there is no click-outside-to-dismiss,
 /// because no mouse events reach a plugin at all, and the palette's own binding
 /// cannot close it on 0.8.2 (§6).
-pub fn next_step(app: &mut App) -> Result<Step, String> {
+///
+/// `drawn_rows` is the height of the frame on screen, not the terminal's size
+/// now: a key typed at a "too short" frame must not act on a list the popup
+/// grew back into before the key was read.
+pub fn next_step(app: &mut App, drawn_rows: u16) -> Result<Step, String> {
     loop {
         let event = event::read().map_err(|e| e.to_string())?;
-        if let Some(step) = apply(app, event) {
+        if let Some(step) = apply(app, event, drawn_rows) {
             return Ok(step);
         }
     }
@@ -72,7 +77,7 @@ pub fn next_step(app: &mut App) -> Result<Step, String> {
 /// on and the loop should read again — separated from `next_step` so a key
 /// sequence can be driven through the same path a keypress takes, without a
 /// terminal (`wiring_tests`).
-fn apply(app: &mut App, event: Event) -> Option<Step> {
+fn apply(app: &mut App, event: Event, drawn_rows: u16) -> Option<Step> {
     // A resize has to redraw immediately rather than wait for a keypress:
     // on Termux the popup resizes exactly when the software keyboard is
     // raised, which is the moment the palette is being used (§5).
@@ -89,6 +94,14 @@ fn apply(app: &mut App, event: Event) -> Option<Step> {
     // that ignored it would read as hung.
     if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
         return Some(Step::Cancel);
+    }
+    // Nothing the user cannot see may change or run.
+    if drawn_rows < MIN_ROWS {
+        return Some(if key.code == KeyCode::Esc {
+            Step::Cancel
+        } else {
+            Step::Continue
+        });
     }
     let typing = matches!(app.stage, Stage::Prompt { .. });
     Some(match key.code {
@@ -133,7 +146,23 @@ fn apply(app: &mut App, event: Event) -> Option<Step> {
     })
 }
 
+/// The fewest pane rows at which every stage still shows two candidates — the
+/// Commands stage with a skip reason is the tallest: query, two rows, a
+/// two-row reason, footer. Herdr's manifest has no size floor, so the palette
+/// enforces it (docs/design.md §5).
+const MIN_ROWS: u16 = 6;
+
 fn render(f: &mut Frame, app: &mut App) {
+    let rows = f.area().height;
+    if rows < MIN_ROWS {
+        let message = vec![
+            Line::from(format!("Too short: needs {MIN_ROWS} rows, has {rows}")),
+            Line::from("Esc to close").dim(),
+        ];
+        f.render_widget(Paragraph::new(message).wrap(Wrap { trim: true }), f.area());
+        return;
+    }
+
     // Herdr draws the pane's own frame; a second Block here doubled it. Its
     // title is static, so Targets shows the command name on a line of its own.
     let header = match &app.stage {
@@ -905,11 +934,28 @@ mod render_tests {
         assert_eq!(lines.last().unwrap(), counts, "{lines:#?}");
     }
 
-    /// The stage that pays for the header is the one to measure, at the
-    /// contracted grid docs/design.md §5 floors at min_height = 8. More
-    /// candidates than can fit, so the count is the list's height.
+    /// Two candidates in every stage is what the floor is derived from. The
+    /// Commands stage with a skip reason selected is the tallest; Targets pays
+    /// for a header line. More candidates than can fit, so each count is the
+    /// list's height.
     #[test]
-    fn the_list_stays_usable_at_the_documented_height_floor() {
+    fn every_stage_shows_two_candidates_at_the_height_floor() {
+        let mut candidates = vec![Candidate::note("tab.rename", "no {text}")];
+        candidates.extend((0..9).map(|i| {
+            Candidate::from_command(command(&format!("c{i}"), &format!("Cmd {i}"), None))
+        }));
+        let mut app = App::new(candidates, Frecency::load(Path::new("/nonexistent")));
+        assert!(
+            app.selected_note().is_some(),
+            "the skip reason is not shown"
+        );
+        let lines = draw(&mut app, 36, MIN_ROWS);
+        let listed = lines
+            .iter()
+            .filter(|l| l.contains("Cmd") || l.contains("skipped"))
+            .count();
+        assert_eq!(listed, 2, "Commands: {lines:#?}");
+
         let picked = command("focus.tab", "Focus tab…", Some("tabs"));
         let mut app = app_with(vec![picked.clone()]);
         app.enter_targets(
@@ -921,9 +967,28 @@ mod render_tests {
                 })
                 .collect(),
         );
-        let lines = draw(&mut app, 36, 8);
+        let lines = draw(&mut app, 36, MIN_ROWS);
         let listed = lines.iter().filter(|l| l.contains("Target")).count();
-        assert_eq!(listed, 5, "{lines:#?}");
+        assert!(listed >= 2, "Targets: {lines:#?}");
+    }
+
+    #[test]
+    fn a_row_under_the_floor_replaces_the_list_with_what_it_needs() {
+        let mut app = app_with(vec![command("tab.create", "New tab", None)]);
+        let lines = draw(&mut app, 36, MIN_ROWS - 1);
+        assert_eq!(lines[0], "Too short: needs 6 rows, has 5", "{lines:#?}");
+        assert_eq!(lines[1], "Esc to close", "{lines:#?}");
+        assert!(!lines.iter().any(|l| l.contains("New tab")), "{lines:#?}");
+    }
+
+    /// Width has no enforced floor (§5): a narrow pane truncates, it does not
+    /// refuse.
+    #[test]
+    fn a_pane_narrower_than_the_advisory_width_still_draws_the_list() {
+        let mut app = app_with(vec![command("tab.create", "New tab", None)]);
+        let lines = draw(&mut app, 30, MIN_ROWS);
+        assert!(lines.iter().any(|l| l.contains("New tab")), "{lines:#?}");
+        assert!(!lines.iter().any(|l| l.contains("Too short")), "{lines:#?}");
     }
 }
 
@@ -941,6 +1006,7 @@ mod wiring_tests {
     use crate::frecency::Frecency;
     use crate::herdr::{PluginAction, Target};
     use crossterm::event::{KeyEvent, KeyEventState};
+    use ratatui::backend::TestBackend;
 
     fn command(id: &str, title: &str, args: &[&str], resolve: Option<&str>) -> Command {
         Command {
@@ -971,9 +1037,13 @@ mod wiring_tests {
     }
 
     fn press(app: &mut App, typed: &str, keys: &[KeyCode]) -> Option<Step> {
+        press_at(MIN_ROWS, app, typed, keys)
+    }
+
+    fn press_at(rows: u16, app: &mut App, typed: &str, keys: &[KeyCode]) -> Option<Step> {
         let codes = typed.chars().map(KeyCode::Char).chain(keys.iter().copied());
         for code in codes {
-            match apply(app, key(code)) {
+            match apply(app, key(code), rows) {
                 None | Some(Step::Continue) => {}
                 Some(step) => return Some(step),
             }
@@ -1097,6 +1167,69 @@ mod wiring_tests {
             Some(Step::Run(Outcome::Command { id, .. })) => assert_eq!(id, "tab.create"),
             other => panic!("backspace did not restore it: {}", describe(&other)),
         }
+    }
+
+    #[test]
+    fn a_too_short_palette_changes_nothing_and_runs_nothing() {
+        // Three matches with the middle one selected, so Up and Down would
+        // each move the selection rather than clamp.
+        let mut app = app_with(vec![
+            command("split.right", "Split pane: right", &["split"], None),
+            command("split.down", "Split pane: down", &["split"], None),
+            command("split.left", "Split pane: left", &["split"], None),
+        ]);
+        assert!(press(&mut app, "split", &[KeyCode::Down]).is_none());
+        let selected = app.selection.selected();
+
+        let short = MIN_ROWS - 1;
+        for code in [
+            KeyCode::Char('x'),
+            KeyCode::Backspace,
+            KeyCode::Up,
+            KeyCode::Down,
+            KeyCode::Enter,
+        ] {
+            let step = press_at(short, &mut app, "", &[code]);
+            assert!(step.is_none(), "{code:?}: {}", describe(&step));
+            assert_eq!(app.query(), "split", "{code:?}");
+            assert_eq!(app.selection.selected(), selected, "{code:?}");
+            assert!(matches!(app.stage, Stage::Commands), "{code:?}");
+        }
+
+        let mut terminal = Terminal::new(TestBackend::new(36, MIN_ROWS)).unwrap();
+        terminal.draw(|f| render(f, &mut app)).unwrap();
+        let input: String = (0..36)
+            .map(|x| terminal.backend().buffer()[(x, 0)].symbol())
+            .collect();
+        assert_eq!(input.trim_end(), "> split");
+    }
+
+    /// Esc closes outright rather than stepping back a stage: the stage it
+    /// would return to is just as invisible.
+    #[test]
+    fn esc_and_ctrl_c_close_a_too_short_palette_from_any_stage() {
+        let entry = command("tab.focus", "Focus tab", &["tab", "focus", "{}"], None);
+        let mut app = app_with(vec![entry.clone()]);
+        app.enter_targets(
+            entry,
+            vec![Target {
+                id: "w46:t1".into(),
+                label: "one".into(),
+            }],
+        );
+
+        let short = MIN_ROWS - 1;
+        let step = press_at(short, &mut app, "", &[KeyCode::Esc]);
+        assert!(matches!(step, Some(Step::Cancel)), "{}", describe(&step));
+
+        let ctrl_c = Event::Key(KeyEvent {
+            code: KeyCode::Char('c'),
+            modifiers: KeyModifiers::CONTROL,
+            kind: KeyEventKind::Press,
+            state: KeyEventState::NONE,
+        });
+        let step = apply(&mut app, ctrl_c, short);
+        assert!(matches!(step, Some(Step::Cancel)), "{}", describe(&step));
     }
 
     /// Every failure above is "the palette accepted the key and ran nothing",

@@ -364,12 +364,21 @@ customisations, so the numbers below are one sample of one configuration, never 
 range to size against.
 
 ```toml
-[popup]
-width      = 60      # fixed cells
-height     = "45%"   # percentage, sized against the keyboard-up state
-min_width  = 36
-min_height = 8
+# herdr-plugin.toml, [[panes]]
+width  = 60      # fixed cells
+height = "45%"   # percentage, sized against the keyboard-up state
 ```
+
+Each axis also has a floor — **6 rows** and **~36 columns** — but Herdr's manifest
+cannot hold either: a popup pane takes `width` and `height` and nothing else
+about its size, and Herdr clamps anything smaller to a popup minimum of its own
+that it does not publish. So the floors are the palette's to keep, and only one
+is kept:
+
+| floor | enforced by | below it |
+|---|---|---|
+| 6 rows, inside Herdr's border | the palette | the list is replaced by a line naming the rows it needs and has; only Esc and Ctrl-C act, and both close it |
+| ~36 columns | nothing — advisory | titles truncate, as they would anyway |
 
 The two axes take different forms, and for opposite reasons.
 
@@ -392,9 +401,20 @@ the keyboard. The idle state is the one the palette is never used in, so sizing
 against it — as the first draft's `60%` did — picks the roomy state and then
 loses about a third of it exactly when it matters.
 
-`min_height` exists because a percentage of an already-contracted grid can round
-down to something useless. A palette showing one candidate is not a smaller
-palette; it is a broken one.
+The height floor exists because a percentage of an already-contracted grid can
+round down to something useless. A palette showing one candidate is not a
+smaller palette; it is a broken one. So the floor is the fewest rows at which
+every stage still shows two: the Commands stage with a skip reason selected is
+the tallest, at query + two rows + a two-row reason + footer = 6. Below it the
+palette says so instead, and ignores every key but the two that close it, since
+nothing may change or run while the user cannot see it. Growing back past the
+floor redraws the palette with the query and selection it had.
+
+The first draft's floor was 8, never measured — #2 recorded it as a starting
+point. It was also too close to where the palette runs: 45% of the 27–29
+keyboard-up rows, less the border and the cell or two a percentage loses, is
+about 8–10 rows inside, so a slightly larger font or keyboard would have made
+the palette refuse rather than merely tighten.
 
 ### Why the first measurement came out backwards
 
@@ -427,7 +447,7 @@ Requesting the full physical width explicitly still clamps. Two consequences:
 
 - `width = 60` is not a deliberate margin — it clamps to 56 and means "as wide as
   available" on this device.
-- `min_width` is measured against the **pane region**, not the terminal. The
+- The width floor is measured against the **pane region**, not the terminal. The
   sidebar has already taken its ~26 columns before the palette sees anything, so
   a narrower device runs out sooner than its terminal width suggests.
 
@@ -444,7 +464,7 @@ gets there. Revisit if a report arrives from a genuinely narrower terminal.
 
 A live resize mid-render (43 ↔ 27 rows, raising and lowering the keyboard) redrew
 cleanly — no tearing, corruption, or hang. The TUI needs no special handling for
-it beyond respecting `min_height`.
+it beyond the height floor above.
 
 ## 6. Popup collision — report it and touch nothing
 
@@ -614,7 +634,10 @@ description = "Fuzzy-search and run Herdr's own commands, plugin actions, and se
 [[build]]
 command = ["sh", "herdr/install.sh"]
 
-# popup is the only placement that accepts width/height (docs/design.md §5).
+# popup is the only placement that accepts width/height (docs/design.md §5), and
+# these are the only place they can be set — `herdr plugin pane open` has no
+# --width/--height flags, so the action hop cannot pass a size. There is no key
+# for §5's floors; the palette enforces the height one itself.
 [[panes]]
 id = "palette"
 title = "Command Palette"
@@ -821,10 +844,11 @@ build entry ran.
    than generic Linux: a static generic-Linux build runs but silently loses DNS
    and user lookup.
 2. ~~**Popup sizing on a narrow screen** (#2)~~ — **settled**, see §5. Width is
-   fixed cells, height a percentage sized against the keyboard-up state, both
-   with floors. The first measurement had its keyboard labels reversed; the
-   re-measurement corrected the direction and the numbers were re-derived from
-   it.
+   fixed cells, height a percentage sized against the keyboard-up state. Each
+   has a floor the manifest cannot express: the palette enforces the height one
+   (6 rows), and the width one (~36 columns) is advisory (#33). The first
+   measurement had its keyboard labels reversed; the re-measurement corrected
+   the direction and the numbers were re-derived from it.
 3. ~~**Catalog contents**~~ — **settled**, see §4 and `herdr/catalog.toml`.
    Twenty entries, every flag checked against `herdr 0.8.2`'s own help rather
    than recalled. Reading the CLI corrected two assumptions §4 had made about
