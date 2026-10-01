@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use ratatui::buffer::CellWidth;
 use serde::Deserialize;
 use unicode_segmentation::UnicodeSegmentation;
+use unicode_width::UnicodeWidthStr;
 
 #[derive(Debug, Deserialize)]
 pub struct Catalog {
@@ -137,6 +138,7 @@ pub fn rejection(c: &Command) -> Option<String> {
 /// The icon column is one cell wide on every row, so an override drawn wider or
 /// narrower would push its own title out of line with every other.
 fn icon_rejection(icon: &str) -> Option<String> {
+    // Before `cell_width`, which panics on a control character in a debug build.
     if icon.chars().any(char::is_control) {
         return Some(format!("`icon` {icon:?} contains a control character"));
     }
@@ -145,6 +147,9 @@ fn icon_rejection(icon: &str) -> Option<String> {
         return Some(format!("`icon` {icon:?} is {clusters} glyphs, expected 1"));
     }
     match icon.cell_width() {
+        1 if icon.width_cjk() != 1 => Some(format!(
+            "`icon` {icon:?} is East Asian Ambiguous width, drawn 2 cells wide in a CJK locale"
+        )),
         1 => None,
         cells => Some(format!("`icon` {icon:?} is {cells} cells wide, expected 1")),
     }
@@ -472,6 +477,8 @@ mod tests {
             ("あ", "2 cells"),
             ("👩\u{200D}💻", "2 cells"),
             ("\u{200B}", "0 cells"),
+            ("□", "Ambiguous"),
+            ("○", "Ambiguous"),
         ];
         for (bad, reason) in cases {
             let why = super::rejection(&entry_with_icon(&["pane", "close"], Some(bad)))

@@ -374,7 +374,9 @@ platform that forgives least: a Nerd Font codepoint without a patched font is
 tofu, and an emoji is two cells wide and drawn differently per platform. Each
 glyph above is East Asian Width `N` — never `A`, which a CJK-locale terminal
 draws double while ratatui counts one — and has no emoji presentation. The
-issue's own example `□` is `A`, which is why it is not used.
+issue's own example `□` is `A`, which is why it is not used. An `icon` override
+is held to the same width rule, checked against both widths, and skipped with
+its reason when it fails.
 
 The icon column is **never dropped**, unlike the key (§10) and the footer's
 version: it is what the row is scanned by, so at the ~36-column floor (§5) the
