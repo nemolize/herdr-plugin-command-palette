@@ -1,0 +1,32 @@
+name: Verify Dispatch Trampoline
+
+# Throwaway: reproduces the version PR's shape (a GITHUB_TOKEN push + PR), then
+# dispatches CI at that branch with the same token.
+on:
+  push:
+    branches: [verify/dispatch-ci]
+
+permissions: {}
+
+jobs:
+  Trampoline:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write
+      pull-requests: write
+      actions: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git switch -c verify/bot-pr
+          git commit --allow-empty -m "test: bot-authored head"
+          git push --force origin verify/bot-pr
+          gh pr create --base main --head verify/bot-pr \
+            --title "[verify] bot PR with dispatched CI (do not merge)" \
+            --body "Throwaway check: do workflow_dispatch CI runs satisfy required checks on a GITHUB_TOKEN-authored PR?"
+          gh workflow run ci.yml --ref verify/bot-pr
