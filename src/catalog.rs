@@ -3,6 +3,7 @@
 use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
+use unicode_segmentation::UnicodeSegmentation;
 
 #[derive(Debug, Deserialize)]
 pub struct Catalog {
@@ -35,7 +36,19 @@ pub struct Command {
     /// this — it is stated here, beside the entry a correction would edit.
     #[serde(default)]
     pub binding: Option<String>,
+    /// Replaces the glyph derived from the entry's subject (docs/design.md §4).
+    #[serde(default)]
+    pub icon: Option<String>,
 }
+
+/// East Asian Width `N` only — an `A` glyph is drawn double in a CJK locale —
+/// and none with an emoji presentation, so the column holds one cell anywhere.
+const SUBJECT_ICONS: &[(&str, &str)] = &[
+    ("pane", "◫"),
+    ("tab", "▭"),
+    ("workspace", "⬚"),
+    ("server", "↻"),
+];
 
 impl Command {
     pub fn needs_target(&self) -> bool {
@@ -44,6 +57,19 @@ impl Command {
 
     pub fn needs_text(&self) -> bool {
         self.prompt.is_some()
+    }
+
+    /// The entry's own `icon`, else its subject's, else empty — an empty icon
+    /// still takes its cell, so the titles stay aligned.
+    pub fn icon(&self) -> &str {
+        if let Some(icon) = &self.icon {
+            return icon;
+        }
+        let subject = self.args.first().map(String::as_str);
+        SUBJECT_ICONS
+            .iter()
+            .find(|(s, _)| Some(*s) == subject)
+            .map_or("", |(_, glyph)| glyph)
     }
 
     pub fn available_in(&self, context: &str) -> bool {
@@ -82,6 +108,14 @@ pub fn rejection(c: &Command) -> Option<String> {
     let texts = c.args.iter().filter(|a| *a == "{text}").count();
     let ids = c.args.iter().filter(|a| *a == "{}").count();
 
+    if let Some(icon) = &c.icon {
+        let clusters = icon.graphemes(true).count();
+        if clusters != 1 || icon.chars().any(char::is_control) {
+            return Some(format!(
+                "`icon` must be one glyph, got {clusters} in {icon:?}"
+            ));
+        }
+    }
     if c.resolve.is_some() && c.prompt.is_some() {
         return Some("`resolve` and `prompt` on one entry".into());
     }
@@ -214,6 +248,7 @@ mod tests {
             resolve: resolve.map(str::to_owned),
             prompt: prompt.map(str::to_owned),
             binding: None,
+            icon: None,
         };
 
         let both = entry(
@@ -370,6 +405,62 @@ mod tests {
                         .all(|c| c.is_ascii_lowercase() || c == '_' || c.is_ascii_digit()),
                 "{}: `{binding}` is not a [keys] action name",
                 e.id
+            );
+        }
+    }
+
+    fn entry_with_icon(args: &[&str], icon: Option<&str>) -> Command {
+        Command {
+            id: "x".into(),
+            title: "X".into(),
+            args: args.iter().map(|s| s.to_string()).collect(),
+            contexts: vec![],
+            resolve: None,
+            prompt: None,
+            binding: None,
+            icon: icon.map(str::to_owned),
+        }
+    }
+
+    #[test]
+    fn every_shipped_entry_derives_its_subjects_icon() {
+        for e in &shipped().commands {
+            let expected = match e.args[0].as_str() {
+                "pane" => "◫",
+                "tab" => "▭",
+                "workspace" => "⬚",
+                "server" => "↻",
+                other => panic!("{}: no expected icon for `{other}`", e.id),
+            };
+            assert_eq!(e.icon, None, "{}: shipped entries derive", e.id);
+            assert_eq!(e.icon(), expected, "{}", e.id);
+        }
+    }
+
+    #[test]
+    fn an_icon_key_replaces_the_derived_glyph() {
+        assert_eq!(entry_with_icon(&["pane", "close"], Some("✕")).icon(), "✕");
+    }
+
+    #[test]
+    fn a_subject_with_no_glyph_derives_an_empty_icon() {
+        assert_eq!(entry_with_icon(&["agent", "list"], None).icon(), "");
+    }
+
+    /// A glyph the column cannot hold as one cell-run would push the title off
+    /// its column, so these surface as a `skipped` row instead.
+    #[test]
+    fn an_icon_that_is_not_one_glyph_is_rejected() {
+        for bad in ["", "◫◫", "ab", "\t"] {
+            let why = super::rejection(&entry_with_icon(&["pane", "close"], Some(bad)))
+                .unwrap_or_else(|| panic!("{bad:?} was accepted"));
+            assert!(why.contains("`icon`"), "{bad:?}: {why}");
+        }
+        for good in ["✕", "e\u{301}", "👩\u{200D}💻"] {
+            assert_eq!(
+                super::rejection(&entry_with_icon(&["pane", "close"], Some(good))),
+                None,
+                "{good:?}"
             );
         }
     }

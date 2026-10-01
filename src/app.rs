@@ -24,13 +24,21 @@ pub struct Candidate {
     /// beside the title rather than inside it because the two are laid out in
     /// separate columns and the title alone is what the filter matches.
     pub key: String,
+    /// The glyph leading the row; empty still takes its cell.
+    pub icon: String,
 }
+
+/// Another plugin's action — one glyph for all of them, since the catalog that
+/// would name a subject does not carry these rows.
+pub const ACTION_ICON: &str = "⧉";
+pub const NOTE_ICON: &str = "!";
 
 impl Candidate {
     pub fn from_command(c: Command) -> Self {
         Self {
             id: c.id.clone(),
             title: c.title.clone(),
+            icon: c.icon().to_string(),
             kind: Kind::Command(c),
             key: String::new(),
         }
@@ -42,6 +50,7 @@ impl Candidate {
             title: a.title.clone(),
             kind: Kind::Action(a),
             key: String::new(),
+            icon: ACTION_ICON.to_string(),
         }
     }
 
@@ -53,6 +62,7 @@ impl Candidate {
             title: format!("skipped `{id}`"),
             kind: Kind::Note(why.to_string()),
             key: String::new(),
+            icon: NOTE_ICON.to_string(),
         }
     }
 }
@@ -103,6 +113,8 @@ pub struct App {
     pub stage: Stage,
     pub status: Option<String>,
     pub selection: Selection,
+    /// Whether Commands-stage rows lead with their icon (`settings.toml`).
+    pub icons: bool,
     candidates: Vec<Candidate>,
     frecency: Frecency,
 }
@@ -113,6 +125,7 @@ impl App {
             stage: Stage::Commands,
             status: None,
             selection: Selection::default(),
+            icons: true,
             candidates,
             frecency,
         };
@@ -176,6 +189,21 @@ impl App {
                 _ => "",
             })
             .collect()
+    }
+
+    /// Aligned with `rows`; None when there is no icon column — switched off, or
+    /// a stage listing one kind of thing, where a glyph distinguishes nothing.
+    pub fn row_icons(&self) -> Option<Vec<&str>> {
+        if !self.icons || !matches!(self.stage, Stage::Commands) {
+            return None;
+        }
+        Some(
+            self.selection
+                .visible()
+                .iter()
+                .map(|&i| self.candidates[i].icon.as_str())
+                .collect(),
+        )
     }
 
     pub fn total(&self) -> usize {
@@ -398,6 +426,7 @@ mod tests {
             resolve: resolve.map(str::to_owned),
             prompt: None,
             binding: None,
+            icon: None,
         }
     }
 

@@ -8,6 +8,7 @@ mod fuzzy;
 mod herdr;
 mod keys;
 mod selection;
+mod settings;
 mod ui;
 
 use std::path::PathBuf;
@@ -120,7 +121,10 @@ fn run() -> Result<(), String> {
         .map(Frecency::load)
         .unwrap_or_default();
 
+    let (settings, settings_problem) = settings::load(config_dir.as_deref());
+
     let mut app = App::new(candidates, frecency);
+    app.icons = settings.icons;
 
     // The catalog drifts when Herdr changes its CLI and nothing detects that
     // automatically (§4). A running Herdr older than the version the catalog was
@@ -139,6 +143,15 @@ fn run() -> Result<(), String> {
             "catalog: {} skipped — search `skipped`",
             rejected.len()
         ));
+    }
+
+    // Appended rather than assigned: the notes above still hold, and a
+    // settings file that is being ignored must not be the message that hides them.
+    if let Some(problem) = settings_problem {
+        app.status = Some(match app.status.take() {
+            Some(earlier) => format!("{earlier} · {problem}"),
+            None => problem,
+        });
     }
 
     let mut screen = ui::Screen::enter()?;
@@ -320,6 +333,7 @@ mod tests {
             resolve: None,
             prompt: None,
             binding: None,
+            icon: None,
         }
     }
 

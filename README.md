@@ -128,6 +128,23 @@ what correcting a catalog means. Start from
 - `contexts` limits where the entry is offered.
 - `binding` names the `[keys]` action in **your** `config.toml` that does the
   same thing, so the palette can show the key beside the entry (see below).
+- `icon` replaces the glyph leading the entry's row. Without it the glyph comes
+  from the first word of `args`: `◫` pane, `▭` tab, `⬚` workspace, `↻` server.
+  Other plugins' actions show `⧉`. It must be a single glyph; anything else
+  skips the entry with that reason.
+
+### Settings
+
+`settings.toml` in the same directory holds switches that are not about the
+catalog, so turning one off does not mean copying the whole catalog:
+
+```toml
+icons = false   # rows without the leading icon; the default is true
+```
+
+The file is optional — without it every default applies. One that cannot be
+read or parsed, or that carries a key the palette does not know, is reported in
+the footer and the defaults apply.
 
 Popup size and placement live in the manifest (`herdr-plugin.toml`), not here —
 `herdr plugin pane open` has no `--width` / `--height` flags, so the action hop
