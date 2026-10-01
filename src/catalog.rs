@@ -337,6 +337,7 @@ mod tests {
             (&["pane", "focus"], 0),
             (&["pane", "zoom"], 0),
             (&["pane", "swap"], 0),
+            (&["pane", "resize"], 0),
             (&["pane", "close"], 1),
             (&["pane", "move"], 1),
             // 2 is what an entry must supply, not what the CLI demands: pane's

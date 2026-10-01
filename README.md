@@ -174,9 +174,11 @@ it unnecessary.
 The key shown is **your** key. Herdr's shipped defaults come from
 `herdr --default-config`, and anything you set in `config.toml` overrides them —
 a plain string or a list, of which the first is shown — so a rebound action shows
-what you bound it to. An action you deliberately cleared (`new_tab = ""`) reads
+what you bound it to. An action with no key — one you deliberately cleared
+(`new_tab = ""`), or one Herdr ships without a key (`Resize pane: …`) — reads
 `unbound`, which is a different thing from the blank shown when nothing claims to
-know of a shortcut at all.
+know of a shortcut at all. A resize row reads `unbound` even though `prefix+r`
+resizes too: that key enters resize mode, which is a separate action.
 
 Your own plugin actions need no setup: a `[[keys.command]]` block with
 `type = "plugin_action"` is matched by its `command`, which is already the id the
