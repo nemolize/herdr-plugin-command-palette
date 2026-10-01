@@ -2,7 +2,8 @@
 
 use crate::catalog::Command;
 use crate::frecency::Frecency;
-use crate::herdr::{PluginAction, Target};
+use crate::herdr::PluginAction;
+use crate::listing::Target;
 use crate::selection::Selection;
 
 pub enum Kind {

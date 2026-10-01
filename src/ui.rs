@@ -435,7 +435,7 @@ mod render_tests {
     use crate::app::Candidate;
     use crate::catalog::Command;
     use crate::frecency::Frecency;
-    use crate::herdr::Target;
+    use crate::listing::Target;
     use ratatui::backend::TestBackend;
     use std::path::Path;
 
@@ -1134,7 +1134,8 @@ mod wiring_tests {
     use crate::app::{Candidate, Outcome};
     use crate::catalog::Command;
     use crate::frecency::Frecency;
-    use crate::herdr::{PluginAction, Target};
+    use crate::herdr::PluginAction;
+    use crate::listing::Target;
     use crossterm::event::{KeyEvent, KeyEventState};
     use ratatui::backend::TestBackend;
 

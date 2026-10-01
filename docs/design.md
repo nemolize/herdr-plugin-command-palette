@@ -277,7 +277,7 @@ focused workspace — the `--current` trap again — so it always runs with
 `worktree create` and `open` cannot take that same workspace as their source:
 they refuse a linked worktree's workspace, and that is the one in front after
 either entry's `--focus`. They name the repository instead, with `--cwd {repo}`,
-filled when the entry runs from the listing's `source.repo_root`.
+filled from the listing's `source.repo_root` when the entry is picked.
 
 Entries needing an argument no listing can supply — a new name — carry a `prompt`
 key instead, whose value labels a free-text stage filling a `{text}` placeholder.
@@ -339,8 +339,9 @@ where the defect happened to be invisible. A literal can do neither.
 A second, simpler substitution covers the ids the invocation already knows:
 `{pane}`, `{tab}` and `{workspace}` resolve from `HERDR_PLUGIN_CONTEXT_JSON`
 (§8). That is how `pane.close` names the current pane without a picker. `{repo}`
-is derived from `{workspace}` by a herdr call, so it is filled only when the
-entry runs. An entry
+is derived from `{workspace}` by a herdr call, so it is filled only once the
+entry is picked — before a typed or picked value goes in, so a value spelling
+`{repo}` is never rewritten. An entry
 naming an id the invocation lacks is not offered at all, rather than failing when
 it is picked.
 

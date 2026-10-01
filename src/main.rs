@@ -7,10 +7,12 @@ mod frecency;
 mod fuzzy;
 mod herdr;
 mod keys;
+mod listing;
 mod selection;
 mod settings;
 mod ui;
 
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
@@ -53,7 +55,8 @@ fn seed_for(herdr: &Herdr, command: &catalog::Command) -> String {
 }
 
 /// Fills `{repo}`, which unlike the context ids costs a herdr call — so it is
-/// made only once an entry naming it runs.
+/// made only once an entry naming it is picked, and before a typed or picked
+/// value goes in, so a value spelling `{repo}` is never rewritten.
 fn fill_repo(herdr: &Herdr, context: &Context, args: &[String]) -> Result<Vec<String>, String> {
     if !args.iter().any(|a| a == "{repo}") {
         return Ok(args.to_vec());
@@ -73,6 +76,26 @@ fn fill_repo(herdr: &Herdr, context: &Context, args: &[String]) -> Result<Vec<St
             }
         })
         .collect())
+}
+
+/// The candidates for a `resolve` entry. `worktree list` alone takes its column
+/// from the entry's argv and its scope from the context.
+fn targets_for(
+    herdr: &Herdr,
+    command: &catalog::Command,
+    context: &Context,
+) -> Result<Vec<listing::Target>, String> {
+    let resolve = command.resolve.as_deref().unwrap_or_default();
+    if resolve != "worktree list" {
+        return herdr.targets(resolve);
+    }
+    let key = listing::WorktreeKey::for_args(&command.args)
+        .ok_or_else(|| catalog::rejection(command).unwrap_or_default())?;
+    let workspace = context
+        .workspace_id
+        .as_deref()
+        .ok_or_else(|| "no workspace to list the repository of".to_string())?;
+    herdr.worktrees(key, workspace)
 }
 
 fn run() -> Result<(), String> {
@@ -106,6 +129,14 @@ fn run() -> Result<(), String> {
             .and_then(|p| std::fs::read_to_string(p).ok())
             .as_deref(),
     );
+
+    // Every other entry naming `{repo}` has it filled when its stage opens.
+    let unstaged_repo: HashSet<String> = catalog
+        .commands
+        .iter()
+        .filter(|c| !c.needs_target() && !c.needs_text() && c.args.iter().any(|a| a == "{repo}"))
+        .map(|c| c.id.clone())
+        .collect();
 
     let (mut candidates, rejected) = assemble(
         catalog.commands,
@@ -179,9 +210,16 @@ fn run() -> Result<(), String> {
         match ui::next_step(&mut app, drawn_rows)? {
             Step::Continue => {}
             Step::Cancel => return Ok(()),
-            Step::NeedsTargets(command) => {
+            Step::NeedsTargets(mut command) => {
+                command.args = match fill_repo(&herdr, &context, &command.args) {
+                    Ok(args) => args,
+                    Err(e) => {
+                        app.status = Some(format!("`{}` failed: {e}", command.id));
+                        continue;
+                    }
+                };
                 let resolve = command.resolve.clone().unwrap_or_default();
-                match herdr.targets(&resolve, &command.args, context.workspace_id.as_deref()) {
+                match targets_for(&herdr, &command, &context) {
                     Ok(targets) if targets.is_empty() => {
                         app.status = Some(format!("nothing to pick from `{resolve}`"));
                     }
@@ -192,7 +230,14 @@ fn run() -> Result<(), String> {
                     Err(e) => app.status = Some(format!("{resolve}: {e}")),
                 }
             }
-            Step::NeedsPrompt(command) => {
+            Step::NeedsPrompt(mut command) => {
+                command.args = match fill_repo(&herdr, &context, &command.args) {
+                    Ok(args) => args,
+                    Err(e) => {
+                        app.status = Some(format!("`{}` failed: {e}", command.id));
+                        continue;
+                    }
+                };
                 let seed = seed_for(&herdr, &command);
                 app.enter_prompt(command, seed);
             }
@@ -203,11 +248,15 @@ fn run() -> Result<(), String> {
                     let _ = app.frecency().save(path);
                 }
                 if let Outcome::Command { id, args } = &mut outcome {
-                    match fill_repo(&herdr, &context, args) {
-                        Ok(filled) => *args = filled,
-                        Err(e) => {
-                            app.status = Some(format!("`{id}` failed: {e}"));
-                            continue;
+                    // A staged entry was filled when its stage opened; a
+                    // `{repo}` left in its argv is the user's own value.
+                    if unstaged_repo.contains(id) {
+                        match fill_repo(&herdr, &context, args) {
+                            Ok(filled) => *args = filled,
+                            Err(e) => {
+                                app.status = Some(format!("`{id}` failed: {e}"));
+                                continue;
+                            }
                         }
                     }
                 }
@@ -350,6 +399,27 @@ fn argv(outcome: Outcome) -> (String, Vec<String>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Both refusals are decided before anything is spawned, so the bin path
+    /// is never reached.
+    #[test]
+    fn a_worktree_listing_with_nothing_to_scope_or_fill_is_refused() {
+        let herdr = Herdr::new("/nonexistent-herdr-binary".to_string());
+        let mut open = command("worktree.open", &["worktree", "open", "--path", "{}"], &[]);
+        open.resolve = Some("worktree list".into());
+
+        let err = targets_for(&herdr, &open, &Context::default()).expect_err("no workspace");
+        assert!(err.contains("no workspace"), "{err}");
+
+        let mut branch = open.clone();
+        branch.args[2] = "--branch".into();
+        let context = Context {
+            workspace_id: Some("w1".into()),
+            ..Context::default()
+        };
+        let err = targets_for(&herdr, &branch, &context).expect_err("no column");
+        assert!(err.contains("--path"), "{err}");
+    }
 
     fn command(id: &str, args: &[&str], contexts: &[&str]) -> catalog::Command {
         catalog::Command {
