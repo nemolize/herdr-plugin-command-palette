@@ -369,7 +369,7 @@ width  = 60      # fixed cells
 height = "45%"   # percentage, sized against the keyboard-up state
 ```
 
-Each axis also has a floor — **8 rows** and **~36 columns** — but Herdr's manifest
+Each axis also has a floor — **6 rows** and **~36 columns** — but Herdr's manifest
 cannot hold either: a popup pane takes `width` and `height` and nothing else
 about its size, and Herdr clamps anything smaller to a popup minimum of its own
 that it does not publish. So the floors are the palette's to keep, and only one
@@ -377,7 +377,7 @@ is kept:
 
 | floor | enforced by | below it |
 |---|---|---|
-| 8 rows, inside Herdr's border | the palette | the list is replaced by a line naming the rows it needs and has; only Esc and Ctrl-C act, and both close it |
+| 6 rows, inside Herdr's border | the palette | the list is replaced by a line naming the rows it needs and has; only Esc and Ctrl-C act, and both close it |
 | ~36 columns | nothing — advisory | titles truncate, as they would anyway |
 
 The two axes take different forms, and for opposite reasons.
@@ -403,10 +403,18 @@ loses about a third of it exactly when it matters.
 
 The height floor exists because a percentage of an already-contracted grid can
 round down to something useless. A palette showing one candidate is not a
-smaller palette; it is a broken one — so below 8 rows it says so instead, and
-ignores every key but the two that close it, since nothing may change or run
-while the user cannot see it. Growing back past the floor redraws the palette
-with the query and selection it had.
+smaller palette; it is a broken one. So the floor is the fewest rows at which
+every stage still shows two: the Commands stage with a skip reason selected is
+the tallest, at query + two rows + a two-row reason + footer = 6. Below it the
+palette says so instead, and ignores every key but the two that close it, since
+nothing may change or run while the user cannot see it. Growing back past the
+floor redraws the palette with the query and selection it had.
+
+The first draft's floor was 8, never measured — #2 recorded it as a starting
+point. It was also too close to where the palette runs: 45% of the 27–29
+keyboard-up rows, less the border and the cell or two a percentage loses, is
+about 8–10 rows inside, so a slightly larger font or keyboard would have made
+the palette refuse rather than merely tighten.
 
 ### Why the first measurement came out backwards
 
@@ -838,7 +846,7 @@ build entry ran.
 2. ~~**Popup sizing on a narrow screen** (#2)~~ — **settled**, see §5. Width is
    fixed cells, height a percentage sized against the keyboard-up state. Each
    has a floor the manifest cannot express: the palette enforces the height one
-   (8 rows), and the width one (~36 columns) is advisory (#33). The first
+   (6 rows), and the width one (~36 columns) is advisory (#33). The first
    measurement had its keyboard labels reversed; the re-measurement corrected
    the direction and the numbers were re-derived from it.
 3. ~~**Catalog contents**~~ — **settled**, see §4 and `herdr/catalog.toml`.

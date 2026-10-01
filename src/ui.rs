@@ -4,7 +4,7 @@ use std::io::{stdout, Stdout};
 
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use crossterm::terminal::{
-    self, disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
+    disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
 use crossterm::ExecutableCommand;
 use ratatui::buffer::CellWidth;
@@ -41,10 +41,11 @@ impl Screen {
         }
     }
 
-    pub fn draw(&mut self, app: &mut App) -> Result<(), String> {
+    /// Returns the height drawn at, which is what the user is looking at.
+    pub fn draw(&mut self, app: &mut App) -> Result<u16, String> {
         self.terminal
             .draw(|f| render(f, app))
-            .map(|_| ())
+            .map(|frame| frame.area.height)
             .map_err(|e| e.to_string())
     }
 }
@@ -59,21 +60,24 @@ impl Drop for Screen {
 /// Dismissal is Esc or picking an entry — there is no click-outside-to-dismiss,
 /// because no mouse events reach a plugin at all, and the palette's own binding
 /// cannot close it on 0.8.2 (§6).
-pub fn next_step(app: &mut App) -> Result<Step, String> {
+///
+/// `drawn_rows` is the height of the frame on screen, not the terminal's size
+/// now: a key typed at a "too short" frame must not act on a list the popup
+/// grew back into before the key was read.
+pub fn next_step(app: &mut App, drawn_rows: u16) -> Result<Step, String> {
     loop {
         let event = event::read().map_err(|e| e.to_string())?;
-        let (_, rows) = terminal::size().map_err(|e| e.to_string())?;
-        if let Some(step) = apply(app, event, rows) {
+        if let Some(step) = apply(app, event, drawn_rows) {
             return Ok(step);
         }
     }
 }
 
-/// One event against the state, with the terminal `rows` tall. `None` means
-/// the event carried nothing to act on and the loop should read again —
-/// separated from `next_step` so a key sequence can be driven through the same
-/// path a keypress takes, without a terminal (`wiring_tests`).
-fn apply(app: &mut App, event: Event, rows: u16) -> Option<Step> {
+/// One event against the state. `None` means the event carried nothing to act
+/// on and the loop should read again — separated from `next_step` so a key
+/// sequence can be driven through the same path a keypress takes, without a
+/// terminal (`wiring_tests`).
+fn apply(app: &mut App, event: Event, drawn_rows: u16) -> Option<Step> {
     // A resize has to redraw immediately rather than wait for a keypress:
     // on Termux the popup resizes exactly when the software keyboard is
     // raised, which is the moment the palette is being used (§5).
@@ -92,7 +96,7 @@ fn apply(app: &mut App, event: Event, rows: u16) -> Option<Step> {
         return Some(Step::Cancel);
     }
     // Nothing the user cannot see may change or run.
-    if rows < MIN_ROWS {
+    if drawn_rows < MIN_ROWS {
         return Some(if key.code == KeyCode::Esc {
             Step::Cancel
         } else {
@@ -142,9 +146,11 @@ fn apply(app: &mut App, event: Event, rows: u16) -> Option<Step> {
     })
 }
 
-/// The fewest rows the palette draws its list in. Herdr's manifest has no
-/// size floor of its own, so the palette enforces it (docs/design.md §5).
-const MIN_ROWS: u16 = 8;
+/// The fewest pane rows at which every stage still shows two candidates — the
+/// Commands stage with a skip reason is the tallest: query, two rows, a
+/// two-row reason, footer. Herdr's manifest has no size floor, so the palette
+/// enforces it (docs/design.md §5).
+const MIN_ROWS: u16 = 6;
 
 fn render(f: &mut Frame, app: &mut App) {
     let rows = f.area().height;
@@ -928,11 +934,28 @@ mod render_tests {
         assert_eq!(lines.last().unwrap(), counts, "{lines:#?}");
     }
 
-    /// The stage that pays for the header is the one to measure, at the
-    /// contracted grid docs/design.md §5 floors at `MIN_ROWS`. More
-    /// candidates than can fit, so the count is the list's height.
+    /// Two candidates in every stage is what the floor is derived from. The
+    /// Commands stage with a skip reason selected is the tallest; Targets pays
+    /// for a header line. More candidates than can fit, so each count is the
+    /// list's height.
     #[test]
-    fn the_list_stays_usable_at_the_documented_height_floor() {
+    fn every_stage_shows_two_candidates_at_the_height_floor() {
+        let mut candidates = vec![Candidate::note("tab.rename", "no {text}")];
+        candidates.extend((0..9).map(|i| {
+            Candidate::from_command(command(&format!("c{i}"), &format!("Cmd {i}"), None))
+        }));
+        let mut app = App::new(candidates, Frecency::load(Path::new("/nonexistent")));
+        assert!(
+            app.selected_note().is_some(),
+            "the skip reason is not shown"
+        );
+        let lines = draw(&mut app, 36, MIN_ROWS);
+        let listed = lines
+            .iter()
+            .filter(|l| l.contains("Cmd") || l.contains("skipped"))
+            .count();
+        assert_eq!(listed, 2, "Commands: {lines:#?}");
+
         let picked = command("focus.tab", "Focus tab…", Some("tabs"));
         let mut app = app_with(vec![picked.clone()]);
         app.enter_targets(
@@ -946,14 +969,14 @@ mod render_tests {
         );
         let lines = draw(&mut app, 36, MIN_ROWS);
         let listed = lines.iter().filter(|l| l.contains("Target")).count();
-        assert_eq!(listed, 5, "{lines:#?}");
+        assert!(listed >= 2, "Targets: {lines:#?}");
     }
 
     #[test]
     fn a_row_under_the_floor_replaces_the_list_with_what_it_needs() {
         let mut app = app_with(vec![command("tab.create", "New tab", None)]);
         let lines = draw(&mut app, 36, MIN_ROWS - 1);
-        assert_eq!(lines[0], "Too short: needs 8 rows, has 7", "{lines:#?}");
+        assert_eq!(lines[0], "Too short: needs 6 rows, has 5", "{lines:#?}");
         assert_eq!(lines[1], "Esc to close", "{lines:#?}");
         assert!(!lines.iter().any(|l| l.contains("New tab")), "{lines:#?}");
     }
