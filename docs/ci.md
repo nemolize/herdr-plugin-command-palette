@@ -152,7 +152,8 @@ reach for the pinned install when a CI result and a local one disagree.
 `just release-test` also needs Node — `.node-version` names the major CI
 installs — and `pnpm install --ignore-scripts` for the Changesets CLI that
 `pnpm-lock.yaml` pins (`packageManager` in `package.json` names the pnpm
-version).
+version). pnpm rather than npm because `pnpm-lock.yaml` records no version for
+the root package, so a release bump has no lockfile copy to leave behind (#95).
 
 Every action is pinned by full commit SHA. A tag is mutable, and a repo that
 audits its Rust dependencies should hold its own workflow supply chain to the
