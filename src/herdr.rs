@@ -4,6 +4,8 @@ use std::process::Command as Proc;
 
 use serde::Deserialize;
 
+use crate::catalog::WorktreeKey;
+
 /// A row from one of the list APIs, reduced to what a candidate needs.
 #[derive(Debug)]
 pub struct Target {
@@ -74,9 +76,19 @@ impl Herdr {
         self.call(args).map(|_| ())
     }
 
-    /// Resolves a `resolve` key into candidate rows. The three list APIs all
-    /// carry an id, a label and a `focused` flag, so one reader covers them.
-    pub fn targets(&self, resolve: &str) -> Result<Vec<Target>, String> {
+    /// Resolves a `resolve` key into candidate rows. Only the worktree listing
+    /// reads `args` and `workspace`.
+    pub fn targets(
+        &self,
+        resolve: &str,
+        args: &[String],
+        workspace: Option<&str>,
+    ) -> Result<Vec<Target>, String> {
+        if resolve == "worktree list" {
+            return self.worktrees(args, workspace);
+        }
+        // The other three listings all carry an id, a label and a `focused`
+        // flag, so one reader covers them.
         // Matched whole, never by leading token: a catalog is user-replaceable
         // (`catalog::locate`), and this string is about to become argv. Reading
         // only the first word would let `workspace close` run a state-mutating
@@ -108,6 +120,22 @@ impl Herdr {
         Ok(rows
             .iter()
             .filter_map(|row| target_from_row(row, id_key, &workspaces))
+            .collect())
+    }
+
+    fn worktrees(&self, args: &[String], workspace: Option<&str>) -> Result<Vec<Target>, String> {
+        let key = WorktreeKey::for_args(args)
+            .ok_or_else(|| "needs its `{}` after `--path` or `--workspace`".to_string())?;
+        let workspace =
+            workspace.ok_or_else(|| "no workspace to list the repository of".to_string())?;
+        let result = self.call(&worktree_list_args(workspace))?;
+        let rows = result
+            .get("worktrees")
+            .and_then(|v| v.as_array())
+            .ok_or_else(|| "worktree list returned no worktrees".to_string())?;
+        Ok(rows
+            .iter()
+            .filter_map(|row| worktree_target(row, key))
             .collect())
     }
 
@@ -281,6 +309,44 @@ fn seed_from_row(row: &serde_json::Value) -> String {
     }
 }
 
+/// Unscoped, `worktree list` reads the server's focused workspace, which while
+/// the palette is up is not reliably the one it was opened from (`--current`).
+fn worktree_list_args(workspace: &str) -> Vec<String> {
+    ["worktree", "list", "--workspace", workspace]
+        .map(str::to_owned)
+        .to_vec()
+}
+
+/// Every row's `label` is the repository name, so the branch tells rows apart.
+/// `Workspace` keeps only open linked rows: `remove` refuses the main checkout.
+fn worktree_target(row: &serde_json::Value, key: WorktreeKey) -> Option<Target> {
+    let path = row.get("path")?.as_str()?;
+    let open = row.get("open_workspace_id").and_then(|v| v.as_str());
+    let id = match key {
+        WorktreeKey::Path => path,
+        WorktreeKey::Workspace => {
+            let linked = row
+                .get("is_linked_worktree")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            open.filter(|_| linked)?
+        }
+    };
+    let mut label = row
+        .get("branch")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .unwrap_or(path)
+        .to_string();
+    if open.is_some() {
+        label.push_str(" (open)");
+    }
+    Some(Target {
+        id: id.to_string(),
+        label,
+    })
+}
+
 /// Builds one candidate row. Pure so the label rules are testable without a
 /// herdr binary — `Herdr::call` stays the only process seam.
 fn target_from_row(
@@ -320,7 +386,10 @@ fn target_from_row(
 
 #[cfg(test)]
 mod tests {
-    use super::{read_response, seed_from_row, target_from_row, Herdr, PluginAction};
+    use super::{
+        read_response, seed_from_row, target_from_row, worktree_list_args, worktree_target, Herdr,
+        PluginAction, WorktreeKey,
+    };
     use serde_json::json;
 
     /// The envelope's own error is what names a failure; the exit status is 1
@@ -490,25 +559,105 @@ mod tests {
     }
 
     /// A catalog is user-replaceable, so `resolve` is untrusted input that
-    /// becomes argv. Anything but the three listings must be refused before it
+    /// becomes argv. Anything but the four listings must be refused before it
     /// can run — `targets` returns the rejection without spawning a process, so
     /// the bin path is never reached.
     #[test]
-    fn rejects_a_resolve_that_is_not_one_of_the_three_listings() {
+    fn rejects_a_resolve_that_is_not_one_of_the_four_listings() {
         let herdr = Herdr::new("/nonexistent-herdr-binary".to_string());
+        let args = ["worktree", "open", "--path", "{}"].map(str::to_owned);
         for hostile in [
             "workspace close",
             "tab close",
             "pane close",
+            "worktree remove",
             "tab list --extra",
+            "worktree list --workspace w1",
             "list",
             "",
         ] {
-            let err = herdr.targets(hostile).expect_err(hostile);
+            let err = herdr
+                .targets(hostile, &args, Some("w1"))
+                .expect_err(hostile);
             assert!(
                 err.starts_with("unsupported resolve target"),
                 "{hostile} was not refused: {err}"
             );
         }
+    }
+
+    #[test]
+    fn the_worktree_listing_is_scoped_to_the_context_workspace() {
+        assert_eq!(
+            worktree_list_args("w1"),
+            vec!["worktree", "list", "--workspace", "w1"]
+        );
+    }
+
+    #[test]
+    fn a_worktree_listing_with_nothing_to_scope_or_fill_is_refused() {
+        let herdr = Herdr::new("/nonexistent-herdr-binary".to_string());
+        let open = ["worktree", "open", "--path", "{}"].map(str::to_owned);
+        let err = herdr
+            .targets("worktree list", &open, None)
+            .expect_err("no workspace");
+        assert!(err.contains("no workspace"), "{err}");
+
+        let branch = ["worktree", "open", "--branch", "{}"].map(str::to_owned);
+        let err = herdr
+            .targets("worktree list", &branch, Some("w1"))
+            .expect_err("no column");
+        assert!(err.contains("--path"), "{err}");
+    }
+
+    fn worktree_rows() -> [serde_json::Value; 3] {
+        [
+            json!({"branch": "main", "is_linked_worktree": false, "label": "repo",
+                   "open_workspace_id": "w1", "path": "/src/repo"}),
+            json!({"branch": "feat-x", "is_linked_worktree": true, "label": "repo",
+                   "open_workspace_id": "w2", "path": "/wt/repo/feat-x"}),
+            json!({"is_detached": true, "is_linked_worktree": true, "label": "repo",
+                   "path": "/wt/repo/detached"}),
+        ]
+    }
+
+    /// Every row's `label` is the repository's name, so a candidate built from
+    /// it would read `repo` N times over.
+    #[test]
+    fn worktree_rows_sharing_a_label_are_told_apart_by_branch() {
+        let labels: Vec<String> = worktree_rows()
+            .iter()
+            .filter_map(|r| worktree_target(r, WorktreeKey::Path))
+            .map(|t| t.label)
+            .collect();
+        assert_eq!(
+            labels,
+            vec!["main (open)", "feat-x (open)", "/wt/repo/detached"]
+        );
+    }
+
+    #[test]
+    fn opening_offers_every_worktree_by_path() {
+        let ids: Vec<String> = worktree_rows()
+            .iter()
+            .filter_map(|r| worktree_target(r, WorktreeKey::Path))
+            .map(|t| t.id)
+            .collect();
+        assert_eq!(
+            ids,
+            vec!["/src/repo", "/wt/repo/feat-x", "/wt/repo/detached"]
+        );
+    }
+
+    /// The main checkout is open too, but `remove` refuses it; a closed
+    /// worktree has no workspace to address it by.
+    #[test]
+    fn removing_offers_only_open_linked_worktrees_by_workspace() {
+        let ids: Vec<String> = worktree_rows()
+            .iter()
+            .filter_map(|r| worktree_target(r, WorktreeKey::Workspace))
+            .map(|t| t.id)
+            .collect();
+        assert_eq!(ids, vec!["w2"]);
     }
 }

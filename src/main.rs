@@ -158,7 +158,7 @@ fn run() -> Result<(), String> {
             Step::Cancel => return Ok(()),
             Step::NeedsTargets(command) => {
                 let resolve = command.resolve.clone().unwrap_or_default();
-                match herdr.targets(&resolve) {
+                match herdr.targets(&resolve, &command.args, context.workspace_id.as_deref()) {
                     Ok(targets) if targets.is_empty() => {
                         app.status = Some(format!("nothing to pick from `{resolve}`"));
                     }

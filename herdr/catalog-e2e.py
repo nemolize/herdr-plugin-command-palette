@@ -53,8 +53,14 @@ def herdr_binary() -> str | None:
 HERDR = herdr_binary()
 
 
+def fixture_env(home: Path) -> dict[str, str]:
+    """HOME as well as the config dir: herdr creates worktrees under
+    `~/.herdr/worktrees`, so a real HOME would collect one per run."""
+    return dict(os.environ, XDG_CONFIG_HOME=str(home), HOME=str(home))
+
+
 def herdr(*args: str, home: Path, check: bool = True) -> subprocess.CompletedProcess:
-    env = dict(os.environ, XDG_CONFIG_HOME=str(home))
+    env = fixture_env(home)
     proc = subprocess.run(
         [HERDR, "--session", SESSION, *args],
         env=env,
@@ -70,7 +76,7 @@ def herdr(*args: str, home: Path, check: bool = True) -> subprocess.CompletedPro
 
 
 def start_server_and_await_readiness(home: Path) -> subprocess.Popen:
-    env = dict(os.environ, XDG_CONFIG_HOME=str(home))
+    env = fixture_env(home)
     log = (home / "server.log").open("w")
     server = subprocess.Popen(
         [HERDR, "--session", SESSION, "server"],
@@ -97,25 +103,64 @@ def start_server_and_await_readiness(home: Path) -> subprocess.Popen:
     )
 
 
+def init_repository(path: Path, home: Path) -> None:
+    """A one-commit repository: `worktree create` needs a HEAD to branch from."""
+    path.mkdir()
+    for args in (
+        ["init", "--quiet"],
+        ["-c", "user.name=e2e", "-c", "user.email=e2e@example.com",
+         "commit", "--quiet", "--allow-empty", "--message", "e2e"],
+    ):
+        proc = subprocess.run(
+            ["git", "-C", str(path), *args],
+            env=fixture_env(home),
+            capture_output=True,
+            text=True,
+        )
+        if proc.returncode != 0:
+            raise RuntimeError(
+                f"fixture setup failed: git {' '.join(args)}\n"
+                f"exit={proc.returncode}\n{proc.stderr.strip()}"
+            )
+
+
 class Fixture:
     """A session holding two tabs, so an entry that needs a second target has one.
 
     `pane.move.tab` moves a pane into a *different* tab, and `tab.focus` is only
-    meaningful with somewhere to switch to.
+    meaningful with somewhere to switch to. The workspace is rooted in a Git
+    repository so the worktree entries have one to act on, and `worktree` adds
+    a linked worktree open in its own workspace — `remove` refuses the main
+    checkout, so acting on that one would prove nothing.
     """
 
-    def __init__(self, home: Path):
+    def __init__(self, home: Path, worktree: bool = False):
         self.home = home
+        repo = home / "repo"
+        init_repository(repo, home)
         self.server = start_server_and_await_readiness(home)
         # Past this point the server is running, so anything that raises has to
         # stop it — an exception here binds no Fixture for the caller to close.
         try:
-            herdr("workspace", "create", home=home)
+            herdr("workspace", "create", "--cwd", str(repo), home=home)
             herdr("tab", "create", home=home)
             self.ids = self._read_ids()
+            if worktree:
+                self.ids.update(self._create_worktree())
         except BaseException:
             self.close()
             raise
+
+    def _create_worktree(self) -> dict[str, str]:
+        proc = herdr(
+            "worktree", "create", "--workspace", self.ids["{workspace}"],
+            "--branch", "e2e-existing", "--no-focus", home=self.home,
+        )
+        row = json.loads(proc.stdout)["result"]["worktree"]
+        return {
+            "{worktree path}": row["path"],
+            "{worktree workspace}": row["open_workspace_id"],
+        }
 
     def _read_ids(self) -> dict[str, str]:
         panes = json.loads(herdr("pane", "list", home=self.home).stdout)
@@ -145,25 +190,37 @@ class Fixture:
             self.server.kill()
 
 
+def flag_before(args: list[str], placeholder: str) -> str | None:
+    at = args.index(placeholder) if placeholder in args else 0
+    return args[at - 1] if at > 0 else None
+
+
 def resolved_args(entry: dict, ids: dict[str, str]) -> list[str]:
     """Substitute the placeholders the palette would have filled at open time.
 
     A tab-resolving entry takes the tab the pane is NOT in, so the move it
     performs is a real one. `{text}` carries a space because that is the shape
-    that breaks if the palette ever splits the typed name across argv elements.
+    that breaks if the palette ever splits the typed name across argv elements —
+    except as a branch name, which git refuses with one. A worktree-resolving
+    entry takes the fixture's linked worktree, by the column its flag names.
 
     Raises on a `resolve` this file does not know: defaulting it to a tab id
     would substitute a plausible argument into an entry never taught here and
     report ok, which is the silent staleness this check exists to remove.
     """
+    args = entry["args"]
     table = dict(ids)
-    table["{text}"] = "e2e renamed"
+    table["{text}"] = "e2e-created" if flag_before(args, "{text}") == "--branch" else "e2e renamed"
     resolve = entry.get("resolve")
     if resolve is not None:
         picked = {
             "tab list": "{another tab}",
             "pane list": "{pane}",
             "workspace list": "{workspace}",
+            "worktree list": {
+                "--path": "{worktree path}",
+                "--workspace": "{worktree workspace}",
+            }.get(flag_before(args, "{}")),
         }.get(resolve)
         if picked is None:
             raise RuntimeError(
@@ -172,7 +229,7 @@ def resolved_args(entry: dict, ids: dict[str, str]) -> list[str]:
             )
         table["{}"] = ids[picked]
 
-    return [table.get(a, a) for a in entry["args"]]
+    return [table.get(a, a) for a in args]
 
 
 def note_if_pin_disagrees_with_running_herdr(checked_against: str | None) -> None:
@@ -298,7 +355,7 @@ def main() -> int:
     for entry in entries:
         home = Path(tempfile.mkdtemp(dir=FIXTURE_ROOT))
         try:
-            fixture = Fixture(home)
+            fixture = Fixture(home, worktree=entry.get("resolve") == "worktree list")
         except RuntimeError as e:
             # Keep going: one flaky boot must not swallow every later entry's
             # verdict, and a harness fault is not a drifted catalog.

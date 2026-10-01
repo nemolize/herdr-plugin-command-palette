@@ -265,6 +265,15 @@ contexts = ["global", "workspace", "tab", "pane"]
 
 An entry with no `resolve` key runs exactly as written.
 
+`worktree list` is the fourth listing, and it does not share that shape. Every
+row's `label` is the repository's name, there is no `focused`, and there is no
+id: `worktree open` takes a `--path`, `worktree remove` takes the `--workspace`
+the worktree is open in. So the flag `{}` follows names the column that fills
+it, a candidate is labelled by its branch, and "open" is the presence of
+`open_workspace_id`. Unscoped, the listing reads the repository of the server's
+focused workspace — the `--current` trap again — so it always runs with
+`--workspace` set to the context's.
+
 Entries needing an argument no listing can supply — a new name — carry a `prompt`
 key instead, whose value labels a free-text stage filling a `{text}` placeholder.
 

@@ -73,15 +73,19 @@ commonly taken already (`mr04vv/herdr-pane-navigator` binds it). Any key works.
 Type to filter. `Enter` runs the selected entry; `↑` / `↓` move the selection.
 
 Entries that need a target you must choose — `Focus tab…`, `Move pane to tab…`,
-`Close workspace…` — open a second list of the live tabs, panes or workspaces
-when you pick them. `Esc` there backs out to the command list rather than closing
+`Close workspace…`, `Open worktree…` — open a second list of the live tabs,
+panes, workspaces or worktrees when you pick them. Worktrees are those of the
+repository behind the workspace you opened the palette from, listed by branch;
+`Remove worktree…` lists only the open ones, and herdr refuses one with
+uncommitted or untracked changes. `Esc` there backs out to the command list rather than closing
 the palette.
 
 Entries that need a name you must type — `Rename tab…`, `Rename workspace…`,
 `Rename pane…` — open an input instead of a list. They act on what you were
 looking at when the palette opened, not on something you pick, and the input
 starts from that thing's current name so renaming is an edit rather than a
-retype. `Enter` runs it, `Esc` backs out. A name may contain spaces; it reaches
+retype. `New worktree…` asks for a branch name the same way and starts empty.
+`Enter` runs it, `Esc` backs out. A name may contain spaces; it reaches
 herdr as one argument.
 
 A name longer than the popup scrolls: the input shows its end, so the cursor and
@@ -120,17 +124,19 @@ what correcting a catalog means. Start from
   picked.
 - `resolve` marks an entry that cannot name its target until open time. Its value
   is the list API whose rows become the second-step candidates (`tab list`,
-  `pane list`, `workspace list`), and the chosen id is substituted for `{}`.
+  `pane list`, `workspace list`, `worktree list`), and the chosen id is
+  substituted for `{}`. A worktree row has no id, so the flag before `{}` picks
+  the column: `--path` its path, `--workspace` the workspace it is open in.
 - `prompt` marks an entry whose argument is typed rather than picked. Its value
-  labels the input, and what you type is substituted for `{text}`. The input
-  opens seeded with the current name of what the entry acts on. The text becomes
-  a single argument, so a name with spaces is not split.
+  labels the input, and what you type is substituted for `{text}`. A rename
+  opens seeded with the current name of what it acts on. The text becomes a
+  single argument, so a name with spaces is not split.
 - `contexts` limits where the entry is offered.
 - `binding` names the `[keys]` action in **your** `config.toml` that does the
   same thing, so the palette can show the key beside the entry (see below).
 - `icon` replaces the glyph leading the entry's row. Without it the glyph comes
-  from the first word of `args`: `◫` pane, `▭` tab, `⬚` workspace, `↻` server.
-  Other plugins' actions show `⧉`. It must be a single glyph one cell wide in
+  from the first word of `args`: `◫` pane, `▭` tab, `⬚` workspace, `↻` server,
+  `⎇` worktree. Other plugins' actions show `⧉`. It must be a single glyph one cell wide in
   every locale, so East Asian Ambiguous characters such as `□` are refused;
   anything else skips the entry with that reason.
 

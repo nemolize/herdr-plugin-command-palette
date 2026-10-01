@@ -50,7 +50,27 @@ const SUBJECT_ICONS: &[(&str, &str)] = &[
     ("tab", "▭"),
     ("workspace", "⬚"),
     ("server", "↻"),
+    ("worktree", "⎇"),
 ];
+
+/// The CLI addresses a worktree by path (`open`) or by the workspace it is open
+/// in (`remove`), so the flag before `{}` names the row column that fills it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WorktreeKey {
+    Path,
+    Workspace,
+}
+
+impl WorktreeKey {
+    pub fn for_args(args: &[String]) -> Option<Self> {
+        let at = args.iter().position(|a| a == "{}")?;
+        match args.get(at.checked_sub(1)?)?.as_str() {
+            "--path" => Some(Self::Path),
+            "--workspace" => Some(Self::Workspace),
+            _ => None,
+        }
+    }
+}
 
 impl Command {
     pub fn needs_target(&self) -> bool {
@@ -126,10 +146,13 @@ pub fn rejection(c: &Command) -> Option<String> {
         (None, n) if n > 0 => return Some("`{text}` without a `prompt` to fill it".into()),
         _ => {}
     }
-    match (&c.resolve, ids) {
+    match (c.resolve.as_deref(), ids) {
         (Some(_), n) if n != 1 => Some(format!(
             "`resolve` with {n} `{{}}` placeholders, expected 1"
         )),
+        (Some("worktree list"), _) if WorktreeKey::for_args(&c.args).is_none() => Some(
+            "`resolve = \"worktree list\"` needs its `{}` after `--path` or `--workspace`".into(),
+        ),
         (None, n) if n > 0 => Some("`{}` without a `resolve` to fill it".into()),
         _ => None,
     }
@@ -179,7 +202,7 @@ pub fn is_older(actual: &str, required: &str) -> Option<bool> {
 
 #[cfg(test)]
 mod tests {
-    use super::{is_older, Catalog, Command};
+    use super::{is_older, Catalog, Command, WorktreeKey};
 
     fn shipped() -> Catalog {
         // The file the plugin actually ships, not a fixture — a fixture would
@@ -218,10 +241,20 @@ mod tests {
             match &e.resolve {
                 Some(r) => {
                     assert!(
-                        matches!(r.as_str(), "pane list" | "tab list" | "workspace list"),
+                        matches!(
+                            r.as_str(),
+                            "pane list" | "tab list" | "workspace list" | "worktree list"
+                        ),
                         "{}: unsupported resolve {r}",
                         e.id
                     );
+                    if r == "worktree list" {
+                        assert!(
+                            WorktreeKey::for_args(&e.args).is_some(),
+                            "{}: no column to fill `{{}}` from",
+                            e.id
+                        );
+                    }
                     assert_eq!(placeholders, 1, "{}: resolve needs exactly one {{}}", e.id);
                 }
                 None => assert_eq!(placeholders, 0, "{}: {{}} without a resolve", e.id),
@@ -230,11 +263,15 @@ mod tests {
     }
 
     /// `rejection` covers the placeholder pairing; this is the half it cannot
-    /// see — that the subject is a context id `main.rs` can read out of the argv.
+    /// see — that a rename's subject is a context id `main.rs` can read out of
+    /// the argv to seed the input with.
     #[test]
-    fn a_prompt_entry_names_its_subject_from_the_context() {
+    fn a_rename_entry_names_its_subject_from_the_context() {
         for e in shipped().commands.iter().filter(|e| e.prompt.is_some()) {
             assert!(e.resolve.is_none(), "{}: prompt entry has a picker", e.id);
+            if e.args.get(1).map(String::as_str) != Some("rename") {
+                continue;
+            }
             let subject = e.args.first().expect("entries have args");
             assert_eq!(
                 e.args.get(2).map(String::as_str),
@@ -352,6 +389,10 @@ mod tests {
             (&["workspace", "close"], 1),
             (&["workspace", "rename"], 2),
             (&["server", "reload-config"], 0),
+            // From 0.9.3: every worktree verb is addressed by flags alone.
+            (&["worktree", "create"], 0),
+            (&["worktree", "open"], 0),
+            (&["worktree", "remove"], 0),
         ];
 
         for e in &shipped().commands {
@@ -377,11 +418,13 @@ mod tests {
                     // hides a missing one.
                     if matches!(
                         a.as_str(),
-                        "--cwd"
+                        "--branch"
+                            | "--cwd"
                             | "--direction"
                             | "--env"
                             | "--label"
                             | "--pane"
+                            | "--path"
                             | "--ratio"
                             | "--right-click"
                             | "--source-pane"
@@ -450,11 +493,41 @@ mod tests {
                 "tab" => "▭",
                 "workspace" => "⬚",
                 "server" => "↻",
+                "worktree" => "⎇",
                 other => panic!("{}: no expected icon for `{other}`", e.id),
             };
             assert_eq!(e.icon, None, "{}: shipped entries derive", e.id);
             assert_eq!(e.icon(), expected, "{}", e.id);
         }
+    }
+
+    #[test]
+    fn a_worktree_placeholder_is_filled_from_the_column_its_flag_names() {
+        let args = |a: &[&str]| a.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert_eq!(
+            WorktreeKey::for_args(&args(&["worktree", "open", "--path", "{}"])),
+            Some(WorktreeKey::Path)
+        );
+        assert_eq!(
+            WorktreeKey::for_args(&args(&["worktree", "remove", "--workspace", "{}"])),
+            Some(WorktreeKey::Workspace)
+        );
+        assert_eq!(
+            WorktreeKey::for_args(&args(&["worktree", "open", "--branch", "{}"])),
+            None
+        );
+        assert_eq!(WorktreeKey::for_args(&args(&["{}"])), None);
+    }
+
+    #[test]
+    fn a_worktree_entry_with_no_column_for_its_placeholder_is_rejected() {
+        let mut e = entry_with_icon(&["worktree", "open", "--branch", "{}"], None);
+        e.resolve = Some("worktree list".into());
+        let why = super::rejection(&e).expect("no column names a branch");
+        assert!(why.contains("--path"), "{why}");
+
+        e.args[2] = "--path".into();
+        assert_eq!(super::rejection(&e), None);
     }
 
     #[test]

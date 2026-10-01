@@ -19,10 +19,13 @@ checked_against = "0.8.2"
 # substituted for the {} placeholder in `args`. Entries with no `resolve` key
 # run exactly as written.
 #
+# `worktree list` rows have no id: the flag {} follows names the column instead
+# — `--path` the worktree's path, `--workspace` the workspace it is open in.
+#
 # `prompt` marks an entry whose argument is typed rather than picked. Its value
 # labels the input, and the text replaces the {text} placeholder in `args`. The
 # input opens seeded with the current name of what the entry acts on, so
-# renaming is an edit rather than a retype.
+# renaming is an edit rather than a retype. Any other verb opens empty.
 #
 # The typed text lands in ONE argv element whatever it contains, because
 # `<LABEL>...` is variadic: splitting on spaces would pass a name's second word
@@ -49,7 +52,7 @@ checked_against = "0.8.2"
 # rebound and no default is copied here to drift.
 #
 # `icon` replaces the glyph leading the entry's row, which otherwise comes from
-# the first element of `args` (pane, tab, workspace, server). It must be one
+# the first element of `args` (pane, tab, workspace, server, worktree). It must be one
 # glyph one cell wide in every locale (no East Asian Ambiguous character, which
 # a CJK locale draws double); anything else drops the entry as `skipped`. None
 # of the entries below set it, so every row of a subject reads alike.
@@ -280,6 +283,42 @@ title = "Close workspace…"
 args = ["workspace", "close", "{}"]
 resolve = "workspace list"
 contexts = ["global", "workspace", "tab", "pane"]
+
+
+# ─── Worktrees ───────────────────────────────────────────────────────────────
+# Each acts on the repository of the workspace the palette was opened from. The
+# listing behind `resolve` is scoped to it the same way: unscoped, `worktree
+# list` reads the server's focused workspace, which is not reliably that one.
+#
+# No `binding`: herdr's `new_worktree` / `open_worktree` / `remove_worktree`
+# open dialogs of their own (`remove_worktree` a confirmation), which these do
+# not reproduce.
+
+# The base ref is left to the server's default.
+[[command]]
+id = "worktree.create"
+title = "New worktree…"
+args = ["worktree", "create", "--workspace", "{workspace}", "--branch", "{text}", "--focus"]
+prompt = "New branch name"
+contexts = ["workspace", "tab", "pane"]
+
+# An already-open worktree is focused rather than opened twice.
+[[command]]
+id = "worktree.open"
+title = "Open worktree…"
+args = ["worktree", "open", "--workspace", "{workspace}", "--path", "{}", "--focus"]
+resolve = "worktree list"
+contexts = ["workspace", "tab", "pane"]
+
+# `remove` reaches a worktree only through the workspace it is open in, so the
+# candidates are the open ones. No --force: herdr refuses a tree with changes,
+# and that refusal is the guard this entry has in place of a confirmation.
+[[command]]
+id = "worktree.remove"
+title = "Remove worktree…"
+args = ["worktree", "remove", "--workspace", "{}"]
+resolve = "worktree list"
+contexts = ["workspace", "tab", "pane"]
 
 
 # ─── Session ─────────────────────────────────────────────────────────────────
