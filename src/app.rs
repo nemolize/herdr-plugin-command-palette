@@ -501,6 +501,37 @@ mod tests {
     }
 
     #[test]
+    fn a_repo_entry_asks_for_its_repository_before_anything_else() {
+        let entry = cmd(
+            "worktree.open",
+            "Open worktree",
+            &["worktree", "open", "--cwd", "{repo}", "--path", "{}"],
+            Some("worktree list"),
+        );
+        let mut app = app_with(vec![entry]);
+        assert!(matches!(app.confirm(), Step::NeedsRepo(_)));
+        assert_eq!(app.frecency().rank("worktree.open"), 0.0);
+    }
+
+    /// Only a run is a use: a stage the user may still back out of is not.
+    #[test]
+    fn a_picked_entry_is_ranked_only_when_it_runs() {
+        let mut app = app_with(vec![]);
+        let staged = cmd(
+            "tab.focus",
+            "Focus tab",
+            &["tab", "focus", "{}"],
+            Some("tab list"),
+        );
+        assert!(matches!(app.picked(staged), Step::NeedsTargets(_)));
+        assert_eq!(app.frecency().rank("tab.focus"), 0.0);
+
+        let fixed = cmd("tab.create", "New tab", &["tab", "create"], None);
+        assert!(matches!(app.picked(fixed), Step::Run(_)));
+        assert!(app.frecency().rank("tab.create") > 0.0);
+    }
+
+    #[test]
     fn a_fixed_entry_runs_directly() {
         let mut app = app_with(vec![cmd("tab.create", "New tab", &["tab", "create"], None)]);
         match app.confirm() {

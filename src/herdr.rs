@@ -113,9 +113,11 @@ impl Herdr {
     pub fn worktrees(&self, key: WorktreeKey, workspace: &str) -> Result<Vec<Target>, String> {
         let managed = match key {
             WorktreeKey::Path => Vec::new(),
-            WorktreeKey::Workspace => {
-                managed_worktree_workspaces(&self.call(&["workspace", "list"].map(str::to_owned))?)
-            }
+            WorktreeKey::Workspace => managed_worktree_workspaces(
+                &self
+                    .call(&["workspace", "list"].map(str::to_owned))
+                    .map_err(|e| format!("workspace list: {e}"))?,
+            ),
         };
         let result = self.call(&worktree_list_args(workspace))?;
         let rows = result
