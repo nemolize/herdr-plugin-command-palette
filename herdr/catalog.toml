@@ -109,6 +109,39 @@ contexts = ["pane"]
 binding = "focus_pane_down"
 
 
+# ─── Panes: resizing ─────────────────────────────────────────────────────────
+# No --amount: the `resize_pane_*` keys send none either, so both take the
+# server's own step.
+
+[[command]]
+id = "pane.resize.left"
+title = "Resize pane: left"
+args = ["pane", "resize", "--pane", "{pane}", "--direction", "left"]
+contexts = ["pane"]
+binding = "resize_pane_left"
+
+[[command]]
+id = "pane.resize.right"
+title = "Resize pane: right"
+args = ["pane", "resize", "--pane", "{pane}", "--direction", "right"]
+contexts = ["pane"]
+binding = "resize_pane_right"
+
+[[command]]
+id = "pane.resize.up"
+title = "Resize pane: up"
+args = ["pane", "resize", "--pane", "{pane}", "--direction", "up"]
+contexts = ["pane"]
+binding = "resize_pane_up"
+
+[[command]]
+id = "pane.resize.down"
+title = "Resize pane: down"
+args = ["pane", "resize", "--pane", "{pane}", "--direction", "down"]
+contexts = ["pane"]
+binding = "resize_pane_down"
+
+
 # ─── Panes: arranging ────────────────────────────────────────────────────────
 # `swap_pane_*` is bound by default (`prefix+shift+h/j/k/l`) yet omitted from
 # `--default-config`, so a key shows here only once the user sets one.
@@ -147,36 +180,6 @@ title = "Swap pane: down"
 args = ["pane", "swap", "--pane", "{pane}", "--direction", "down"]
 contexts = ["pane"]
 binding = "swap_pane_down"
-
-# No --amount: the `resize_pane_*` keys send none either, so both take the
-# server's own step.
-[[command]]
-id = "pane.resize.left"
-title = "Resize pane: left"
-args = ["pane", "resize", "--pane", "{pane}", "--direction", "left"]
-contexts = ["pane"]
-binding = "resize_pane_left"
-
-[[command]]
-id = "pane.resize.right"
-title = "Resize pane: right"
-args = ["pane", "resize", "--pane", "{pane}", "--direction", "right"]
-contexts = ["pane"]
-binding = "resize_pane_right"
-
-[[command]]
-id = "pane.resize.up"
-title = "Resize pane: up"
-args = ["pane", "resize", "--pane", "{pane}", "--direction", "up"]
-contexts = ["pane"]
-binding = "resize_pane_up"
-
-[[command]]
-id = "pane.resize.down"
-title = "Resize pane: down"
-args = ["pane", "resize", "--pane", "{pane}", "--direction", "down"]
-contexts = ["pane"]
-binding = "resize_pane_down"
 
 # No picker: the context already names the pane the palette was opened from.
 [[command]]
