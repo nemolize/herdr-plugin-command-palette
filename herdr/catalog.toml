@@ -50,8 +50,9 @@ checked_against = "0.8.2"
 #
 # `icon` replaces the glyph leading the entry's row, which otherwise comes from
 # the first element of `args` (pane, tab, workspace, server). It must be one
-# glyph one cell wide; anything else drops the entry as `skipped`. None of the
-# entries below set it, so every row of a subject reads alike.
+# glyph one cell wide in every locale (no East Asian Ambiguous character, which
+# a CJK locale draws double); anything else drops the entry as `skipped`. None
+# of the entries below set it, so every row of a subject reads alike.
 
 
 # ─── Panes: splitting ────────────────────────────────────────────────────────
