@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, test } from "node:test";
@@ -14,6 +14,7 @@ import { checkVersions, readPackageVersion } from "./sync-version.mjs";
 const repo = fileURLToPath(new URL("..", import.meta.url));
 const FIXTURE_FILES = [
   "package.json",
+  "pnpm-lock.yaml",
   ".changeset/config.json",
   ".changeset/README.md",
   "CHANGELOG.md",
@@ -30,13 +31,9 @@ function git(cwd, ...args) {
   });
 }
 
-// Runs the script itself rather than `pnpm run`, whose own install writes through
-// the fixture's node_modules symlink into this repository.
 function versionPackages(cwd) {
-  const script = JSON.parse(readFileSync(join(cwd, "package.json"), "utf8")).scripts["version-packages"];
-  const PATH = `${join(cwd, "node_modules", ".bin")}:${process.env.PATH}`;
   try {
-    execFileSync("sh", ["-c", script], { cwd, encoding: "utf8", stdio: "pipe", env: { ...process.env, PATH } });
+    execFileSync("pnpm", ["run", "--silent", "version-packages"], { cwd, encoding: "utf8", stdio: "pipe" });
   } catch (error) {
     throw new Error(`version-packages failed:\n${error.stdout}${error.stderr}`);
   }
@@ -56,7 +53,9 @@ describe("changeset version on a fixture repository", () => {
   before(() => {
     dir = mkdtempSync(join(tmpdir(), "changesets-fixture-"));
     for (const file of FIXTURE_FILES) cpSync(join(repo, file), join(dir, file), { recursive: true });
-    symlinkSync(join(repo, "node_modules"), join(dir, "node_modules"), "dir");
+    // Its own install, not a symlink to ours: pnpm writes install state into whatever
+    // node_modules the fixture has. --offline reuses the store this repo's install filled.
+    execFileSync("pnpm", ["install", "--offline", "--frozen-lockfile", "--ignore-scripts"], { cwd: dir, stdio: "pipe" });
     writeFileSync(join(dir, ".gitignore"), "node_modules\n");
     git(dir, "init", "-q", "-b", "main");
     git(dir, "add", "-A");
