@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.5.0
+
+### Minor Changes
+
+- 6c7991e: Lead each palette row with an icon for what it acts on — pane, tab, workspace, another plugin's action — so the list can be scanned by shape; set `icon` on a catalog entry to change one, or `icons = false` in `settings.toml` to turn them off
+
+### Patch Changes
+
+- 0d0ce78: Say so when the popup is shorter than 6 rows instead of drawing a list too short to use; only Esc and Ctrl-C act until it grows back
+
 ## [0.4.0](https://github.com/nemolize/herdr-plugin-command-palette/compare/v0.3.1...v0.4.0) (2026-09-28)
 
 
