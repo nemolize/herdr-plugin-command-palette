@@ -91,9 +91,9 @@ step, when removing one was the point).
 
 ## Decision 3 — the release PR's approval click is kept
 
-`Lint`, `Test` and `Build` are required by a ruleset, and on the release PR they
-sit unapproved until someone clicks *Approve workflows to run* — the
-approval-required state above. Two ways out were available and both were
+`Lint`, `Test`, `E2ETests` and `Build` are required by a ruleset, and on the
+release PR they sit unapproved until someone clicks *Approve workflows to run* —
+the approval-required state above. Three ways out were weighed and all were
 rejected:
 
 - **Exclude the release PR from the required checks**, or drop the requirement.
@@ -101,6 +101,12 @@ rejected:
   required precisely so a release cannot go out on an untested tree.
 - **Author the PR with a PAT or an App token**, so its runs start normally.
   Rejected: it reintroduces the credential decision 2 avoids, for a click.
+- **Dispatch CI at the release PR's branch** with `workflow_dispatch`.
+  Rejected after a trial on a throwaway bot-authored PR: the dispatched runs
+  started without approval and passed on the PR's head commit, yet its
+  status-check rollup stayed empty and the PR stayed blocked while its own
+  `pull_request` runs awaited approval. A run dispatched by a person behaved the
+  same.
 
 The click is treated as the release's own review step. A release PR is the one
 pull request nobody else reviews, so a deliberate human action before the assets
