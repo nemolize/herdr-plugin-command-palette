@@ -56,8 +56,9 @@ echo "$@" >> "$HERDR_STUB_LOG"
 """
 
 # One stub per verdict. Each answers in JSON because the palette reads the body
-# rather than the exit status, which alone cannot name a failure.
-REJECTS = STUB % ("""echo '{"error":{"message":"%s"}}'\nexit 1""" % FAILURE)
+# rather than the exit status, which alone cannot name a failure. A failure's
+# envelope goes to stderr, where herdr 0.9 writes it.
+REJECTS = STUB % ("""echo '{"error":{"message":"%s"}}' >&2\nexit 1""" % FAILURE)
 ACCEPTS = STUB % """echo '{"result":{"type":"ok"}}'\nexit 0"""
 
 # Everything but the listing succeeds, so the palette still opens and the entry
@@ -73,12 +74,31 @@ LISTING_REFUSED = "tab list is not available on this session"
 
 REJECTS_LISTING = STUB % (
     """if [ "$1" = "tab" ] && [ "$2" = "list" ]; then
-  echo '{"error":{"message":"%s"}}'
+  echo '{"error":{"message":"%s"}}' >&2
   exit 1
 fi
 echo '{"result":{"type":"ok"}}'
 exit 0"""
     % LISTING_REFUSED
+)
+
+WORKTREES = STUB % """if [ "$1" = "worktree" ] && [ "$2" = "list" ]; then
+  echo '{"result":{"source":{"repo_root":"/src/repo"},"worktrees":[{"branch":"main","is_linked_worktree":false,"label":"repo","open_workspace_id":"w1","path":"/src/repo"},{"branch":"feat-x","is_linked_worktree":true,"label":"repo","path":"/wt/feat-x"}]}}'
+  exit 0
+fi
+echo '{"result":{"type":"ok"}}'
+exit 0"""
+
+NOT_GIT = "Herdr worktree actions require a workspace inside a Git work tree"
+
+REJECTS_WORKTREE_LIST = STUB % (
+    """if [ "$1" = "worktree" ] && [ "$2" = "list" ]; then
+  echo '{"error":{"code":"not_git_worktree","message":"%s"}}' >&2
+  exit 1
+fi
+echo '{"result":{"type":"ok"}}'
+exit 0"""
+    % NOT_GIT
 )
 
 
@@ -290,6 +310,11 @@ def rejected_command_is_reported(scratch: Path) -> bool:
             f"drew: {text[-400:]!r}",
         )
         passed &= check(
+            "the failure shows herdr's message, not its envelope",
+            '"error"' not in squeezed,
+            f"drew: {text[-400:]!r}",
+        )
+        passed &= check(
             "the failure names the entry that produced it",
             "pane.split.right" in text,
             f"drew: {text[-400:]!r}",
@@ -384,6 +409,73 @@ def a_refused_listing_is_reported(scratch: Path) -> bool:
             "the palette stays up after a refused listing",
             palette.wait_for_exit(1.0) is None,
             "it exited instead of letting the user pick something else",
+        )
+        return passed
+    finally:
+        palette.close()
+
+
+def a_worktree_pick_reaches_the_context_repository(scratch: Path) -> bool:
+    """`main` scopes the listing and fills `{repo}` from the context workspace,
+    which neither the unit tests nor the catalog E2E reach."""
+    stub = write_stub(scratch / "herdr-worktrees", WORKTREES)
+    log = scratch / "worktrees.log"
+    log.write_text("")
+    palette = Palette(stub, log, scratch / "worktrees.stderr")
+    name = "the worktree listing is scoped to the context workspace"
+    try:
+        if not started(palette, name):
+            return False
+        palette.send(b"Open worktree\r")
+        seen = palette.wait_for("feat-x", OUTCOME_TIMEOUT)
+        palette.send(b"feat-x\r")
+        code = palette.wait_for_exit(EXIT_TIMEOUT)
+        calls = log.read_text()
+        passed = check(name, "worktree list --workspace w1" in calls, f"stub log: {calls!r}")
+        passed &= check(
+            "worktree candidates are labelled by branch",
+            seen,
+            f"drew: {visible(palette.painted)[-400:]!r}",
+        )
+        passed &= check(
+            "the picked worktree opens from the repository root",
+            "worktree open --cwd /src/repo --path /wt/feat-x --focus" in calls and code == 0,
+            f"exit {code}, stub log: {calls!r}",
+        )
+        return passed
+    finally:
+        palette.close()
+
+
+def an_unfillable_repo_is_reported_before_dispatch(scratch: Path) -> bool:
+    """`{repo}` is looked up after the pick, so a workspace outside any Git
+    repository fails there — a path distinct from a rejected dispatch."""
+    stub = write_stub(scratch / "herdr-not-git", REJECTS_WORKTREE_LIST)
+    log = scratch / "not-git.log"
+    log.write_text("")
+    palette = Palette(stub, log, scratch / "not-git.stderr")
+    name = "an unresolvable {repo} reports herdr's reason"
+    try:
+        if not started(palette, name):
+            return False
+        palette.send(b"New worktree\r")
+        palette.wait_for("New branch name", OUTCOME_TIMEOUT)
+        palette.send(b"e2e\r")
+        # The head only: the wrapped remainder is redrawn cell by cell.
+        seen = palette.wait_until_squeezed(
+            "`worktree.create`failed:Herdrworktreeactionsrequire", OUTCOME_TIMEOUT
+        )
+        text = visible(palette.painted).replace("\n", " ")
+        passed = check(name, seen, f"drew: {text[-400:]!r}")
+        passed &= check(
+            "the palette stays up after an unresolvable {repo}",
+            palette.wait_for_exit(1.0) is None,
+            "it exited instead of showing why",
+        )
+        passed &= check(
+            "nothing was dispatched without a repository",
+            "worktree create" not in log.read_text(),
+            f"stub log: {log.read_text()!r}",
         )
         return passed
     finally:
@@ -535,6 +627,8 @@ def main() -> int:
     passed &= accepted_command_closes_the_palette(scratch)
     passed &= an_empty_listing_is_reported(scratch)
     passed &= a_refused_listing_is_reported(scratch)
+    passed &= a_worktree_pick_reaches_the_context_repository(scratch)
+    passed &= an_unfillable_repo_is_reported_before_dispatch(scratch)
     passed &= esc_closes_the_palette(scratch)
     passed &= icons_follow_settings(scratch)
     passed &= every_footer_note_is_kept(scratch)
