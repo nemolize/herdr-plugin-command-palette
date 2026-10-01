@@ -55,6 +55,7 @@ const SUBJECT_ICONS: &[(&str, &str)] = &[
 
 /// The CLI addresses a worktree by path (`open`) or by the workspace it is open
 /// in (`remove`), so the flag before `{}` names the row column that fills it.
+/// `Workspace` offers only linked worktrees: `remove` refuses the main checkout.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WorktreeKey {
     Path,
@@ -361,6 +362,23 @@ mod tests {
         }
     }
 
+    /// `worktree create` / `open` refuse a linked worktree's workspace as their
+    /// source, and the context workspace is one whenever a worktree is in front.
+    #[test]
+    fn no_worktree_entry_starts_from_the_context_workspace() {
+        for e in &shipped().commands {
+            if e.args.first().map(String::as_str) != Some("worktree") {
+                continue;
+            }
+            assert!(
+                !e.args.iter().any(|a| a == "{workspace}"),
+                "{}: `{}` names its source with {{workspace}}; use --cwd {{repo}}",
+                e.id,
+                e.args.join(" ")
+            );
+        }
+    }
+
     /// The check that would have caught `tab.rename`, which supplied an id to a
     /// command whose signature is `<TAB_ID> <LABEL>...` and so could never run.
     /// Verifying flags and enum values — as the original catalog check did —
@@ -389,7 +407,7 @@ mod tests {
             (&["workspace", "close"], 1),
             (&["workspace", "rename"], 2),
             (&["server", "reload-config"], 0),
-            // From 0.9.3: every worktree verb is addressed by flags alone.
+            // The worktree rows from 0.9.3.
             (&["worktree", "create"], 0),
             (&["worktree", "open"], 0),
             (&["worktree", "remove"], 0),
@@ -411,7 +429,7 @@ mod tests {
             while let Some(a) = rest.next() {
                 if a.starts_with("--") {
                     // Only value-taking flags consume the next token. Listed
-                    // from the same 0.8.2 `--help` output as `required` above,
+                    // from the same `--help` output as `required` above,
                     // and for the same reason: a flag missing here reads its
                     // value as a positional and fails a correct entry, while a
                     // valueless flag wrongly listed eats a real positional and

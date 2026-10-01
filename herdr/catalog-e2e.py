@@ -130,11 +130,12 @@ class Fixture:
     `pane.move.tab` moves a pane into a *different* tab, and `tab.focus` is only
     meaningful with somewhere to switch to. The workspace is rooted in a Git
     repository so the worktree entries have one to act on, and `worktree` adds
-    a linked worktree open in its own workspace — `remove` refuses the main
-    checkout, so acting on that one would prove nothing.
+    a linked worktree — `remove` refuses the main checkout, so acting on that
+    one would prove nothing. `closed` closes its workspace, so `open` opens it
+    rather than focusing what is already there.
     """
 
-    def __init__(self, home: Path, worktree: bool = False):
+    def __init__(self, home: Path, worktree: bool = False, closed: bool = False):
         self.home = home
         repo = home / "repo"
         init_repository(repo, home)
@@ -146,18 +147,31 @@ class Fixture:
             herdr("tab", "create", home=home)
             self.ids = self._read_ids()
             if worktree:
-                self.ids.update(self._create_worktree())
+                self.ids.update(self._create_worktree(closed))
         except BaseException:
             self.close()
             raise
 
-    def _create_worktree(self) -> dict[str, str]:
+    def _create_worktree(self, closed: bool) -> dict[str, str]:
         proc = herdr(
             "worktree", "create", "--workspace", self.ids["{workspace}"],
             "--branch", "e2e-existing", "--no-focus", home=self.home,
         )
         row = json.loads(proc.stdout)["result"]["worktree"]
+        # The linked worktree's workspace is where `create` and `open` refuse to
+        # start from, so the context is moved there while it stays open.
+        listing = herdr(
+            "worktree", "list", "--workspace", row["open_workspace_id"], home=self.home
+        )
+        repo = json.loads(listing.stdout)["result"]["source"]["repo_root"]
+        ids = {}
+        if closed:
+            herdr("workspace", "close", row["open_workspace_id"], home=self.home)
+        else:
+            ids["{workspace}"] = row["open_workspace_id"]
         return {
+            **ids,
+            "{repo}": repo,
             "{worktree path}": row["path"],
             "{worktree workspace}": row["open_workspace_id"],
         }
@@ -201,8 +215,7 @@ def resolved_args(entry: dict, ids: dict[str, str]) -> list[str]:
     A tab-resolving entry takes the tab the pane is NOT in, so the move it
     performs is a real one. `{text}` carries a space because that is the shape
     that breaks if the palette ever splits the typed name across argv elements —
-    except as a branch name, which git refuses with one. A worktree-resolving
-    entry takes the fixture's linked worktree, by the column its flag names.
+    except as a branch name, which git refuses with one.
 
     Raises on a `resolve` this file does not know: defaulting it to a tab id
     would substitute a plausible argument into an entry never taught here and
@@ -355,7 +368,11 @@ def main() -> int:
     for entry in entries:
         home = Path(tempfile.mkdtemp(dir=FIXTURE_ROOT))
         try:
-            fixture = Fixture(home, worktree=entry.get("resolve") == "worktree list")
+            fixture = Fixture(
+                home,
+                worktree=entry["args"][0] == "worktree",
+                closed=flag_before(entry["args"], "{}") == "--path",
+            )
         except RuntimeError as e:
             # Keep going: one flaky boot must not swallow every later entry's
             # verdict, and a harness fault is not a drifted catalog.

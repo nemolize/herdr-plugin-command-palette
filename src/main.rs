@@ -52,6 +52,29 @@ fn seed_for(herdr: &Herdr, command: &catalog::Command) -> String {
     herdr.current_label(&format!("{subject} list"), id)
 }
 
+/// Fills `{repo}`, which unlike the context ids costs a herdr call — so it is
+/// made only once an entry naming it runs.
+fn fill_repo(herdr: &Herdr, context: &Context, args: &[String]) -> Result<Vec<String>, String> {
+    if !args.iter().any(|a| a == "{repo}") {
+        return Ok(args.to_vec());
+    }
+    let workspace = context
+        .workspace_id
+        .as_deref()
+        .ok_or_else(|| "no workspace to find the repository of".to_string())?;
+    let root = herdr.repo_root(workspace)?;
+    Ok(args
+        .iter()
+        .map(|a| {
+            if a == "{repo}" {
+                root.clone()
+            } else {
+                a.clone()
+            }
+        })
+        .collect())
+}
+
 fn run() -> Result<(), String> {
     let bin = std::env::var("HERDR_BIN_PATH")
         .map_err(|_| "HERDR_BIN_PATH is not set — this runs as a herdr plugin pane".to_string())?;
@@ -175,9 +198,18 @@ fn run() -> Result<(), String> {
             }
             // The ranking is saved before the dispatch is attempted, so a
             // failure still leaves the ordering updated — the user did pick it.
-            Step::Run(outcome) => {
+            Step::Run(mut outcome) => {
                 if let Some(path) = frecency_path.as_deref() {
                     let _ = app.frecency().save(path);
+                }
+                if let Outcome::Command { id, args } = &mut outcome {
+                    match fill_repo(&herdr, &context, args) {
+                        Ok(filled) => *args = filled,
+                        Err(e) => {
+                            app.status = Some(format!("`{id}` failed: {e}"));
+                            continue;
+                        }
+                    }
                 }
                 // Torn down first because the popup is a real pane while it is
                 // up: an entry that moves focus would be racing its own UI.

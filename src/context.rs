@@ -51,9 +51,11 @@ impl Context {
 
     /// An entry whose argv names a context id the current invocation lacks
     /// cannot run, so it is not offered rather than failing when picked.
+    /// `{repo}` is looked up from the workspace, so it needs one too.
     pub fn can_satisfy(&self, args: &[String]) -> bool {
         args.iter().all(|a| match a.as_str() {
             "{pane}" | "{tab}" | "{workspace}" => self.lookup(a).is_some(),
+            "{repo}" => self.workspace_id.is_some(),
             _ => true,
         })
     }
@@ -106,6 +108,15 @@ mod tests {
         let needs_tab = ["tab", "close", "{tab}"].map(str::to_owned).to_vec();
         assert!(!c.can_satisfy(&needs_pane));
         assert!(c.can_satisfy(&needs_tab));
+    }
+
+    #[test]
+    fn a_repo_entry_needs_a_workspace() {
+        let args = ["worktree", "create", "--cwd", "{repo}"]
+            .map(str::to_owned)
+            .to_vec();
+        assert!(!ctx(Some("w1:p1"), Some("w1:t1"), None).can_satisfy(&args));
+        assert!(ctx(None, None, Some("w1")).can_satisfy(&args));
     }
 
     #[test]

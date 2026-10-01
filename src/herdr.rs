@@ -139,6 +139,12 @@ impl Herdr {
             .collect())
     }
 
+    /// The repository behind `workspace`, whichever of its checkouts that is:
+    /// `worktree create` and `open` refuse a linked one's workspace as source.
+    pub fn repo_root(&self, workspace: &str) -> Result<String, String> {
+        source_repo_root(&self.call(&worktree_list_args(workspace))?)
+    }
+
     /// The current name of `id`, for seeding a rename. Empty when there is no
     /// name to edit, including when the lookup fails: an unseeded prompt still
     /// renames, so it is not worth refusing the stage over.
@@ -270,7 +276,10 @@ pub fn current_platform() -> &'static str {
 /// a dispatch fails, and a herdr that answers with something other than the
 /// envelope leaves this as the sole account of it.
 fn read_response(stdout: &[u8], stderr: &[u8]) -> Result<serde_json::Value, String> {
-    let body: Envelope = serde_json::from_slice(stdout).map_err(|_| {
+    // herdr 0.9 writes a failure's envelope to stderr and leaves stdout empty.
+    let parsed = serde_json::from_slice::<Envelope>(stdout)
+        .or_else(|_| serde_json::from_slice::<Envelope>(stderr));
+    let body: Envelope = parsed.map_err(|_| {
         // Preferred over stdout because a herdr that failed before writing its
         // envelope says why on stderr, and stdout is then empty or a fragment.
         let stderr = String::from_utf8_lossy(stderr);
@@ -315,6 +324,14 @@ fn worktree_list_args(workspace: &str) -> Vec<String> {
     ["worktree", "list", "--workspace", workspace]
         .map(str::to_owned)
         .to_vec()
+}
+
+fn source_repo_root(listing: &serde_json::Value) -> Result<String, String> {
+    listing
+        .pointer("/source/repo_root")
+        .and_then(|v| v.as_str())
+        .map(str::to_owned)
+        .ok_or_else(|| "worktree list named no repository root".to_string())
 }
 
 /// Every row's `label` is the repository name, so the branch tells rows apart.
@@ -387,8 +404,8 @@ fn target_from_row(
 #[cfg(test)]
 mod tests {
     use super::{
-        read_response, seed_from_row, target_from_row, worktree_list_args, worktree_target, Herdr,
-        PluginAction, WorktreeKey,
+        read_response, seed_from_row, source_repo_root, target_from_row, worktree_list_args,
+        worktree_target, Herdr, PluginAction, WorktreeKey,
     };
     use serde_json::json;
 
@@ -399,6 +416,15 @@ mod tests {
         let body = br#"{"error":{"message":"pane not found"}}"#;
         let err = read_response(body, b"").expect_err("an error body is a failure");
         assert_eq!(err, "pane not found");
+    }
+
+    /// What herdr 0.9 actually does: the envelope on stderr, stdout empty.
+    /// Read raw, the user would be shown the JSON instead of its message.
+    #[test]
+    fn an_api_error_on_stderr_surfaces_its_message() {
+        let body = br#"{"error":{"code":"dirty_worktree_requires_force","message":"contains modified files"}}"#;
+        let err = read_response(b"", body).expect_err("an error body is a failure");
+        assert_eq!(err, "contains modified files");
     }
 
     #[test]
@@ -559,11 +585,11 @@ mod tests {
     }
 
     /// A catalog is user-replaceable, so `resolve` is untrusted input that
-    /// becomes argv. Anything but the four listings must be refused before it
+    /// becomes argv. Anything but a supported listing must be refused before it
     /// can run — `targets` returns the rejection without spawning a process, so
     /// the bin path is never reached.
     #[test]
-    fn rejects_a_resolve_that_is_not_one_of_the_four_listings() {
+    fn rejects_a_resolve_that_is_not_a_supported_listing() {
         let herdr = Herdr::new("/nonexistent-herdr-binary".to_string());
         let args = ["worktree", "open", "--path", "{}"].map(str::to_owned);
         for hostile in [
@@ -608,6 +634,14 @@ mod tests {
             .targets("worktree list", &branch, Some("w1"))
             .expect_err("no column");
         assert!(err.contains("--path"), "{err}");
+    }
+
+    #[test]
+    fn the_repository_root_comes_from_the_listing_source() {
+        let listing = json!({"source": {"repo_root": "/src/repo", "source_workspace_id": "w1"},
+                             "worktrees": []});
+        assert_eq!(source_repo_root(&listing), Ok("/src/repo".to_string()));
+        assert!(source_repo_root(&json!({"worktrees": []})).is_err());
     }
 
     fn worktree_rows() -> [serde_json::Value; 3] {

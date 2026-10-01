@@ -121,7 +121,8 @@ what correcting a catalog means. Start from
 - `{pane}`, `{tab}`, `{workspace}` resolve from the invocation's context — the
   pane you were in when the palette opened, not the palette's own pane. An entry
   naming an id the invocation lacks is not offered rather than failing when
-  picked.
+  picked. `{repo}` is the root of the Git repository behind `{workspace}`,
+  looked up when the entry runs.
 - `resolve` marks an entry that cannot name its target until open time. Its value
   is the list API whose rows become the second-step candidates (`tab list`,
   `pane list`, `workspace list`, `worktree list`), and the chosen id is
