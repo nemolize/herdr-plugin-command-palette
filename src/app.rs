@@ -2,7 +2,8 @@
 
 use crate::catalog::Command;
 use crate::frecency::Frecency;
-use crate::herdr::{PluginAction, Target};
+use crate::herdr::PluginAction;
+use crate::listing::Target;
 use crate::selection::Selection;
 
 pub enum Kind {
@@ -87,6 +88,10 @@ pub enum Stage {
 pub enum Step {
     Continue,
     Cancel,
+    /// Fill this entry's `{repo}`, then hand it back through `App::picked`.
+    /// Filled here, before any stage, so a typed or picked value spelling
+    /// `{repo}` is never rewritten.
+    NeedsRepo(Command),
     /// Fetch this entry's targets and re-enter as `Stage::Targets`.
     NeedsTargets(Command),
     /// Seed this entry's input with the current name. A `Step` rather than a
@@ -316,15 +321,12 @@ impl App {
 
         match &self.stage {
             Stage::Commands => match &self.candidates[i].kind {
-                Kind::Command(c) if c.needs_target() => Step::NeedsTargets(c.clone()),
-                Kind::Command(c) if c.needs_text() => Step::NeedsPrompt(c.clone()),
+                Kind::Command(c) if c.args.iter().any(|a| a == "{repo}") => {
+                    Step::NeedsRepo(c.clone())
+                }
                 Kind::Command(c) => {
-                    let id = c.id.clone();
-                    self.frecency.record(&id);
-                    Step::Run(Outcome::Command {
-                        id,
-                        args: c.args.clone(),
-                    })
+                    let c = c.clone();
+                    self.picked(c)
                 }
                 Kind::Action(a) => {
                     let id = self.candidates[i].id.clone();
@@ -345,6 +347,21 @@ impl App {
                 Step::Run(Outcome::Command { id, args })
             }
             Stage::Prompt { .. } => Step::Continue,
+        }
+    }
+
+    /// What a command picked from the list needs next.
+    pub fn picked(&mut self, c: Command) -> Step {
+        if c.needs_target() {
+            Step::NeedsTargets(c)
+        } else if c.needs_text() {
+            Step::NeedsPrompt(c)
+        } else {
+            self.frecency.record(&c.id);
+            Step::Run(Outcome::Command {
+                id: c.id,
+                args: c.args,
+            })
         }
     }
 
@@ -481,6 +498,37 @@ mod tests {
             Some("tab list"),
         )]);
         assert!(matches!(app.confirm(), Step::NeedsTargets(_)));
+    }
+
+    #[test]
+    fn a_repo_entry_asks_for_its_repository_before_anything_else() {
+        let entry = cmd(
+            "worktree.open",
+            "Open worktree",
+            &["worktree", "open", "--cwd", "{repo}", "--path", "{}"],
+            Some("worktree list"),
+        );
+        let mut app = app_with(vec![entry]);
+        assert!(matches!(app.confirm(), Step::NeedsRepo(_)));
+        assert_eq!(app.frecency().rank("worktree.open"), 0.0);
+    }
+
+    /// Only a run is a use: a stage the user may still back out of is not.
+    #[test]
+    fn a_picked_entry_is_ranked_only_when_it_runs() {
+        let mut app = app_with(vec![]);
+        let staged = cmd(
+            "tab.focus",
+            "Focus tab",
+            &["tab", "focus", "{}"],
+            Some("tab list"),
+        );
+        assert!(matches!(app.picked(staged), Step::NeedsTargets(_)));
+        assert_eq!(app.frecency().rank("tab.focus"), 0.0);
+
+        let fixed = cmd("tab.create", "New tab", &["tab", "create"], None);
+        assert!(matches!(app.picked(fixed), Step::Run(_)));
+        assert!(app.frecency().rank("tab.create") > 0.0);
     }
 
     #[test]

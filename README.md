@@ -76,9 +76,9 @@ Entries that need a target you must choose — `Focus tab…`, `Move pane to tab
 `Close workspace…`, `Open worktree…` — open a second list of the live tabs,
 panes, workspaces or worktrees when you pick them. Worktrees are those of the
 repository behind the workspace you opened the palette from, listed by branch;
-`Remove worktree…` lists only the open ones, and herdr refuses one with
-uncommitted or untracked changes. `Esc` there backs out to the command list rather than closing
-the palette.
+`Remove worktree…` lists only the open ones herdr created, and herdr refuses
+one with uncommitted or untracked changes. `Esc` there backs out to the command
+list rather than closing the palette.
 
 Entries that need a name you must type — `Rename tab…`, `Rename workspace…`,
 `Rename pane…` — open an input instead of a list. They act on what you were
@@ -122,7 +122,7 @@ what correcting a catalog means. Start from
   pane you were in when the palette opened, not the palette's own pane. An entry
   naming an id the invocation lacks is not offered rather than failing when
   picked. `{repo}` is the root of the Git repository behind `{workspace}`,
-  looked up when the entry runs.
+  looked up when the entry is picked.
 - `resolve` marks an entry that cannot name its target until open time. Its value
   is the list API whose rows become the second-step candidates (`tab list`,
   `pane list`, `workspace list`, `worktree list`), and the chosen id is

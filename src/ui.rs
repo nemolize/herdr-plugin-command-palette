@@ -435,7 +435,7 @@ mod render_tests {
     use crate::app::Candidate;
     use crate::catalog::Command;
     use crate::frecency::Frecency;
-    use crate::herdr::Target;
+    use crate::listing::Target;
     use ratatui::backend::TestBackend;
     use std::path::Path;
 
@@ -1134,7 +1134,8 @@ mod wiring_tests {
     use crate::app::{Candidate, Outcome};
     use crate::catalog::Command;
     use crate::frecency::Frecency;
-    use crate::herdr::{PluginAction, Target};
+    use crate::herdr::PluginAction;
+    use crate::listing::Target;
     use crossterm::event::{KeyEvent, KeyEventState};
     use ratatui::backend::TestBackend;
 
@@ -1370,6 +1371,7 @@ mod wiring_tests {
             None => "the keys were consumed and no step was produced".into(),
             Some(Step::Continue) => "Continue".into(),
             Some(Step::Cancel) => "Cancel".into(),
+            Some(Step::NeedsRepo(c)) => format!("NeedsRepo({})", c.id),
             Some(Step::NeedsTargets(c)) => format!("NeedsTargets({})", c.id),
             Some(Step::NeedsPrompt(c)) => format!("NeedsPrompt({})", c.id),
             Some(Step::Run(Outcome::Command { id, args })) => {

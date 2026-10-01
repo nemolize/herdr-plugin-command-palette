@@ -82,8 +82,14 @@ exit 0"""
     % LISTING_REFUSED
 )
 
+# `manual` is a `git worktree add` checkout opened as a plain workspace (w3):
+# its row matches a herdr-created one, and only `workspace list` tells them apart.
 WORKTREES = STUB % """if [ "$1" = "worktree" ] && [ "$2" = "list" ]; then
-  echo '{"result":{"source":{"repo_root":"/src/repo"},"worktrees":[{"branch":"main","is_linked_worktree":false,"label":"repo","open_workspace_id":"w1","path":"/src/repo"},{"branch":"feat-x","is_linked_worktree":true,"label":"repo","path":"/wt/feat-x"}]}}'
+  echo '{"result":{"source":{"repo_root":"/src/repo"},"worktrees":[{"branch":"main","is_linked_worktree":false,"label":"repo","open_workspace_id":"w1","path":"/src/repo"},{"branch":"feat-x","is_linked_worktree":true,"label":"repo","path":"/wt/feat-x"},{"branch":"feat-y","is_linked_worktree":true,"label":"repo","open_workspace_id":"w2","path":"/wt/feat-y"},{"branch":"manual","is_linked_worktree":true,"label":"repo","open_workspace_id":"w3","path":"/src/manual"}]}}'
+  exit 0
+fi
+if [ "$1" = "workspace" ] && [ "$2" = "list" ]; then
+  echo '{"result":{"workspaces":[{"workspace_id":"w1","label":"repo","worktree":{"is_linked_worktree":false}},{"workspace_id":"w2","label":"feat-y","worktree":{"is_linked_worktree":true}},{"workspace_id":"w3","label":"manual"}]}}'
   exit 0
 fi
 echo '{"result":{"type":"ok"}}'
@@ -447,9 +453,65 @@ def a_worktree_pick_reaches_the_context_repository(scratch: Path) -> bool:
         palette.close()
 
 
+def removing_offers_only_worktrees_herdr_created(scratch: Path) -> bool:
+    stub = write_stub(scratch / "herdr-remove", WORKTREES)
+    log = scratch / "remove.log"
+    log.write_text("")
+    palette = Palette(stub, log, scratch / "remove.stderr")
+    name = "remove lists the worktree herdr created"
+    try:
+        if not started(palette, name):
+            return False
+        palette.send(b"Remove worktree\r")
+        seen = palette.wait_for("feat-y", OUTCOME_TIMEOUT)
+        drawn = visible(palette.painted)
+        palette.send(b"\r")
+        code = palette.wait_for_exit(EXIT_TIMEOUT)
+        calls = log.read_text()
+        passed = check(name, seen, f"drew: {drawn[-400:]!r}")
+        passed &= check(
+            "remove leaves out a checkout herdr did not create",
+            "manual" not in drawn.split("Remove worktree")[-1],
+            f"drew: {drawn[-400:]!r}",
+        )
+        passed &= check(
+            "the picked worktree is removed through its workspace",
+            "worktree remove --workspace w2" in calls and code == 0,
+            f"exit {code}, stub log: {calls!r}",
+        )
+        return passed
+    finally:
+        palette.close()
+
+
+def a_typed_repo_placeholder_is_kept_as_typed(scratch: Path) -> bool:
+    """`{repo}` is filled before the typed name goes in, so a name that spells
+    it reaches herdr as typed rather than as the repository's path."""
+    stub = write_stub(scratch / "herdr-typed-repo", WORKTREES)
+    log = scratch / "typed-repo.log"
+    log.write_text("")
+    palette = Palette(stub, log, scratch / "typed-repo.stderr")
+    name = "a branch typed as {repo} reaches herdr as typed"
+    try:
+        if not started(palette, name):
+            return False
+        palette.send(b"New worktree\r")
+        palette.wait_for("New branch name", OUTCOME_TIMEOUT)
+        palette.send(b"{repo}\r")
+        code = palette.wait_for_exit(EXIT_TIMEOUT)
+        calls = log.read_text()
+        return check(
+            name,
+            "worktree create --cwd /src/repo --branch {repo} --focus" in calls and code == 0,
+            f"exit {code}, stub log: {calls!r}",
+        )
+    finally:
+        palette.close()
+
+
 def an_unfillable_repo_is_reported_before_dispatch(scratch: Path) -> bool:
-    """`{repo}` is looked up after the pick, so a workspace outside any Git
-    repository fails there — a path distinct from a rejected dispatch."""
+    """`{repo}` is looked up when the entry is picked, so a workspace outside
+    any Git repository fails there, before the branch name is asked for."""
     stub = write_stub(scratch / "herdr-not-git", REJECTS_WORKTREE_LIST)
     log = scratch / "not-git.log"
     log.write_text("")
@@ -459,14 +521,17 @@ def an_unfillable_repo_is_reported_before_dispatch(scratch: Path) -> bool:
         if not started(palette, name):
             return False
         palette.send(b"New worktree\r")
-        palette.wait_for("New branch name", OUTCOME_TIMEOUT)
-        palette.send(b"e2e\r")
         # The head only: the wrapped remainder is redrawn cell by cell.
         seen = palette.wait_until_squeezed(
             "`worktree.create`failed:Herdrworktreeactionsrequire", OUTCOME_TIMEOUT
         )
         text = visible(palette.painted).replace("\n", " ")
         passed = check(name, seen, f"drew: {text[-400:]!r}")
+        passed &= check(
+            "the branch name is not asked for without a repository",
+            "New branch name" not in visible(palette.painted),
+            f"drew: {text[-400:]!r}",
+        )
         passed &= check(
             "the palette stays up after an unresolvable {repo}",
             palette.wait_for_exit(1.0) is None,
@@ -629,6 +694,8 @@ def main() -> int:
     passed &= a_refused_listing_is_reported(scratch)
     passed &= a_worktree_pick_reaches_the_context_repository(scratch)
     passed &= an_unfillable_repo_is_reported_before_dispatch(scratch)
+    passed &= a_typed_repo_placeholder_is_kept_as_typed(scratch)
+    passed &= removing_offers_only_worktrees_herdr_created(scratch)
     passed &= esc_closes_the_palette(scratch)
     passed &= icons_follow_settings(scratch)
     passed &= every_footer_note_is_kept(scratch)

@@ -4,6 +4,8 @@ use std::path::{Path, PathBuf};
 
 use ratatui::buffer::CellWidth;
 use serde::Deserialize;
+
+use crate::listing::WorktreeKey;
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
@@ -52,26 +54,6 @@ const SUBJECT_ICONS: &[(&str, &str)] = &[
     ("server", "↻"),
     ("worktree", "⎇"),
 ];
-
-/// The CLI addresses a worktree by path (`open`) or by the workspace it is open
-/// in (`remove`), so the flag before `{}` names the row column that fills it.
-/// `Workspace` offers only linked worktrees: `remove` refuses the main checkout.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum WorktreeKey {
-    Path,
-    Workspace,
-}
-
-impl WorktreeKey {
-    pub fn for_args(args: &[String]) -> Option<Self> {
-        let at = args.iter().position(|a| a == "{}")?;
-        match args.get(at.checked_sub(1)?)?.as_str() {
-            "--path" => Some(Self::Path),
-            "--workspace" => Some(Self::Workspace),
-            _ => None,
-        }
-    }
-}
 
 impl Command {
     pub fn needs_target(&self) -> bool {
@@ -517,24 +499,6 @@ mod tests {
             assert_eq!(e.icon, None, "{}: shipped entries derive", e.id);
             assert_eq!(e.icon(), expected, "{}", e.id);
         }
-    }
-
-    #[test]
-    fn a_worktree_placeholder_is_filled_from_the_column_its_flag_names() {
-        let args = |a: &[&str]| a.iter().map(|s| s.to_string()).collect::<Vec<_>>();
-        assert_eq!(
-            WorktreeKey::for_args(&args(&["worktree", "open", "--path", "{}"])),
-            Some(WorktreeKey::Path)
-        );
-        assert_eq!(
-            WorktreeKey::for_args(&args(&["worktree", "remove", "--workspace", "{}"])),
-            Some(WorktreeKey::Workspace)
-        );
-        assert_eq!(
-            WorktreeKey::for_args(&args(&["worktree", "open", "--branch", "{}"])),
-            None
-        );
-        assert_eq!(WorktreeKey::for_args(&args(&["{}"])), None);
     }
 
     #[test]

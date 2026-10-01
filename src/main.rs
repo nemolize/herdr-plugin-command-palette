@@ -7,6 +7,7 @@ mod frecency;
 mod fuzzy;
 mod herdr;
 mod keys;
+mod listing;
 mod selection;
 mod settings;
 mod ui;
@@ -52,8 +53,7 @@ fn seed_for(herdr: &Herdr, command: &catalog::Command) -> String {
     herdr.current_label(&format!("{subject} list"), id)
 }
 
-/// Fills `{repo}`, which unlike the context ids costs a herdr call — so it is
-/// made only once an entry naming it runs.
+/// Fills `{repo}`, which unlike the context ids costs a herdr call.
 fn fill_repo(herdr: &Herdr, context: &Context, args: &[String]) -> Result<Vec<String>, String> {
     if !args.iter().any(|a| a == "{repo}") {
         return Ok(args.to_vec());
@@ -73,6 +73,24 @@ fn fill_repo(herdr: &Herdr, context: &Context, args: &[String]) -> Result<Vec<St
             }
         })
         .collect())
+}
+
+fn targets_for(
+    herdr: &Herdr,
+    command: &catalog::Command,
+    context: &Context,
+) -> Result<Vec<listing::Target>, String> {
+    let resolve = command.resolve.as_deref().unwrap_or_default();
+    if resolve != "worktree list" {
+        return herdr.targets(resolve);
+    }
+    let key = listing::WorktreeKey::for_args(&command.args)
+        .ok_or_else(|| catalog::rejection(command).unwrap_or_default())?;
+    let workspace = context
+        .workspace_id
+        .as_deref()
+        .ok_or_else(|| "no workspace to list the repository of".to_string())?;
+    herdr.worktrees(key, workspace)
 }
 
 fn run() -> Result<(), String> {
@@ -174,14 +192,29 @@ fn run() -> Result<(), String> {
 
     let mut screen = ui::Screen::enter()?;
 
+    // A step the loop produced itself, handled before the next keypress.
+    let mut next: Option<Step> = None;
     loop {
-        let drawn_rows = screen.draw(&mut app)?;
-        match ui::next_step(&mut app, drawn_rows)? {
+        let step = match next.take() {
+            Some(step) => step,
+            None => {
+                let drawn_rows = screen.draw(&mut app)?;
+                ui::next_step(&mut app, drawn_rows)?
+            }
+        };
+        match step {
             Step::Continue => {}
             Step::Cancel => return Ok(()),
+            Step::NeedsRepo(mut command) => match fill_repo(&herdr, &context, &command.args) {
+                Ok(args) => {
+                    command.args = args;
+                    next = Some(app.picked(command));
+                }
+                Err(e) => app.status = Some(format!("`{}` failed: {e}", command.id)),
+            },
             Step::NeedsTargets(command) => {
                 let resolve = command.resolve.clone().unwrap_or_default();
-                match herdr.targets(&resolve, &command.args, context.workspace_id.as_deref()) {
+                match targets_for(&herdr, &command, &context) {
                     Ok(targets) if targets.is_empty() => {
                         app.status = Some(format!("nothing to pick from `{resolve}`"));
                     }
@@ -198,18 +231,9 @@ fn run() -> Result<(), String> {
             }
             // The ranking is saved before the dispatch is attempted, so a
             // failure still leaves the ordering updated — the user did pick it.
-            Step::Run(mut outcome) => {
+            Step::Run(outcome) => {
                 if let Some(path) = frecency_path.as_deref() {
                     let _ = app.frecency().save(path);
-                }
-                if let Outcome::Command { id, args } = &mut outcome {
-                    match fill_repo(&herdr, &context, args) {
-                        Ok(filled) => *args = filled,
-                        Err(e) => {
-                            app.status = Some(format!("`{id}` failed: {e}"));
-                            continue;
-                        }
-                    }
                 }
                 // Torn down first because the popup is a real pane while it is
                 // up: an entry that moves focus would be racing its own UI.
@@ -350,6 +374,27 @@ fn argv(outcome: Outcome) -> (String, Vec<String>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Both refusals are decided before anything is spawned, so the bin path
+    /// is never reached.
+    #[test]
+    fn a_worktree_listing_with_nothing_to_scope_or_fill_is_refused() {
+        let herdr = Herdr::new("/nonexistent-herdr-binary".to_string());
+        let mut open = command("worktree.open", &["worktree", "open", "--path", "{}"], &[]);
+        open.resolve = Some("worktree list".into());
+
+        let err = targets_for(&herdr, &open, &Context::default()).expect_err("no workspace");
+        assert!(err.contains("no workspace"), "{err}");
+
+        let mut branch = open.clone();
+        branch.args[2] = "--branch".into();
+        let context = Context {
+            workspace_id: Some("w1".into()),
+            ..Context::default()
+        };
+        let err = targets_for(&herdr, &branch, &context).expect_err("no column");
+        assert!(err.contains("--path"), "{err}");
+    }
 
     fn command(id: &str, args: &[&str], contexts: &[&str]) -> catalog::Command {
         catalog::Command {
