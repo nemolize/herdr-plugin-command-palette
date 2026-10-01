@@ -12,7 +12,6 @@ mod selection;
 mod settings;
 mod ui;
 
-use std::collections::HashSet;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
@@ -54,9 +53,7 @@ fn seed_for(herdr: &Herdr, command: &catalog::Command) -> String {
     herdr.current_label(&format!("{subject} list"), id)
 }
 
-/// Fills `{repo}`, which unlike the context ids costs a herdr call — so it is
-/// made only once an entry naming it is picked, and before a typed or picked
-/// value goes in, so a value spelling `{repo}` is never rewritten.
+/// Fills `{repo}`, which unlike the context ids costs a herdr call.
 fn fill_repo(herdr: &Herdr, context: &Context, args: &[String]) -> Result<Vec<String>, String> {
     if !args.iter().any(|a| a == "{repo}") {
         return Ok(args.to_vec());
@@ -78,8 +75,6 @@ fn fill_repo(herdr: &Herdr, context: &Context, args: &[String]) -> Result<Vec<St
         .collect())
 }
 
-/// The candidates for a `resolve` entry. `worktree list` alone takes its column
-/// from the entry's argv and its scope from the context.
 fn targets_for(
     herdr: &Herdr,
     command: &catalog::Command,
@@ -129,14 +124,6 @@ fn run() -> Result<(), String> {
             .and_then(|p| std::fs::read_to_string(p).ok())
             .as_deref(),
     );
-
-    // Every other entry naming `{repo}` has it filled when its stage opens.
-    let unstaged_repo: HashSet<String> = catalog
-        .commands
-        .iter()
-        .filter(|c| !c.needs_target() && !c.needs_text() && c.args.iter().any(|a| a == "{repo}"))
-        .map(|c| c.id.clone())
-        .collect();
 
     let (mut candidates, rejected) = assemble(
         catalog.commands,
@@ -205,19 +192,27 @@ fn run() -> Result<(), String> {
 
     let mut screen = ui::Screen::enter()?;
 
+    // A step the loop produced itself, handled before the next keypress.
+    let mut next: Option<Step> = None;
     loop {
-        let drawn_rows = screen.draw(&mut app)?;
-        match ui::next_step(&mut app, drawn_rows)? {
+        let step = match next.take() {
+            Some(step) => step,
+            None => {
+                let drawn_rows = screen.draw(&mut app)?;
+                ui::next_step(&mut app, drawn_rows)?
+            }
+        };
+        match step {
             Step::Continue => {}
             Step::Cancel => return Ok(()),
-            Step::NeedsTargets(mut command) => {
-                command.args = match fill_repo(&herdr, &context, &command.args) {
-                    Ok(args) => args,
-                    Err(e) => {
-                        app.status = Some(format!("`{}` failed: {e}", command.id));
-                        continue;
-                    }
-                };
+            Step::NeedsRepo(mut command) => match fill_repo(&herdr, &context, &command.args) {
+                Ok(args) => {
+                    command.args = args;
+                    next = Some(app.picked(command));
+                }
+                Err(e) => app.status = Some(format!("`{}` failed: {e}", command.id)),
+            },
+            Step::NeedsTargets(command) => {
                 let resolve = command.resolve.clone().unwrap_or_default();
                 match targets_for(&herdr, &command, &context) {
                     Ok(targets) if targets.is_empty() => {
@@ -230,35 +225,15 @@ fn run() -> Result<(), String> {
                     Err(e) => app.status = Some(format!("{resolve}: {e}")),
                 }
             }
-            Step::NeedsPrompt(mut command) => {
-                command.args = match fill_repo(&herdr, &context, &command.args) {
-                    Ok(args) => args,
-                    Err(e) => {
-                        app.status = Some(format!("`{}` failed: {e}", command.id));
-                        continue;
-                    }
-                };
+            Step::NeedsPrompt(command) => {
                 let seed = seed_for(&herdr, &command);
                 app.enter_prompt(command, seed);
             }
             // The ranking is saved before the dispatch is attempted, so a
             // failure still leaves the ordering updated — the user did pick it.
-            Step::Run(mut outcome) => {
+            Step::Run(outcome) => {
                 if let Some(path) = frecency_path.as_deref() {
                     let _ = app.frecency().save(path);
-                }
-                if let Outcome::Command { id, args } = &mut outcome {
-                    // A staged entry was filled when its stage opened; a
-                    // `{repo}` left in its argv is the user's own value.
-                    if unstaged_repo.contains(id) {
-                        match fill_repo(&herdr, &context, args) {
-                            Ok(filled) => *args = filled,
-                            Err(e) => {
-                                app.status = Some(format!("`{id}` failed: {e}"));
-                                continue;
-                            }
-                        }
-                    }
                 }
                 // Torn down first because the popup is a real pane while it is
                 // up: an entry that moves focus would be racing its own UI.

@@ -88,6 +88,10 @@ pub enum Stage {
 pub enum Step {
     Continue,
     Cancel,
+    /// Fill this entry's `{repo}`, then hand it back through `App::picked`.
+    /// Filled here, before any stage, so a typed or picked value spelling
+    /// `{repo}` is never rewritten.
+    NeedsRepo(Command),
     /// Fetch this entry's targets and re-enter as `Stage::Targets`.
     NeedsTargets(Command),
     /// Seed this entry's input with the current name. A `Step` rather than a
@@ -317,15 +321,12 @@ impl App {
 
         match &self.stage {
             Stage::Commands => match &self.candidates[i].kind {
-                Kind::Command(c) if c.needs_target() => Step::NeedsTargets(c.clone()),
-                Kind::Command(c) if c.needs_text() => Step::NeedsPrompt(c.clone()),
+                Kind::Command(c) if c.args.iter().any(|a| a == "{repo}") => {
+                    Step::NeedsRepo(c.clone())
+                }
                 Kind::Command(c) => {
-                    let id = c.id.clone();
-                    self.frecency.record(&id);
-                    Step::Run(Outcome::Command {
-                        id,
-                        args: c.args.clone(),
-                    })
+                    let c = c.clone();
+                    self.picked(c)
                 }
                 Kind::Action(a) => {
                     let id = self.candidates[i].id.clone();
@@ -346,6 +347,21 @@ impl App {
                 Step::Run(Outcome::Command { id, args })
             }
             Stage::Prompt { .. } => Step::Continue,
+        }
+    }
+
+    /// What a command picked from the list needs next.
+    pub fn picked(&mut self, c: Command) -> Step {
+        if c.needs_target() {
+            Step::NeedsTargets(c)
+        } else if c.needs_text() {
+            Step::NeedsPrompt(c)
+        } else {
+            self.frecency.record(&c.id);
+            Step::Run(Outcome::Command {
+                id: c.id,
+                args: c.args,
+            })
         }
     }
 

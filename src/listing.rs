@@ -61,20 +61,38 @@ pub fn source_repo_root(listing: &serde_json::Value) -> Result<String, String> {
         .ok_or_else(|| "worktree list named no repository root".to_string())
 }
 
+/// The workspaces holding a worktree herdr created, the only ones `worktree
+/// remove` accepts: a `git worktree add` checkout opened as a plain workspace
+/// lists identically, and only its `workspace list` row tells it apart.
+pub fn managed_worktree_workspaces(workspace_list: &serde_json::Value) -> Vec<String> {
+    workspace_list
+        .get("workspaces")
+        .and_then(|v| v.as_array())
+        .map(|rows| {
+            rows.iter()
+                .filter(|row| {
+                    row.pointer("/worktree/is_linked_worktree")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false)
+                })
+                .filter_map(|row| row.get("workspace_id")?.as_str().map(str::to_owned))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 /// Every row's `label` is the repository name, so the branch tells rows apart.
-/// `Workspace` keeps only open linked rows: `remove` refuses the main checkout.
-pub fn worktree_target(row: &serde_json::Value, key: WorktreeKey) -> Option<Target> {
+/// `Workspace` keeps only rows open in one of `managed`.
+pub fn worktree_target(
+    row: &serde_json::Value,
+    key: WorktreeKey,
+    managed: &[String],
+) -> Option<Target> {
     let path = row.get("path")?.as_str()?;
     let open = row.get("open_workspace_id").and_then(|v| v.as_str());
     let id = match key {
         WorktreeKey::Path => path,
-        WorktreeKey::Workspace => {
-            let linked = row
-                .get("is_linked_worktree")
-                .and_then(|v| v.as_bool())
-                .unwrap_or(false);
-            open.filter(|_| linked)?
-        }
+        WorktreeKey::Workspace => open.filter(|w| managed.iter().any(|m| m == w))?,
     };
     let mut label = row
         .get("branch")
@@ -130,8 +148,8 @@ pub fn target_from_row(
 #[cfg(test)]
 mod tests {
     use super::{
-        seed_from_row, source_repo_root, target_from_row, worktree_list_args, worktree_target,
-        WorktreeKey,
+        managed_worktree_workspaces, seed_from_row, source_repo_root, target_from_row,
+        worktree_list_args, worktree_target, WorktreeKey,
     };
     use serde_json::json;
 
@@ -260,7 +278,7 @@ mod tests {
         assert!(source_repo_root(&json!({"worktrees": []})).is_err());
     }
 
-    fn worktree_rows() -> [serde_json::Value; 3] {
+    fn worktree_rows() -> [serde_json::Value; 4] {
         [
             json!({"branch": "main", "is_linked_worktree": false, "label": "repo",
                    "open_workspace_id": "w1", "path": "/src/repo"}),
@@ -268,19 +286,35 @@ mod tests {
                    "open_workspace_id": "w2", "path": "/wt/repo/feat-x"}),
             json!({"is_detached": true, "is_linked_worktree": true, "label": "repo",
                    "path": "/wt/repo/detached"}),
+            json!({"branch": "manual", "is_linked_worktree": true, "label": "repo",
+                   "open_workspace_id": "w3", "path": "/src/manual"}),
         ]
+    }
+
+    /// w3 holds a `git worktree add` checkout herdr did not create.
+    fn managed() -> Vec<String> {
+        managed_worktree_workspaces(&json!({"workspaces": [
+            {"workspace_id": "w1", "worktree": {"is_linked_worktree": false}},
+            {"workspace_id": "w2", "worktree": {"is_linked_worktree": true}},
+            {"workspace_id": "w3"},
+        ]}))
     }
 
     #[test]
     fn worktree_rows_sharing_a_label_are_told_apart_by_branch() {
         let labels: Vec<String> = worktree_rows()
             .iter()
-            .filter_map(|r| worktree_target(r, WorktreeKey::Path))
+            .filter_map(|r| worktree_target(r, WorktreeKey::Path, &[]))
             .map(|t| t.label)
             .collect();
         assert_eq!(
             labels,
-            vec!["main (open)", "feat-x (open)", "/wt/repo/detached"]
+            vec![
+                "main (open)",
+                "feat-x (open)",
+                "/wt/repo/detached",
+                "manual (open)"
+            ]
         );
     }
 
@@ -288,20 +322,26 @@ mod tests {
     fn opening_offers_every_worktree_by_path() {
         let ids: Vec<String> = worktree_rows()
             .iter()
-            .filter_map(|r| worktree_target(r, WorktreeKey::Path))
+            .filter_map(|r| worktree_target(r, WorktreeKey::Path, &[]))
             .map(|t| t.id)
             .collect();
         assert_eq!(
             ids,
-            vec!["/src/repo", "/wt/repo/feat-x", "/wt/repo/detached"]
+            vec![
+                "/src/repo",
+                "/wt/repo/feat-x",
+                "/wt/repo/detached",
+                "/src/manual"
+            ]
         );
     }
 
     #[test]
-    fn removing_offers_only_open_linked_worktrees_by_workspace() {
+    fn removing_offers_only_worktrees_herdr_manages_by_workspace() {
+        let managed = managed();
         let ids: Vec<String> = worktree_rows()
             .iter()
-            .filter_map(|r| worktree_target(r, WorktreeKey::Workspace))
+            .filter_map(|r| worktree_target(r, WorktreeKey::Workspace, &managed))
             .map(|t| t.id)
             .collect();
         assert_eq!(ids, vec!["w2"]);

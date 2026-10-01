@@ -5,8 +5,8 @@ use std::process::Command as Proc;
 use serde::Deserialize;
 
 use crate::listing::{
-    seed_from_row, source_repo_root, target_from_row, worktree_list_args, worktree_target, Target,
-    WorktreeKey,
+    managed_worktree_workspaces, seed_from_row, source_repo_root, target_from_row,
+    worktree_list_args, worktree_target, Target, WorktreeKey,
 };
 
 #[derive(Deserialize)]
@@ -111,6 +111,12 @@ impl Herdr {
     }
 
     pub fn worktrees(&self, key: WorktreeKey, workspace: &str) -> Result<Vec<Target>, String> {
+        let managed = match key {
+            WorktreeKey::Path => Vec::new(),
+            WorktreeKey::Workspace => {
+                managed_worktree_workspaces(&self.call(&["workspace", "list"].map(str::to_owned))?)
+            }
+        };
         let result = self.call(&worktree_list_args(workspace))?;
         let rows = result
             .get("worktrees")
@@ -118,7 +124,7 @@ impl Herdr {
             .ok_or_else(|| "worktree list returned no worktrees".to_string())?;
         Ok(rows
             .iter()
-            .filter_map(|row| worktree_target(row, key))
+            .filter_map(|row| worktree_target(row, key, &managed))
             .collect())
     }
 
