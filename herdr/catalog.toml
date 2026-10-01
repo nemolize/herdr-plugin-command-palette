@@ -50,7 +50,7 @@ checked_against = "0.8.2"
 #
 # `icon` replaces the glyph leading the entry's row, which otherwise comes from
 # the first element of `args` (pane, tab, workspace, server). It must be one
-# grapheme cluster; anything else drops the entry as `skipped`. None of the
+# glyph one cell wide; anything else drops the entry as `skipped`. None of the
 # entries below set it, so every row of a subject reads alike.
 
 

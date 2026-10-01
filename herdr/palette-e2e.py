@@ -417,19 +417,25 @@ def esc_closes_the_palette(scratch: Path) -> bool:
 
 
 def opened_with_settings(
-    scratch: Path, name: str, settings: str | None, ready: str = READY_MARKER
+    scratch: Path,
+    name: str,
+    settings: str | None,
+    ready: str = READY_MARKER,
+    stub_body: str = ACCEPTS,
+    catalog: str | None = None,
 ) -> str:
     """What the palette draws on opening with `settings` as its settings.toml,
-    or with none at all. Each run gets its own config dir, so a file written for
-    one case cannot leak into another. `ready` is given squeezed, because a
+    or with none at all. `ready` is matched with whitespace removed, because a
     status line replaces the footer that carries READY_MARKER and may wrap."""
-    stub = write_stub(scratch / f"herdr-{name}", ACCEPTS)
+    stub = write_stub(scratch / f"herdr-{name}", stub_body)
     log = scratch / f"{name}.log"
     log.write_text("")
     config = scratch / f"config-{name}"
     config.mkdir()
     if settings is not None:
         (config / "settings.toml").write_text(settings)
+    if catalog is not None:
+        (config / "catalog.toml").write_text(catalog)
     palette = Palette(stub, log, scratch / f"{name}.stderr", config)
     try:
         if not palette.wait_until_squeezed("".join(ready.split()), READY_TIMEOUT):
@@ -473,6 +479,47 @@ def icons_follow_settings(scratch: Path) -> bool:
     return passed
 
 
+# One well-formed entry so the palette opens, and one whose icon is two glyphs,
+# so the catalog has something to skip.
+ONE_SKIPPED = """checked_against = "0.8.2"
+
+[[command]]
+id = "pane.split.right"
+title = "Split pane: right"
+args = ["pane", "split", "--pane", "{pane}", "--direction", "right"]
+contexts = ["pane"]
+
+[[command]]
+id = "pane.bad.icon"
+title = "Bad icon"
+args = ["pane", "zoom", "--pane", "{pane}", "--toggle"]
+contexts = ["pane"]
+icon = "◫◫"
+"""
+
+
+def every_footer_note_is_kept(scratch: Path) -> bool:
+    """Each of `main`'s three startup notes is added on its own path, so all
+    three are raised at once: any one assigned over the others drops a note."""
+    drew = opened_with_settings(
+        scratch,
+        "all-notes",
+        "icon = false\n",
+        ready="using defaults",
+        stub_body=ACCEPTS.replace("herdr 0.8.2", "herdr 0.1.0"),
+        catalog=ONE_SKIPPED,
+    )
+    squeezed = "".join(drew.split())
+    passed = True
+    for note in ("isolderthanthecatalog's", "1skipped", "usingdefaults"):
+        passed &= check(
+            f"the footer keeps the `{note}` note beside the others",
+            note in squeezed,
+            f"drew: {drew[-500:]!r}",
+        )
+    return passed
+
+
 def main() -> int:
     if not BINARY.is_file():
         print(f"no binary at {BINARY} — run `cargo build` first", file=sys.stderr)
@@ -490,6 +537,7 @@ def main() -> int:
     passed &= a_refused_listing_is_reported(scratch)
     passed &= esc_closes_the_palette(scratch)
     passed &= icons_follow_settings(scratch)
+    passed &= every_footer_note_is_kept(scratch)
 
     return 0 if passed else 1
 

@@ -152,6 +152,15 @@ impl App {
         self.status = None;
     }
 
+    /// Adds a footer note after any already showing, so a later note never
+    /// hides an earlier one.
+    pub fn add_status(&mut self, note: String) {
+        self.status = Some(match self.status.take() {
+            Some(earlier) => format!("{earlier} · {note}"),
+            None => note,
+        });
+    }
+
     /// Backs out to the command list. Returns false when already there, which
     /// is where Esc means "close".
     pub fn leave_stage(&mut self) -> bool {
@@ -451,6 +460,16 @@ mod tests {
         let args = ["tab".to_string(), "focus".to_string(), "{}".to_string()];
         // The id lands in the placeholder slot; it does not rewrite its neighbours.
         assert_eq!(substitute(&args, "{}", "{}"), vec!["tab", "focus", "{}"]);
+    }
+
+    #[test]
+    fn a_later_footer_note_follows_an_earlier_one_rather_than_replacing_it() {
+        let mut app = app_with(vec![]);
+        app.add_status("first".into());
+        assert_eq!(app.status.as_deref(), Some("first"));
+        app.add_status("second".into());
+        app.add_status("third".into());
+        assert_eq!(app.status.as_deref(), Some("first · second · third"));
     }
 
     #[test]

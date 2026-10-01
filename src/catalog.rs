@@ -2,6 +2,7 @@
 //! Herdr's built-in operations (docs/design.md §4).
 use std::path::{Path, PathBuf};
 
+use ratatui::buffer::CellWidth;
 use serde::Deserialize;
 use unicode_segmentation::UnicodeSegmentation;
 
@@ -109,11 +110,8 @@ pub fn rejection(c: &Command) -> Option<String> {
     let ids = c.args.iter().filter(|a| *a == "{}").count();
 
     if let Some(icon) = &c.icon {
-        let clusters = icon.graphemes(true).count();
-        if clusters != 1 || icon.chars().any(char::is_control) {
-            return Some(format!(
-                "`icon` must be one glyph, got {clusters} in {icon:?}"
-            ));
+        if let Some(why) = icon_rejection(icon) {
+            return Some(why);
         }
     }
     if c.resolve.is_some() && c.prompt.is_some() {
@@ -133,6 +131,22 @@ pub fn rejection(c: &Command) -> Option<String> {
         )),
         (None, n) if n > 0 => Some("`{}` without a `resolve` to fill it".into()),
         _ => None,
+    }
+}
+
+/// The icon column is one cell wide on every row, so an override drawn wider or
+/// narrower would push its own title out of line with every other.
+fn icon_rejection(icon: &str) -> Option<String> {
+    if icon.chars().any(char::is_control) {
+        return Some(format!("`icon` {icon:?} contains a control character"));
+    }
+    let clusters = icon.graphemes(true).count();
+    if clusters != 1 {
+        return Some(format!("`icon` {icon:?} is {clusters} glyphs, expected 1"));
+    }
+    match icon.cell_width() {
+        1 => None,
+        cells => Some(format!("`icon` {icon:?} is {cells} cells wide, expected 1")),
     }
 }
 
@@ -447,16 +461,24 @@ mod tests {
         assert_eq!(entry_with_icon(&["agent", "list"], None).icon(), "");
     }
 
-    /// A glyph the column cannot hold as one cell-run would push the title off
-    /// its column, so these surface as a `skipped` row instead.
+    /// An icon the one-cell column cannot hold would push its own title out of
+    /// line, so it surfaces as a `skipped` row naming why instead.
     #[test]
-    fn an_icon_that_is_not_one_glyph_is_rejected() {
-        for bad in ["", "◫◫", "ab", "\t"] {
+    fn an_icon_that_is_not_one_cell_is_rejected() {
+        let cases = [
+            ("", "0 glyphs"),
+            ("◫◫", "2 glyphs"),
+            ("\t", "control character"),
+            ("あ", "2 cells"),
+            ("👩\u{200D}💻", "2 cells"),
+            ("\u{200B}", "0 cells"),
+        ];
+        for (bad, reason) in cases {
             let why = super::rejection(&entry_with_icon(&["pane", "close"], Some(bad)))
                 .unwrap_or_else(|| panic!("{bad:?} was accepted"));
-            assert!(why.contains("`icon`"), "{bad:?}: {why}");
+            assert!(why.contains(reason), "{bad:?}: {why}");
         }
-        for good in ["✕", "e\u{301}", "👩\u{200D}💻"] {
+        for good in ["✕", "e\u{301}", "!"] {
             assert_eq!(
                 super::rejection(&entry_with_icon(&["pane", "close"], Some(good))),
                 None,

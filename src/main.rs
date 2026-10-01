@@ -132,26 +132,21 @@ fn run() -> Result<(), String> {
     // as a footer note rather than a refusal, because most entries still work.
     if let (Some(required), Some(actual)) = (checked_against.as_deref(), herdr.version()) {
         if catalog::is_older(&actual, required) == Some(true) {
-            app.status = Some(format!(
+            app.add_status(format!(
                 "herdr {actual} is older than the catalog's {required} — some entries may fail"
             ));
         }
     }
 
     if !rejected.is_empty() {
-        app.status = Some(format!(
+        app.add_status(format!(
             "catalog: {} skipped — search `skipped`",
             rejected.len()
         ));
     }
 
-    // Appended rather than assigned: the notes above still hold, and a
-    // settings file that is being ignored must not be the message that hides them.
     if let Some(problem) = settings_problem {
-        app.status = Some(match app.status.take() {
-            Some(earlier) => format!("{earlier} · {problem}"),
-            None => problem,
-        });
+        app.add_status(problem);
     }
 
     let mut screen = ui::Screen::enter()?;

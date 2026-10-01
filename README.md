@@ -130,8 +130,8 @@ what correcting a catalog means. Start from
   same thing, so the palette can show the key beside the entry (see below).
 - `icon` replaces the glyph leading the entry's row. Without it the glyph comes
   from the first word of `args`: `◫` pane, `▭` tab, `⬚` workspace, `↻` server.
-  Other plugins' actions show `⧉`. It must be a single glyph; anything else
-  skips the entry with that reason.
+  Other plugins' actions show `⧉`. It must be a single glyph one cell wide;
+  anything else skips the entry with that reason.
 
 ### Settings
 
