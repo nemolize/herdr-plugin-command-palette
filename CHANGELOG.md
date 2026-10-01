@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.6.0
+
+### Minor Changes
+
+- 0b38d07: Add pane resizing in all four directions to the command palette
+
+### Patch Changes
+
+- fa67835: Skip a catalog `icon` that a CJK-locale terminal draws two cells wide, such as `□`, instead of letting it push its row's title out of line
+
 ## 0.5.0
 
 ### Minor Changes
