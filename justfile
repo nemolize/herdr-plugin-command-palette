@@ -19,7 +19,7 @@ clippy:
 test:
     cargo test --locked
 
-# Needs `npm ci --ignore-scripts` first, for the Changesets CLI the lockfile pins.
+# Needs `pnpm install --ignore-scripts` first, for the Changesets CLI the lockfile pins.
 release-test:
     node scripts/sync-version.mjs --check
     node --test scripts/release.test.mjs

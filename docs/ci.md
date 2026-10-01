@@ -150,8 +150,9 @@ setups already have; it just tracks the current formula rather than 1.58.0, so
 reach for the pinned install when a CI result and a local one disagree.
 
 `just release-test` also needs Node — `.node-version` names the major CI
-installs — and `npm ci --ignore-scripts` for the Changesets CLI that
-`package-lock.json` pins.
+installs — and `pnpm install --ignore-scripts` for the Changesets CLI that
+`pnpm-lock.yaml` pins (`packageManager` in `package.json` names the pnpm
+version).
 
 Every action is pinned by full commit SHA. A tag is mutable, and a repo that
 audits its Rust dependencies should hold its own workflow supply chain to the
@@ -176,7 +177,7 @@ unreleased (#43).
 
 1. **`Version-PR`** — while changesets are pending, `changesets/action` opens or
    updates the single `Version Packages` pull request (branch
-   `changeset-release/main`). Its commit runs `npm run version-packages`:
+   `changeset-release/main`). Its commit runs `pnpm run version-packages`:
    `changeset version` consumes the pending files, bumps `package.json` and
    writes `CHANGELOG.md`, then `scripts/sync-version.mjs` copies the version
    into `Cargo.toml`, `Cargo.lock` and `herdr-plugin.toml`. With nothing

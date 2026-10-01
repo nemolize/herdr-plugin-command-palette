@@ -32,7 +32,7 @@ function git(cwd, ...args) {
 
 function versionPackages(cwd) {
   try {
-    execFileSync("npm", ["run", "--silent", "version-packages"], { cwd, encoding: "utf8", stdio: "pipe" });
+    execFileSync("pnpm", ["run", "--silent", "version-packages"], { cwd, encoding: "utf8", stdio: "pipe" });
   } catch (error) {
     throw new Error(`version-packages failed:\n${error.stdout}${error.stderr}`);
   }
