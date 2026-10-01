@@ -30,9 +30,13 @@ function git(cwd, ...args) {
   });
 }
 
+// Runs the script itself rather than `pnpm run`, whose own install writes through
+// the fixture's node_modules symlink into this repository.
 function versionPackages(cwd) {
+  const script = JSON.parse(readFileSync(join(cwd, "package.json"), "utf8")).scripts["version-packages"];
+  const PATH = `${join(cwd, "node_modules", ".bin")}:${process.env.PATH}`;
   try {
-    execFileSync("npm", ["run", "--silent", "version-packages"], { cwd, encoding: "utf8", stdio: "pipe" });
+    execFileSync("sh", ["-c", script], { cwd, encoding: "utf8", stdio: "pipe", env: { ...process.env, PATH } });
   } catch (error) {
     throw new Error(`version-packages failed:\n${error.stdout}${error.stderr}`);
   }
