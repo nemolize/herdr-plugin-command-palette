@@ -228,10 +228,17 @@ fn render(f: &mut Frame, app: &mut App) {
             }
         };
 
+        let icons: Vec<Option<String>> = match app.row_icons() {
+            Some(icons) => icons.into_iter().map(|i| Some(i.to_owned())).collect(),
+            None => vec![None; rows.len()],
+        };
         let items: Vec<ListItem> = rows
             .iter()
             .zip(keys.iter())
-            .map(|(title, key)| ListItem::new(row_line(title, key, list_area.width)))
+            .zip(icons.iter())
+            .map(|((title, key), icon)| {
+                ListItem::new(row_line(icon.as_deref(), title, key, list_area.width))
+            })
             .collect();
         f.render_stateful_widget(
             List::new(items).highlight_symbol("▶ "),
@@ -255,36 +262,44 @@ const PROMPT_COLUMNS: u16 = 2;
 /// Columns the list's own `▶ ` highlight symbol takes from every row.
 const HIGHLIGHT_COLUMNS: u16 = 2;
 
+const ICON_GAP: u16 = 1;
+
 /// Blank columns between a title and the key flush right, so the two read as
 /// separate columns rather than one run-on string.
 const KEY_GAP: u16 = 2;
 
-/// One list row: the title, and the key dimmed flush right when it fits.
+/// The icon is never dropped, since the eye sorts by it; an empty one still
+/// takes its cell so the title stays in line. The narrow row clips its title.
 ///
-/// The key is dropped whole rather than clipped, the way §5's footer drops the
-/// version: a half-written chord is a chord that does not work, and a title the
-/// user cannot read costs more than a shortcut they are not yet looking for.
-fn row_line(title: &str, key: &str, width: u16) -> Line<'static> {
-    let title_span = Span::raw(title.to_string());
+/// The key is dropped whole rather than clipped, as §5's footer drops the
+/// version: a half-written chord is a chord that does not work.
+fn row_line(icon: Option<&str>, title: &str, key: &str, width: u16) -> Line<'static> {
+    let mut spans = Vec::new();
+    let mut lead = 0;
+    if let Some(icon) = icon {
+        let icon = if icon.is_empty() { " " } else { icon };
+        lead = drawn_width(icon) + ICON_GAP;
+        spans.push(Span::raw(icon.to_string()));
+        spans.push(Span::raw(" ".repeat(ICON_GAP as usize)));
+    }
+    spans.push(Span::raw(title.to_string()));
     if key.is_empty() || width == 0 {
-        return Line::from(title_span);
+        return Line::from(spans);
     }
 
     // The highlight symbol indents every row, so the columns a row may use are
     // fewer than the area's own width and a key sized against it would wrap.
     let Some(room) = width.checked_sub(HIGHLIGHT_COLUMNS) else {
-        return Line::from(title_span);
+        return Line::from(spans);
     };
-    let needed = drawn_width(title) + KEY_GAP + drawn_width(key);
+    let needed = lead + drawn_width(title) + KEY_GAP + drawn_width(key);
     let Some(gap) = room.checked_sub(needed).map(|slack| slack + KEY_GAP) else {
-        return Line::from(title_span);
+        return Line::from(spans);
     };
 
-    Line::from(vec![
-        title_span,
-        Span::raw(" ".repeat(gap as usize)),
-        Span::raw(key.to_string()).dim(),
-    ])
+    spans.push(Span::raw(" ".repeat(gap as usize)));
+    spans.push(Span::raw(key.to_string()).dim());
+    Line::from(spans)
 }
 
 /// Draws the typed name with a block cursor after it (docs/design.md §4).
@@ -433,6 +448,7 @@ mod render_tests {
             resolve: resolve.map(str::to_string),
             prompt: None,
             binding: None,
+            icon: None,
         }
     }
 
@@ -443,7 +459,9 @@ mod render_tests {
 
     /// One entry carrying the key it is also reachable by.
     fn app_with_key(title: &str, key: &str) -> App {
-        let mut candidate = Candidate::from_command(command("entry", title, None));
+        let mut entry = command("entry", title, None);
+        entry.args = vec!["tab".into(), "create".into()];
+        let mut candidate = Candidate::from_command(entry);
         candidate.key = key.to_string();
         App::new(vec![candidate], Frecency::load(Path::new("/nonexistent")))
     }
@@ -471,7 +489,7 @@ mod render_tests {
         let mut app = app_with_key("New tab", "prefix+c");
         let lines = draw(&mut app, 36, 8);
         let row = lines.iter().find(|l| l.contains("New tab")).unwrap();
-        assert!(row.starts_with("▶ New tab"), "{lines:#?}");
+        assert!(row.starts_with("▶ ▭ New tab"), "{lines:#?}");
         assert!(row.ends_with("prefix+c"), "{lines:#?}");
         assert_eq!(row.chars().count(), 36, "{row:?} in {lines:#?}");
     }
@@ -483,11 +501,11 @@ mod render_tests {
         let mut app = app_with_key("New tab", "");
         let lines = draw(&mut app, 36, 8);
         let row = lines.iter().find(|l| l.contains("New tab")).unwrap();
-        assert_eq!(row, "▶ New tab", "{lines:#?}");
+        assert_eq!(row, "▶ ▭ New tab", "{lines:#?}");
 
         // The drawn row cannot tell padding from absence — a buffer trims its
         // trailing blanks either way — so the line's own spans are the oracle.
-        assert_eq!(row_line("New tab", "", 36).spans.len(), 1);
+        assert_eq!(row_line(None, "New tab", "", 36).spans.len(), 1);
     }
 
     /// §5's footer drops the version rather than truncate the counts, and the
@@ -499,7 +517,7 @@ mod render_tests {
         let lines = draw(&mut app, 24, 8);
         let row = lines.iter().find(|l| l.contains("Rename")).unwrap();
         assert!(!row.contains("prefix"), "key survived a clip: {lines:#?}");
-        assert!(row.starts_with("▶ Rename workspace…"), "{lines:#?}");
+        assert!(row.starts_with("▶ ▭ Rename workspace…"), "{lines:#?}");
     }
 
     /// A catalog is user-editable and a plugin's title is another author's, so
@@ -507,7 +525,7 @@ mod render_tests {
     /// debug build. `render_input` filters them for the same reason.
     #[test]
     fn a_control_char_in_a_title_is_measured_rather_than_panicking() {
-        let line = row_line("New\ttab", "prefix+c", 36);
+        let line = row_line(None, "New\ttab", "prefix+c", 36);
         assert!(!line.spans.is_empty());
     }
 
@@ -515,17 +533,18 @@ mod render_tests {
     /// two read as one string at exactly the width where the row is fullest.
     #[test]
     fn a_key_that_only_just_fits_still_clears_the_title() {
-        let exact = HIGHLIGHT_COLUMNS + drawn_width("New tab") + KEY_GAP + drawn_width("prefix+c");
+        // `▶ ` + `▭ ` + `New tab` + the gap + `prefix+c`.
+        let exact = 2 + 2 + 7 + 2 + 8;
 
         let mut app = app_with_key("New tab", "prefix+c");
         let lines = draw(&mut app, exact, 8);
         let row = lines.iter().find(|l| l.contains("New tab")).unwrap();
-        assert_eq!(row, "▶ New tab  prefix+c", "{lines:#?}");
+        assert_eq!(row, "▶ ▭ New tab  prefix+c", "{lines:#?}");
 
         let mut app = app_with_key("New tab", "prefix+c");
         let lines = draw(&mut app, exact - 1, 8);
         let row = lines.iter().find(|l| l.contains("New tab")).unwrap();
-        assert_eq!(row, "▶ New tab", "{lines:#?}");
+        assert_eq!(row, "▶ ▭ New tab", "{lines:#?}");
     }
 
     /// A target has no shortcut of its own, so the stage that picks one must
@@ -579,6 +598,116 @@ mod render_tests {
         let lines = draw(&mut app, 36, 8);
         assert_eq!(lines[0], "Focus tab…", "{lines:#?}");
         assert_eq!(lines[1], ">", "{lines:#?}");
+    }
+
+    fn entry(id: &str, title: &str, args: &[&str]) -> Command {
+        let mut c = command(id, title, None);
+        c.args = args.iter().map(|a| a.to_string()).collect();
+        c
+    }
+
+    fn cells(app: &mut App, width: u16, height: u16, y: u16) -> Vec<String> {
+        let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+        terminal.draw(|f| render(f, app)).unwrap();
+        let buffer = terminal.backend().buffer();
+        (0..width)
+            .map(|x| buffer[(x, y)].symbol().to_string())
+            .collect()
+    }
+
+    /// Issue #53. Expectations are literal cells, never computed from the code
+    /// under test (see `the_input_line_lands_where_it_is_expected`).
+    #[test]
+    fn each_kind_of_row_leads_with_its_icon() {
+        let action = crate::herdr::PluginAction {
+            plugin_id: "reviewr".into(),
+            action_id: "open".into(),
+            title: "Review".into(),
+            contexts: vec![],
+            platforms: vec![],
+        };
+        let candidates = vec![
+            Candidate::from_command(entry("p", "Pane", &["pane", "zoom"])),
+            Candidate::from_command(entry("t", "Tab", &["tab", "create"])),
+            Candidate::from_command(entry("w", "Work", &["workspace", "create"])),
+            Candidate::from_command(entry("s", "Srv", &["server", "reload-config"])),
+            Candidate::from_action(action),
+            Candidate::note("bad", "why"),
+            Candidate::from_command(entry("u", "Odd", &["agent", "list"])),
+        ];
+        let mut app = App::new(candidates, Frecency::load(Path::new("/nonexistent")));
+
+        let expected: [[&str; 7]; 7] = [
+            ["▶", " ", "◫", " ", "P", "a", "n"],
+            [" ", " ", "▭", " ", "T", "a", "b"],
+            [" ", " ", "⬚", " ", "W", "o", "r"],
+            [" ", " ", "↻", " ", "S", "r", "v"],
+            [" ", " ", "⧉", " ", "R", "e", "v"],
+            [" ", " ", "!", " ", "s", "k", "i"],
+            [" ", " ", " ", " ", "O", "d", "d"],
+        ];
+        for (row, want) in expected.iter().enumerate() {
+            let got = cells(&mut app, 7, 12, 1 + row as u16);
+            assert_eq!(got, want, "row {row}");
+        }
+    }
+
+    #[test]
+    fn an_entrys_own_icon_replaces_the_derived_one() {
+        let mut c = entry("p", "Pane", &["pane", "close"]);
+        c.icon = Some("✕".into());
+        let mut app = app_with(vec![c]);
+        assert_eq!(cells(&mut app, 6, 8, 1), ["▶", " ", "✕", " ", "P", "a"]);
+    }
+
+    /// `icons = false` must give back exactly the row this change started from.
+    #[test]
+    fn switched_off_icons_leave_the_row_as_it_was() {
+        let mut app = app_with_key("New tab", "prefix+c");
+        app.icons = false;
+        // `▶ ` + `New tab` + the gap + `prefix+c`: the width the key just fits.
+        let lines = draw(&mut app, 19, 8);
+        assert_eq!(lines[1], "▶ New tab  prefix+c", "{lines:#?}");
+    }
+
+    /// At §5's ~36-column floor the title clips, not the icon — whole clusters
+    /// only, so a wide glyph that does not fit leaves a blank, not half of itself.
+    #[test]
+    fn a_narrow_row_keeps_its_icon_and_clips_the_title_whole() {
+        let title = format!("a{}", "あ".repeat(20));
+        let mut app = app_with(vec![entry("p", &title, &["pane", "zoom"])]);
+        let row = cells(&mut app, 36, 8, 1);
+
+        let mut want = vec!["▶", " ", "◫", " ", "a"];
+        for _ in 0..15 {
+            want.extend(["あ", " "]);
+        }
+        want.push(" ");
+        assert_eq!(row, want);
+    }
+
+    #[test]
+    fn the_targets_stage_shows_no_icons() {
+        let picked = entry("focus.tab", "Focus tab…", &["tab", "focus", "{}"]);
+        let mut app = app_with(vec![picked.clone()]);
+        app.enter_targets(
+            picked,
+            vec![Target {
+                id: "1".into(),
+                label: "editor".into(),
+            }],
+        );
+        let lines = draw(&mut app, 36, 8);
+        assert_eq!(lines[2], "▶ editor", "{lines:#?}");
+    }
+
+    /// The icon is drawn beside the title, not part of what the filter reads.
+    #[test]
+    fn typing_an_icon_matches_nothing() {
+        let mut app = app_with(vec![entry("p", "Pane", &["pane", "zoom"])]);
+        app.push('◫');
+        let lines = draw(&mut app, 36, 8);
+        assert_eq!(lines[1], "no matches", "{lines:#?}");
     }
 
     /// The Commands stage must not pay for the header row it has no use for.
@@ -1018,6 +1147,7 @@ mod wiring_tests {
             resolve: resolve.map(str::to_string),
             prompt: None,
             binding: None,
+            icon: None,
         }
     }
 

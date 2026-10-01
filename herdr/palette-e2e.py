@@ -109,14 +109,16 @@ def visible(painted: str) -> str:
 
 
 class Palette:
-    def __init__(self, stub: Path, log: Path, errlog: Path):
+    def __init__(
+        self, stub: Path, log: Path, errlog: Path, config: Path | None = None
+    ):
         env = dict(
             os.environ,
             HERDR_BIN_PATH=str(stub),
             HERDR_PLUGIN_ROOT=str(REPO),
             # Pinned into the scratch dir so a developer's own catalog and
             # ranking cannot change which entry this picks, or get written to.
-            HERDR_PLUGIN_CONFIG_DIR=str(stub.parent / "config"),
+            HERDR_PLUGIN_CONFIG_DIR=str(config or stub.parent / "config"),
             HERDR_PLUGIN_STATE_DIR=str(stub.parent / "state"),
             HERDR_PLUGIN_ID="command-palette",
             HERDR_PLUGIN_CONTEXT_JSON=CONTEXT,
@@ -414,6 +416,110 @@ def esc_closes_the_palette(scratch: Path) -> bool:
         palette.close()
 
 
+def opened_with_settings(
+    scratch: Path,
+    name: str,
+    settings: str | None,
+    ready: str = READY_MARKER,
+    stub_body: str = ACCEPTS,
+    catalog: str | None = None,
+) -> str:
+    """What the palette draws on opening with `settings` as its settings.toml,
+    or with none at all. `ready` is matched with whitespace removed, because a
+    status line replaces the footer that carries READY_MARKER and may wrap."""
+    stub = write_stub(scratch / f"herdr-{name}", stub_body)
+    log = scratch / f"{name}.log"
+    log.write_text("")
+    config = scratch / f"config-{name}"
+    config.mkdir()
+    if settings is not None:
+        (config / "settings.toml").write_text(settings)
+    if catalog is not None:
+        (config / "catalog.toml").write_text(catalog)
+    palette = Palette(stub, log, scratch / f"{name}.stderr", config)
+    try:
+        if not palette.wait_until_squeezed("".join(ready.split()), READY_TIMEOUT):
+            return ""
+        return visible(palette.painted)
+    finally:
+        palette.close()
+
+
+def icons_follow_settings(scratch: Path) -> bool:
+    """`settings.toml` is read by `main`, which no unit test reaches: these
+    prove the switch arrives, and that a missing file is not an error."""
+    absent = opened_with_settings(scratch, "settings-absent", None)
+    passed = check(
+        "with no settings.toml the rows carry icons",
+        "◫" in absent,
+        f"drew: {absent[-400:]!r}",
+    )
+    passed &= check(
+        "a missing settings.toml says nothing",
+        "settings.toml" not in absent,
+        f"drew: {absent[-400:]!r}",
+    )
+
+    off = opened_with_settings(scratch, "settings-off", "icons = false\n")
+    passed &= check(
+        "icons = false draws no icons",
+        bool(off) and "◫" not in off and "Splitpane" in "".join(off.split()),
+        f"drew: {off[-400:]!r}",
+    )
+
+    broken = opened_with_settings(
+        scratch, "settings-broken", "icon = false\n", ready="using defaults"
+    )
+    squeezed = "".join(broken.split())
+    passed &= check(
+        "an unusable settings.toml is reported and the defaults kept",
+        "settings.toml" in squeezed and "usingdefaults" in squeezed and "◫" in broken,
+        f"drew: {broken[-400:]!r}",
+    )
+    return passed
+
+
+# One well-formed entry so the palette opens, and one whose icon is two glyphs,
+# so the catalog has something to skip.
+ONE_SKIPPED = """checked_against = "0.8.2"
+
+[[command]]
+id = "pane.split.right"
+title = "Split pane: right"
+args = ["pane", "split", "--pane", "{pane}", "--direction", "right"]
+contexts = ["pane"]
+
+[[command]]
+id = "pane.bad.icon"
+title = "Bad icon"
+args = ["pane", "zoom", "--pane", "{pane}", "--toggle"]
+contexts = ["pane"]
+icon = "◫◫"
+"""
+
+
+def every_footer_note_is_kept(scratch: Path) -> bool:
+    """Each of `main`'s three startup notes is added on its own path, so all
+    three are raised at once: any one assigned over the others drops a note."""
+    drew = opened_with_settings(
+        scratch,
+        "all-notes",
+        "icon = false\n",
+        ready="using defaults",
+        stub_body=ACCEPTS.replace("herdr 0.8.2", "herdr 0.1.0"),
+        catalog=ONE_SKIPPED,
+    )
+    squeezed = "".join(drew.split())
+    passed = True
+    for note in ("isolderthanthecatalog's", "1skipped", "usingdefaults"):
+        passed &= check(
+            f"the footer keeps the `{note}` note beside the others",
+            note in squeezed,
+            f"drew: {drew[-500:]!r}",
+        )
+    return passed
+
+
 def main() -> int:
     if not BINARY.is_file():
         print(f"no binary at {BINARY} — run `cargo build` first", file=sys.stderr)
@@ -430,6 +536,8 @@ def main() -> int:
     passed &= an_empty_listing_is_reported(scratch)
     passed &= a_refused_listing_is_reported(scratch)
     passed &= esc_closes_the_palette(scratch)
+    passed &= icons_follow_settings(scratch)
+    passed &= every_footer_note_is_kept(scratch)
 
     return 0 if passed else 1
 

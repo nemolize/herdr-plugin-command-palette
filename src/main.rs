@@ -8,6 +8,7 @@ mod fuzzy;
 mod herdr;
 mod keys;
 mod selection;
+mod settings;
 mod ui;
 
 use std::path::PathBuf;
@@ -120,7 +121,10 @@ fn run() -> Result<(), String> {
         .map(Frecency::load)
         .unwrap_or_default();
 
+    let (settings, settings_problem) = settings::load(config_dir.as_deref());
+
     let mut app = App::new(candidates, frecency);
+    app.icons = settings.icons;
 
     // The catalog drifts when Herdr changes its CLI and nothing detects that
     // automatically (§4). A running Herdr older than the version the catalog was
@@ -128,17 +132,21 @@ fn run() -> Result<(), String> {
     // as a footer note rather than a refusal, because most entries still work.
     if let (Some(required), Some(actual)) = (checked_against.as_deref(), herdr.version()) {
         if catalog::is_older(&actual, required) == Some(true) {
-            app.status = Some(format!(
+            app.add_status(format!(
                 "herdr {actual} is older than the catalog's {required} — some entries may fail"
             ));
         }
     }
 
     if !rejected.is_empty() {
-        app.status = Some(format!(
+        app.add_status(format!(
             "catalog: {} skipped — search `skipped`",
             rejected.len()
         ));
+    }
+
+    if let Some(problem) = settings_problem {
+        app.add_status(problem);
     }
 
     let mut screen = ui::Screen::enter()?;
@@ -320,6 +328,7 @@ mod tests {
             resolve: None,
             prompt: None,
             binding: None,
+            icon: None,
         }
     }
 
