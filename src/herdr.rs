@@ -269,19 +269,9 @@ pub fn current_platform() -> &'static str {
 fn read_response(stdout: &[u8], stderr: &[u8]) -> Result<serde_json::Value, String> {
     // herdr 0.9 writes a failure's envelope to stderr and leaves stdout empty.
     let parsed = serde_json::from_slice::<Envelope>(stdout)
-        .map(|body| (body, stdout, stderr))
-        .or_else(|_| {
-            serde_json::from_slice::<Envelope>(stderr).map(|body| (body, stderr, &[][..]))
-        });
-    let (body, raw, other): (Envelope, &[u8], &[u8]) = parsed.map_err(|_| {
-        // Preferred over stdout because a herdr that failed before writing its
-        // envelope says why on stderr, and stdout is then empty or a fragment.
-        let stderr = String::from_utf8_lossy(stderr);
-        let text = if stderr.trim().is_empty() {
-            String::from_utf8_lossy(stdout).trim().to_string()
-        } else {
-            stderr.trim().to_string()
-        };
+        .or_else(|_| serde_json::from_slice::<Envelope>(stderr));
+    let body: Envelope = parsed.map_err(|_| {
+        let text = what_herdr_said(stdout, stderr);
         if text.is_empty() {
             "herdr returned no output".to_string()
         } else {
@@ -293,14 +283,22 @@ fn read_response(stdout: &[u8], stderr: &[u8]) -> Result<serde_json::Value, Stri
         return Err(err.message);
     }
     body.result.ok_or_else(|| {
-        let other = String::from_utf8_lossy(other);
-        let detail = if other.trim().is_empty() {
-            String::from_utf8_lossy(raw)
-        } else {
-            other
-        };
-        format!("herdr returned no result: {}", detail.trim())
+        format!(
+            "herdr returned no result: {}",
+            what_herdr_said(stdout, stderr)
+        )
     })
+}
+
+/// A herdr that went wrong says why on stderr, and stdout is then empty, a
+/// fragment or the envelope.
+fn what_herdr_said(stdout: &[u8], stderr: &[u8]) -> String {
+    let stderr = String::from_utf8_lossy(stderr);
+    if stderr.trim().is_empty() {
+        String::from_utf8_lossy(stdout).trim().to_string()
+    } else {
+        stderr.trim().to_string()
+    }
 }
 
 #[cfg(test)]
@@ -378,12 +376,11 @@ mod tests {
         );
     }
 
-    /// The envelope arriving on stderr leaves no other stream to quote, so the
-    /// unexpected JSON itself is reported rather than repeated as "stderr".
+    /// A stdout fragment beside it is not what went wrong; the envelope is.
     #[test]
     fn an_envelope_with_neither_half_on_stderr_reports_the_json() {
-        let err =
-            read_response(b"", b"{\"id\":\"1\"}\n").expect_err("an empty envelope is a failure");
+        let err = read_response(b"partial", b"{\"id\":\"1\"}\n")
+            .expect_err("an empty envelope is a failure");
         assert_eq!(err, r#"herdr returned no result: {"id":"1"}"#);
     }
 
