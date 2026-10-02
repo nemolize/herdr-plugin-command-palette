@@ -29,16 +29,18 @@ pub fn load(config_dir: Option<&Path>) -> (Settings, Option<String>) {
     let text = match std::fs::read_to_string(&path) {
         Ok(text) => text,
         Err(e) if e.kind() == ErrorKind::NotFound => return (Settings::default(), None),
-        Err(e) => return (Settings::default(), Some(unusable(&path, &e.to_string()))),
+        Err(e) => return (Settings::default(), Some(unusable(&e.to_string()))),
     };
     match toml::from_str(&text) {
         Ok(settings) => (settings, None),
-        Err(e) => (Settings::default(), Some(unusable(&path, e.message()))),
+        Err(e) => (Settings::default(), Some(unusable(e.message()))),
     }
 }
 
-pub fn unusable(path: &Path, why: &str) -> String {
-    format!("{}: {why} - using defaults", path.display())
+/// Names the file alone: the full path would take most of the status area
+/// beside the other startup notes (#149).
+pub fn unusable(why: &str) -> String {
+    format!("{FILE_NAME}: {why} - using defaults")
 }
 
 #[cfg(test)]
@@ -90,6 +92,7 @@ mod tests {
         let why = why.expect("a misspelt key is reported");
         assert!(why.contains("icon"), "{why}");
         assert!(why.contains(FILE_NAME), "{why}");
+        assert!(!why.contains(dir.to_str().unwrap()), "{why}");
     }
 
     #[test]

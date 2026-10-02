@@ -143,12 +143,7 @@ def visible(painted: str) -> str:
 
 class Palette:
     def __init__(
-        self,
-        stub: Path,
-        log: Path,
-        errlog: Path,
-        config: Path | None = None,
-        columns: int = COLUMNS,
+        self, stub: Path, log: Path, errlog: Path, config: Path | None = None
     ):
         env = dict(
             os.environ,
@@ -175,7 +170,7 @@ class Palette:
         # Sized because a pty.fork() terminal starts at 0x0 and ratatui draws
         # nothing into an empty area — the palette would appear to render nothing.
         fcntl.ioctl(
-            self.fd, termios.TIOCSWINSZ, struct.pack("HHHH", ROWS, columns, 0, 0)
+            self.fd, termios.TIOCSWINSZ, struct.pack("HHHH", ROWS, COLUMNS, 0, 0)
         )
         os.set_blocking(self.fd, False)
         self.painted = ""
@@ -592,12 +587,10 @@ def opened_with_settings(
     ready: str = READY_MARKER,
     stub_body: str = ACCEPTS,
     catalog: str | None = None,
-    wide: bool = False,
 ) -> str:
     """What the palette draws on opening with `settings` as its settings.toml,
     or with none at all. `ready` is matched with whitespace removed, because a
-    status line replaces the footer that carries READY_MARKER and may wrap.
-    `wide` opens a pane with room for every startup note on one row."""
+    status line replaces the footer that carries READY_MARKER and may wrap."""
     stub = write_stub(scratch / f"herdr-{name}", stub_body)
     log = scratch / f"{name}.log"
     log.write_text("")
@@ -607,20 +600,13 @@ def opened_with_settings(
         (config / "settings.toml").write_text(settings)
     if catalog is not None:
         (config / "catalog.toml").write_text(catalog)
-    columns = columns_for_every_note(config / "settings.toml") if wide else COLUMNS
-    palette = Palette(stub, log, scratch / f"{name}.stderr", config, columns)
+    palette = Palette(stub, log, scratch / f"{name}.stderr", config)
     try:
         if not palette.wait_until_squeezed("".join(ready.split()), READY_TIMEOUT):
             return ""
         return visible(palette.painted)
     finally:
         palette.close()
-
-
-def columns_for_every_note(settings: Path) -> int:
-    """The settings note quotes this path, and a status past three rows is
-    cut (#144); 200 covers the notes' own text, path aside."""
-    return len(str(settings)) + 200
 
 
 def icons_follow_settings(scratch: Path) -> bool:
@@ -650,7 +636,6 @@ def icons_follow_settings(scratch: Path) -> bool:
         "settings-broken",
         "icon = false\n",
         ready="using defaults",
-        wide=True,
     )
     squeezed = "".join(broken.split())
     passed &= check(
@@ -690,14 +675,17 @@ def every_footer_note_is_kept(scratch: Path) -> bool:
         ready="using defaults",
         stub_body=ACCEPTS.replace(f"herdr {STUB_VERSION}", "herdr 0.1.0"),
         catalog=ONE_SKIPPED,
-        wide=True,
     )
     squeezed = "".join(drew.split())
     passed = True
-    for note in ("isolderthanthecatalog's", "1skipped", "usingdefaults"):
+    for note in (
+        "herdr 0.1.0 < catalog 0.8.2 - some entries may fail",
+        "catalog: 1 skipped - search `skipped`",
+        "settings.toml: unknown field `icon`, expected `icons` - using defaults",
+    ):
         passed &= check(
-            f"the footer keeps the `{note}` note beside the others",
-            note in squeezed,
+            f"the footer shows `{note}` whole beside the others (#149)",
+            "".join(note.split()) in squeezed,
             f"drew: {drew[-500:]!r}",
         )
     return passed

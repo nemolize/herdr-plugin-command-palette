@@ -1123,6 +1123,27 @@ mod render_tests {
         assert!(!lines[16].contains("herdr"), "{lines:#?}");
     }
 
+    /// Issue #149: all three of `main`'s startup notes at the popup's width.
+    #[test]
+    fn every_startup_note_fits_whole_at_sixty_columns() {
+        let notes = [
+            crate::outdated_note("0.1.0", "0.8.2"),
+            crate::skipped_note(1),
+            crate::settings::unusable("unknown field `icon`, expected `icons`"),
+        ];
+        let mut app = app_with(vec![command("split.right", "Split pane: right", None)]);
+        for note in &notes {
+            app.add_status(note.clone());
+        }
+        let lines = draw(&mut app, 60, 20);
+        let shown: String = lines[17..].concat().split_whitespace().collect();
+        for note in &notes {
+            let note: String = note.split_whitespace().collect();
+            assert!(shown.contains(&note), "{note} is not whole in {lines:#?}");
+        }
+        assert!(!shown.ends_with(CUT_MARKER), "{lines:#?}");
+    }
+
     /// A cut wide glyph would overprint the marker, so it is blanked instead.
     #[test]
     fn a_cut_marker_after_a_wide_glyph_at_the_edge_replaces_it_whole() {
