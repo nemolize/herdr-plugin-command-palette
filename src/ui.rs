@@ -148,11 +148,15 @@ fn apply(app: &mut App, event: Event, drawn_rows: u16) -> Option<Step> {
 }
 
 /// The height of the palette's own terminal below which it draws only the
-/// too-short message. 6 is the fewest rows at which every stage lists two
-/// candidates while the footer takes one row — the Commands stage with a skip
-/// reason is the tallest: query, two rows, a two-row reason, footer. Herdr's
-/// manifest has no size floor, so the palette enforces it (docs/design.md §5).
-const MIN_ROWS: u16 = 6;
+/// too-short message: the tallest stage, Commands with a skip reason, listing
+/// two candidates. Herdr's manifest has no size floor, so the palette enforces
+/// it (docs/design.md §5).
+const MIN_ROWS: u16 = INPUT_ROWS + FLOOR_CANDIDATES + REASON_ROWS + FOOTER_ROWS;
+
+/// The query, or the typed name.
+const INPUT_ROWS: u16 = 1;
+
+const FOOTER_ROWS: u16 = 1;
 
 fn render(f: &mut Frame, app: &mut App) {
     let rows = f.area().height;
@@ -183,7 +187,7 @@ fn render(f: &mut Frame, app: &mut App) {
         .as_ref()
         .map(|msg| Paragraph::new(msg.clone()).wrap(Wrap { trim: false }).dim());
     let reserved = u16::from(header.is_some())
-        + 1
+        + INPUT_ROWS
         + if matches!(app.stage, Stage::Prompt { .. }) {
             0
         } else {
@@ -200,12 +204,12 @@ fn render(f: &mut Frame, app: &mut App) {
             let needed = wrapped_height(p, f.area());
             (needed.min(status_room), needed > status_room)
         }
-        None => (1, false),
+        None => (FOOTER_ROWS, false),
     };
 
     let chunks = Layout::vertical([
         Constraint::Length(if header.is_some() { 1 } else { 0 }),
-        Constraint::Length(1),
+        Constraint::Length(INPUT_ROWS),
         Constraint::Min(1),
         Constraint::Length(status_height),
     ])
@@ -269,7 +273,7 @@ fn render(f: &mut Frame, app: &mut App) {
 
 const MAX_STATUS_ROWS: u16 = 3;
 
-/// Candidate rows [`MIN_ROWS`] promises; a status message never takes them.
+/// A status message never takes these.
 const FLOOR_CANDIDATES: u16 = 2;
 
 const REASON_ROWS: u16 = 2;
