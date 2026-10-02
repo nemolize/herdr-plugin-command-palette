@@ -11,9 +11,8 @@ set -eu
 
 ENTRYPOINT=palette
 
-# Reads a top-level "..." string value for a key. The responses this script
-# handles are single-line JSON with no nested key of the same name, which is the
-# whole reason a small dependency-free reader is enough here.
+# Reads the "..." string value of a key at any depth. The responses this script
+# handles are single-line JSON carrying each key it reads once.
 json_str() {
   sed -n 's/.*"'"$1"'"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p'
 }
