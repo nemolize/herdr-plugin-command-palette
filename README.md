@@ -6,7 +6,7 @@ from a popup over the session.
 ```
 ┌ Command Palette ───────────────────────────┐
 │ > split                                    │
-│ ▶ Split pane: right                        │
+│ ▸ Split pane: right                        │
 │   Split pane: down                         │
 │                                            │
 │ 2/24 · esc to close                        │
@@ -168,7 +168,7 @@ of its title — so using the palette is also how you learn the shortcut that ma
 it unnecessary.
 
 ```
-▶ Split pane: right                                 prefix+v
+▸ Split pane: right                                 prefix+v
   Split pane: down                              prefix+minus
   Focus pane: left                                  prefix+h
   Zoom pane: toggle                                 prefix+z
