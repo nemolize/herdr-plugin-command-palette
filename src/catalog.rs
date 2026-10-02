@@ -5,9 +5,9 @@ use std::path::{Path, PathBuf};
 use ratatui::buffer::CellWidth;
 use serde::Deserialize;
 
+use crate::glyph::same_width_in_every_locale;
 use crate::listing::WorktreeKey;
 use unicode_segmentation::UnicodeSegmentation;
-use unicode_width::UnicodeWidthStr;
 
 #[derive(Debug, Deserialize)]
 pub struct Catalog {
@@ -153,7 +153,7 @@ fn icon_rejection(icon: &str) -> Option<String> {
         return Some(format!("`icon` {icon:?} is {clusters} glyphs, expected 1"));
     }
     match icon.cell_width() {
-        1 if icon.width_cjk() != 1 => Some(format!(
+        1 if !same_width_in_every_locale(icon) => Some(format!(
             "`icon` {icon:?} is East Asian Ambiguous width, drawn 2 cells wide in a CJK locale"
         )),
         1 => None,
@@ -185,9 +185,7 @@ pub fn is_older(actual: &str, required: &str) -> Option<bool> {
 
 #[cfg(test)]
 mod tests {
-    use unicode_width::UnicodeWidthStr;
-
-    use super::{is_older, Catalog, Command, WorktreeKey};
+    use super::{is_older, same_width_in_every_locale, Catalog, Command, WorktreeKey};
 
     fn shipped() -> Catalog {
         // The file the plugin actually ships, not a fixture — a fixture would
@@ -219,12 +217,13 @@ mod tests {
         }
     }
 
-    /// Issue #138: `width_cjk` counts an East Asian Ambiguous character as two
-    /// cells, so any one in a shipped title (`…` was) makes the two disagree.
+    /// Issue #138.
     #[test]
-    fn no_shipped_title_widens_in_a_cjk_locale() {
+    fn no_shipped_text_widens_in_a_cjk_locale() {
         for e in &shipped().commands {
-            assert_eq!(e.title.width(), e.title.width_cjk(), "{}", e.title);
+            for text in std::iter::once(&e.title).chain(&e.prompt) {
+                assert!(same_width_in_every_locale(text), "{}: {text}", e.id);
+            }
         }
     }
 

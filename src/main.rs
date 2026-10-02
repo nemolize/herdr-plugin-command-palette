@@ -382,13 +382,12 @@ mod tests {
     /// Issue #138.
     #[test]
     fn every_status_note_takes_the_same_cells_in_every_locale() {
-        use unicode_width::UnicodeWidthStr;
         for note in [
             outdated_note("0.1.0", "0.2.0"),
             skipped_note(2),
             settings::unusable(std::path::Path::new("settings.toml"), "bad"),
         ] {
-            assert_eq!(note.width(), note.width_cjk(), "{note}");
+            assert!(glyph::same_width_in_every_locale(&note), "{note}");
         }
     }
 
