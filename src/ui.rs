@@ -182,9 +182,25 @@ fn render(f: &mut Frame, app: &mut App) {
         .status
         .as_ref()
         .map(|msg| Paragraph::new(msg.clone()).wrap(Wrap { trim: false }).dim());
-    let status_height = match &status {
-        Some(p) => wrapped_height(p, f.area()),
-        None => 1,
+    let reserved = u16::from(header.is_some())
+        + 1
+        + if matches!(app.stage, Stage::Prompt { .. }) {
+            0
+        } else {
+            FLOOR_CANDIDATES
+        }
+        + if app.selected_note().is_some() {
+            REASON_ROWS
+        } else {
+            0
+        };
+    let status_room = rows.saturating_sub(reserved).clamp(1, MAX_STATUS_ROWS);
+    let (status_height, status_cut) = match &status {
+        Some(p) => {
+            let needed = wrapped_height(p, f.area());
+            (needed.min(status_room), needed > status_room)
+        }
+        None => (1, false),
     };
 
     let chunks = Layout::vertical([
@@ -201,10 +217,7 @@ fn render(f: &mut Frame, app: &mut App) {
 
     if let Stage::Prompt { text, .. } = &app.stage {
         render_input(f, text, chunks[1]);
-        match status {
-            Some(p) => f.render_widget(p, chunks[3]),
-            None => render_footer(f, app, chunks[3]),
-        }
+        render_status(f, app, status, status_cut, chunks[3]);
         return;
     }
 
@@ -223,8 +236,8 @@ fn render(f: &mut Frame, app: &mut App) {
         let (list_area, reason_area) = match &reason {
             None => (chunks[2], None),
             Some(_) => {
-                let split =
-                    Layout::vertical([Constraint::Min(1), Constraint::Length(2)]).split(chunks[2]);
+                let split = Layout::vertical([Constraint::Min(1), Constraint::Length(REASON_ROWS)])
+                    .split(chunks[2]);
                 (split[0], Some(split[1]))
             }
         };
@@ -251,10 +264,50 @@ fn render(f: &mut Frame, app: &mut App) {
         }
     }
 
+    render_status(f, app, status, status_cut, chunks[3]);
+}
+
+const MAX_STATUS_ROWS: u16 = 3;
+
+/// Candidate rows [`MIN_ROWS`] promises; a status message never takes them.
+const FLOOR_CANDIDATES: u16 = 2;
+
+const REASON_ROWS: u16 = 2;
+
+/// ASCII rather than `…`, which is East Asian Ambiguous (see `glyph`).
+const CUT_MARKER: &str = "...";
+
+fn render_status(f: &mut Frame, app: &App, status: Option<Paragraph>, cut: bool, area: Rect) {
     match status {
-        Some(p) => f.render_widget(p, chunks[3]),
-        None => render_footer(f, app, chunks[3]),
+        Some(p) => {
+            f.render_widget(p, area);
+            if cut {
+                mark_cut(f.buffer_mut(), area);
+            }
+        }
+        None => render_footer(f, app, area),
     }
+}
+
+fn mark_cut(buffer: &mut Buffer, area: Rect) {
+    if area.is_empty() {
+        return;
+    }
+    let y = area.bottom() - 1;
+    let marker_width = CUT_MARKER.len() as u16;
+    let text_end = (area.left()..area.right())
+        .filter(|&x| buffer[(x, y)].symbol().trim() != "")
+        .map(|x| x + buffer[(x, y)].symbol().cell_width().max(1))
+        .max()
+        .unwrap_or(area.left());
+    let x = text_end.min(area.right().saturating_sub(marker_width).max(area.left()));
+    // The cell left of the marker may hold a wide glyph whose second half the
+    // marker now covers; a half-drawn glyph would overprint the marker.
+    if x > area.left() && buffer[(x - 1, y)].symbol().cell_width() > 1 {
+        buffer[(x - 1, y)].reset();
+    }
+    let style = buffer[(x.min(area.right() - 1), y)].style();
+    buffer.set_stringn(x, y, CUT_MARKER, (area.right() - x) as usize, style);
 }
 
 /// Columns the `> ` prefix takes from the input line.
@@ -1041,19 +1094,112 @@ mod render_tests {
         );
     }
 
-    /// `wrapped_height` grows with the message and has no cap of its own, so
-    /// what keeps a candidate visible is the layout trimming a `Length` that
-    /// exceeds the pane. Verified by rendering rather than reasoned about — the
-    /// trimming is ratatui's behaviour, not something this file states.
+    /// Herdr's stderr quoted whole (#144): many lines, more than the cap.
+    fn long_error() -> String {
+        (0..20)
+            .map(|i| format!("herdr: error line {i}"))
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
     #[test]
-    fn a_long_status_leaves_the_list_a_row() {
+    fn a_long_status_takes_three_rows_and_says_it_was_cut() {
         let mut app = app_with(vec![command("split.right", "Split pane: right", None)]);
-        app.status = Some("x".repeat(500));
-        let lines = draw(&mut app, 36, 8);
-        assert!(
-            lines.iter().any(|l| l.contains("Split pane: right")),
-            "the candidate was pushed off: {lines:#?}"
+        app.status = Some(long_error());
+        let lines = draw(&mut app, 36, 20);
+        assert_eq!(
+            lines[17..],
+            [
+                "herdr: error line 0",
+                "herdr: error line 1",
+                "herdr: error line 2...",
+            ],
+            "{lines:#?}"
         );
+        assert!(!lines[16].contains("herdr"), "{lines:#?}");
+    }
+
+    /// A cut wide glyph would overprint the marker, so it is blanked instead.
+    #[test]
+    fn a_cut_marker_after_a_wide_glyph_at_the_edge_replaces_it_whole() {
+        let mut app = app_with(vec![command("split.right", "Split pane: right", None)]);
+        // `ｶﾞ` is one column to unicode-width but two cells to ratatui.
+        for glyph in ["あ", "ｶ\u{FF9E}"] {
+            app.status = Some(glyph.repeat(100));
+            let lines = draw(&mut app, 36, 20);
+            // `draw` reads a wide glyph's second cell as a space.
+            let row = format!("{} ...", format!("{glyph} ").repeat(16));
+            assert_eq!(lines[19], row, "{glyph:?}: {lines:#?}");
+        }
+    }
+
+    #[test]
+    fn a_cut_marker_after_a_short_row_ending_in_a_two_cell_glyph_is_whole() {
+        let mut app = app_with(vec![command("split.right", "Split pane: right", None)]);
+        app.status = Some("one\ntwo\nthree ｶ\u{FF9E}\nfour".to_string());
+        let lines = draw(&mut app, 36, 20);
+        assert_eq!(lines[19], "three ｶ\u{FF9E} ...", "{lines:#?}");
+    }
+
+    /// The typing stage lists nothing, so it keeps no rows for candidates.
+    #[test]
+    fn a_long_status_while_typing_takes_three_rows_at_the_floor() {
+        let mut picked = command("pane.rename", "Rename pane", None);
+        picked.args = vec!["pane".into(), "rename".into(), "{text}".into()];
+        picked.prompt = Some("New pane name".into());
+        let mut app = app_with(vec![picked.clone()]);
+        app.enter_prompt(picked, String::new());
+        app.status = Some(long_error());
+        let lines = draw(&mut app, 36, MIN_ROWS);
+        assert_eq!(
+            lines[3..],
+            [
+                "herdr: error line 0",
+                "herdr: error line 1",
+                "herdr: error line 2...",
+            ],
+            "{lines:#?}"
+        );
+    }
+
+    /// The floor's two candidates outrank status rows, so there the status is
+    /// one row — still marked as cut.
+    #[test]
+    fn a_long_status_leaves_the_floor_its_two_candidates() {
+        let mut candidates = vec![Candidate::note("tab.rename", "no {text}")];
+        candidates.extend((0..9).map(|i| {
+            Candidate::from_command(command(&format!("c{i}"), &format!("Cmd {i}"), None))
+        }));
+        let mut app = App::new(candidates, Frecency::load(Path::new("/nonexistent")));
+        app.status = Some(long_error());
+        let lines = draw(&mut app, 36, MIN_ROWS);
+        let listed = lines
+            .iter()
+            .filter(|l| l.contains("Cmd") || l.contains("skipped"))
+            .count();
+        assert_eq!(listed, 2, "Commands: {lines:#?}");
+        assert_eq!(
+            lines.last().unwrap(),
+            "herdr: error line 0...",
+            "{lines:#?}"
+        );
+
+        let picked = command("focus.tab", "Focus tab...", Some("tabs"));
+        let mut app = app_with(vec![picked.clone()]);
+        app.enter_targets(
+            picked,
+            (0..99)
+                .map(|i| Target {
+                    id: i.to_string(),
+                    label: format!("Target {i}"),
+                })
+                .collect(),
+        );
+        app.status = Some(long_error());
+        let lines = draw(&mut app, 36, MIN_ROWS);
+        let listed = lines.iter().filter(|l| l.contains("Target")).count();
+        assert_eq!(listed, 2, "Targets: {lines:#?}");
+        assert!(lines.last().unwrap().ends_with("..."), "{lines:#?}");
     }
 
     /// Herdr can hand the plugin a region narrower than §5's floor. The counts

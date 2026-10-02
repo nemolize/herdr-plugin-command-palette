@@ -466,6 +466,11 @@ palette says so instead, and ignores every key but the two that close it, since
 nothing may change or run while the user cannot see it. Growing back past the
 floor redraws the palette with the query and selection it had.
 
+A status message replacing the footer wraps to at most three rows, and to
+fewer when more would take those two candidates; a longer one ends in `...`
+(#144). Herdr's errors are quoted whole, so without the cap one long error
+leaves the list no room.
+
 The first draft's floor was 8, never measured — #2 recorded it as a starting
 point. It was also too close to where the palette runs: 45% of the 27–29
 keyboard-up rows, less the border and the cell or two a percentage loses, is
