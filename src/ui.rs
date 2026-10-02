@@ -11,7 +11,6 @@ use ratatui::buffer::CellWidth;
 use ratatui::prelude::*;
 use ratatui::widgets::{List, ListItem, Paragraph, Wrap};
 use unicode_segmentation::UnicodeSegmentation;
-use unicode_width::UnicodeWidthStr;
 
 use crate::app::{App, Stage, Step};
 use crate::glyph::{CURSOR, HIGHLIGHT_SYMBOL, SEPARATOR};
@@ -185,7 +184,11 @@ fn render(f: &mut Frame, app: &mut App) {
         .map(|msg| Paragraph::new(msg.clone()).wrap(Wrap { trim: false }).dim());
     let reserved = u16::from(header.is_some())
         + 1
-        + FLOOR_CANDIDATES
+        + if matches!(app.stage, Stage::Prompt { .. }) {
+            0
+        } else {
+            FLOOR_CANDIDATES
+        }
         + if app.selected_note().is_some() {
             REASON_ROWS
         } else {
@@ -294,13 +297,13 @@ fn mark_cut(buffer: &mut Buffer, area: Rect) {
     let marker_width = CUT_MARKER.len() as u16;
     let text_end = (area.left()..area.right())
         .filter(|&x| buffer[(x, y)].symbol().trim() != "")
-        .map(|x| x + (buffer[(x, y)].symbol().width() as u16).max(1))
+        .map(|x| x + buffer[(x, y)].symbol().cell_width().max(1))
         .max()
         .unwrap_or(area.left());
     let x = text_end.min(area.right().saturating_sub(marker_width).max(area.left()));
     // The cell left of the marker may hold a wide glyph whose second half the
     // marker now covers; a half-drawn glyph would overprint the marker.
-    if x > area.left() && buffer[(x - 1, y)].symbol().width() > 1 {
+    if x > area.left() && buffer[(x - 1, y)].symbol().cell_width() > 1 {
         buffer[(x - 1, y)].reset();
     }
     let style = buffer[(x.min(area.right() - 1), y)].style();
@@ -1120,10 +1123,43 @@ mod render_tests {
     #[test]
     fn a_cut_marker_after_a_wide_glyph_at_the_edge_replaces_it_whole() {
         let mut app = app_with(vec![command("split.right", "Split pane: right", None)]);
-        app.status = Some("あ".repeat(100));
+        // `ｶﾞ` is one column to unicode-width but two cells to ratatui.
+        for glyph in ["あ", "ｶ\u{FF9E}"] {
+            app.status = Some(glyph.repeat(100));
+            let lines = draw(&mut app, 36, 20);
+            // `draw` reads a wide glyph's second cell as a space.
+            let row = format!("{} ...", format!("{glyph} ").repeat(16));
+            assert_eq!(lines[19], row, "{glyph:?}: {lines:#?}");
+        }
+    }
+
+    #[test]
+    fn a_cut_marker_after_a_short_row_ending_in_a_two_cell_glyph_is_whole() {
+        let mut app = app_with(vec![command("split.right", "Split pane: right", None)]);
+        app.status = Some("one\ntwo\nthree ｶ\u{FF9E}\nfour".to_string());
         let lines = draw(&mut app, 36, 20);
-        // `draw` reads a wide glyph's second cell as a space.
-        assert_eq!(lines[19], format!("{} ...", "あ ".repeat(16)), "{lines:#?}");
+        assert_eq!(lines[19], "three ｶ\u{FF9E} ...", "{lines:#?}");
+    }
+
+    /// The typing stage lists nothing, so it keeps no rows for candidates.
+    #[test]
+    fn a_long_status_while_typing_takes_three_rows_at_the_floor() {
+        let mut picked = command("pane.rename", "Rename pane", None);
+        picked.args = vec!["pane".into(), "rename".into(), "{text}".into()];
+        picked.prompt = Some("New pane name".into());
+        let mut app = app_with(vec![picked.clone()]);
+        app.enter_prompt(picked, String::new());
+        app.status = Some(long_error());
+        let lines = draw(&mut app, 36, MIN_ROWS);
+        assert_eq!(
+            lines[3..],
+            [
+                "herdr: error line 0",
+                "herdr: error line 1",
+                "herdr: error line 2...",
+            ],
+            "{lines:#?}"
+        );
     }
 
     /// The floor's two candidates outrank status rows, so there the status is
