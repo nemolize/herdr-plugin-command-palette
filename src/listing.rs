@@ -81,8 +81,6 @@ pub fn managed_worktree_workspaces(workspace_list: &serde_json::Value) -> Vec<St
         .unwrap_or_default()
 }
 
-/// herdr refuses to open the bare repository and a prunable worktree, whose
-/// directory is gone; `remove` still clears a prunable one.
 fn herdr_can_open(row: &serde_json::Value) -> bool {
     !["is_bare", "is_prunable"]
         .iter()
@@ -90,7 +88,8 @@ fn herdr_can_open(row: &serde_json::Value) -> bool {
 }
 
 /// Every row's `label` is the repository name, so the branch tells rows apart.
-/// `Workspace` keeps only rows open in one of `managed`.
+/// `Path` drops the bare and prunable rows herdr refuses to open. `Workspace`
+/// keeps only rows open in one of `managed`, prunable ones too: `remove` clears them.
 pub fn worktree_target(
     row: &serde_json::Value,
     key: WorktreeKey,
@@ -289,14 +288,17 @@ mod tests {
 
     fn worktree_rows() -> [serde_json::Value; 4] {
         [
-            json!({"branch": "main", "is_linked_worktree": false, "label": "repo",
-                   "open_workspace_id": "w1", "path": "/src/repo"}),
-            json!({"branch": "feat-x", "is_linked_worktree": true, "label": "repo",
-                   "open_workspace_id": "w2", "path": "/wt/repo/feat-x"}),
-            json!({"is_detached": true, "is_linked_worktree": true, "label": "repo",
-                   "path": "/wt/repo/detached"}),
-            json!({"branch": "manual", "is_linked_worktree": true, "label": "repo",
-                   "open_workspace_id": "w3", "path": "/src/manual"}),
+            json!({"branch": "main", "is_bare": false, "is_linked_worktree": false,
+                   "is_prunable": false, "label": "repo", "open_workspace_id": "w1",
+                   "path": "/src/repo"}),
+            json!({"branch": "feat-x", "is_bare": false, "is_linked_worktree": true,
+                   "is_prunable": false, "label": "repo", "open_workspace_id": "w2",
+                   "path": "/wt/repo/feat-x"}),
+            json!({"is_bare": false, "is_detached": true, "is_linked_worktree": true,
+                   "is_prunable": false, "label": "repo", "path": "/wt/repo/detached"}),
+            json!({"branch": "manual", "is_bare": false, "is_linked_worktree": true,
+                   "is_prunable": false, "label": "repo", "open_workspace_id": "w3",
+                   "path": "/src/manual"}),
         ]
     }
 
@@ -337,7 +339,7 @@ mod tests {
     }
 
     #[test]
-    fn opening_offers_every_worktree_by_path() {
+    fn opening_offers_every_openable_worktree_by_path() {
         let ids: Vec<String> = worktree_rows()
             .iter()
             .filter_map(|r| worktree_target(r, WorktreeKey::Path, &[]))
