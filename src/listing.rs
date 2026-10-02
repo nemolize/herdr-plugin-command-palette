@@ -82,12 +82,17 @@ pub fn managed_worktree_workspaces(workspace_list: &serde_json::Value) -> Vec<St
 }
 
 /// Every row's `label` is the repository name, so the branch tells rows apart.
-/// `Workspace` keeps only rows open in one of `managed`.
+/// `Workspace` keeps only rows open in one of `managed`. Neither key offers a
+/// bare or prunable row: herdr cannot open either.
 pub fn worktree_target(
     row: &serde_json::Value,
     key: WorktreeKey,
     managed: &[String],
 ) -> Option<Target> {
+    let flag = |k: &str| row.get(k).and_then(|v| v.as_bool()).unwrap_or(false);
+    if flag("is_bare") || flag("is_prunable") {
+        return None;
+    }
     let path = row.get("path")?.as_str()?;
     let open = row.get("open_workspace_id").and_then(|v| v.as_str());
     let id = match key {
@@ -278,7 +283,7 @@ mod tests {
         assert!(source_repo_root(&json!({"worktrees": []})).is_err());
     }
 
-    fn worktree_rows() -> [serde_json::Value; 4] {
+    fn worktree_rows() -> [serde_json::Value; 6] {
         [
             json!({"branch": "main", "is_linked_worktree": false, "label": "repo",
                    "open_workspace_id": "w1", "path": "/src/repo"}),
@@ -288,6 +293,10 @@ mod tests {
                    "path": "/wt/repo/detached"}),
             json!({"branch": "manual", "is_linked_worktree": true, "label": "repo",
                    "open_workspace_id": "w3", "path": "/src/manual"}),
+            json!({"is_bare": true, "is_linked_worktree": false, "label": "repo",
+                   "open_workspace_id": "w2", "path": "/src/repo.git"}),
+            json!({"branch": "gone", "is_linked_worktree": true, "is_prunable": true,
+                   "label": "repo", "open_workspace_id": "w2", "path": "/wt/repo/gone"}),
         ]
     }
 
@@ -319,7 +328,7 @@ mod tests {
     }
 
     #[test]
-    fn opening_offers_every_worktree_by_path() {
+    fn opening_offers_every_openable_worktree_by_path() {
         let ids: Vec<String> = worktree_rows()
             .iter()
             .filter_map(|r| worktree_target(r, WorktreeKey::Path, &[]))
@@ -345,5 +354,15 @@ mod tests {
             .map(|t| t.id)
             .collect();
         assert_eq!(ids, vec!["w2"]);
+    }
+
+    /// Both rows sit in a managed workspace, so only their own flag drops them.
+    #[test]
+    fn bare_and_prunable_rows_are_offered_under_neither_key() {
+        let managed = managed();
+        for row in &worktree_rows()[4..] {
+            assert!(worktree_target(row, WorktreeKey::Path, &[]).is_none());
+            assert!(worktree_target(row, WorktreeKey::Workspace, &managed).is_none());
+        }
     }
 }
