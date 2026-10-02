@@ -592,11 +592,12 @@ def opened_with_settings(
     ready: str = READY_MARKER,
     stub_body: str = ACCEPTS,
     catalog: str | None = None,
-    columns: int = COLUMNS,
+    wide: bool = False,
 ) -> str:
     """What the palette draws on opening with `settings` as its settings.toml,
     or with none at all. `ready` is matched with whitespace removed, because a
-    status line replaces the footer that carries READY_MARKER and may wrap."""
+    status line replaces the footer that carries READY_MARKER and may wrap.
+    `wide` opens a pane with room for every startup note on one row."""
     stub = write_stub(scratch / f"herdr-{name}", stub_body)
     log = scratch / f"{name}.log"
     log.write_text("")
@@ -606,6 +607,7 @@ def opened_with_settings(
         (config / "settings.toml").write_text(settings)
     if catalog is not None:
         (config / "catalog.toml").write_text(catalog)
+    columns = columns_for_every_note(config / "settings.toml") if wide else COLUMNS
     palette = Palette(stub, log, scratch / f"{name}.stderr", config, columns)
     try:
         if not palette.wait_until_squeezed("".join(ready.split()), READY_TIMEOUT):
@@ -615,11 +617,10 @@ def opened_with_settings(
         palette.close()
 
 
-def notes_on_one_row(scratch: Path, name: str) -> int:
-    """A pane wide enough for every startup note on one row: the settings
-    note quotes the scratch path, and a status past three rows is cut (#144).
-    200 covers the notes' own text, path aside."""
-    return len(str(scratch / f"config-{name}" / "settings.toml")) + 200
+def columns_for_every_note(settings: Path) -> int:
+    """The settings note quotes this path, and a status past three rows is
+    cut (#144); 200 covers the notes' own text, path aside."""
+    return len(str(settings)) + 200
 
 
 def icons_follow_settings(scratch: Path) -> bool:
@@ -649,7 +650,7 @@ def icons_follow_settings(scratch: Path) -> bool:
         "settings-broken",
         "icon = false\n",
         ready="using defaults",
-        columns=notes_on_one_row(scratch, "settings-broken"),
+        wide=True,
     )
     squeezed = "".join(broken.split())
     passed &= check(
@@ -689,7 +690,7 @@ def every_footer_note_is_kept(scratch: Path) -> bool:
         ready="using defaults",
         stub_body=ACCEPTS.replace(f"herdr {STUB_VERSION}", "herdr 0.1.0"),
         catalog=ONE_SKIPPED,
-        columns=notes_on_one_row(scratch, "all-notes"),
+        wide=True,
     )
     squeezed = "".join(drew.split())
     passed = True
