@@ -31,7 +31,8 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 BINARY = REPO / "target" / "debug" / "herdr-command-palette"
 
-COLUMNS = 60
+# The manifest's 60-column popup, inside Herdr's border (docs/design.md §5).
+COLUMNS = 58
 ROWS = 20
 
 CONTEXT = '{"focused_pane_id":"w1:p1","tab_id":"w1:t1","workspace_id":"w1"}'

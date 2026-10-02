@@ -1123,9 +1123,10 @@ mod render_tests {
         assert!(!lines[16].contains("herdr"), "{lines:#?}");
     }
 
-    /// Issue #149: all three of `main`'s startup notes at the popup's width.
+    /// Issue #149. The manifest's 60-column popup is 58 inside Herdr's border
+    /// (docs/design.md §5).
     #[test]
-    fn every_startup_note_fits_whole_at_sixty_columns() {
+    fn every_startup_note_fits_whole_inside_the_popup() {
         let notes = [
             crate::outdated_note("0.1.0", "0.8.2"),
             crate::skipped_note(1),
@@ -1135,7 +1136,7 @@ mod render_tests {
         for note in &notes {
             app.add_status(note.clone());
         }
-        let lines = draw(&mut app, 60, 20);
+        let lines = draw(&mut app, 58, 20);
         let shown: String = lines[17..].concat().split_whitespace().collect();
         for note in &notes {
             let note: String = note.split_whitespace().collect();
