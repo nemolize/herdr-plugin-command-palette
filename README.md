@@ -9,7 +9,7 @@ from a popup over the session.
 │ ▸ Split pane: right                        │
 │   Split pane: down                         │
 │                                            │
-│ 2/24 · esc to close                        │
+│ 2/24 ⋅ esc to close                        │
 └────────────────────────────────────────────┘
 ```
 
@@ -72,19 +72,19 @@ commonly taken already (`mr04vv/herdr-pane-navigator` binds it). Any key works.
 
 Type to filter. `Enter` runs the selected entry; `↑` / `↓` move the selection.
 
-Entries that need a target you must choose — `Focus tab…`, `Move pane to tab…`,
-`Close workspace…`, `Open worktree…` — open a second list of the live tabs,
+Entries that need a target you must choose — `Focus tab...`, `Move pane to tab...`,
+`Close workspace...`, `Open worktree...` — open a second list of the live tabs,
 panes, workspaces or worktrees when you pick them. Worktrees are those of the
 repository behind the workspace you opened the palette from, listed by branch;
-`Remove worktree…` lists only the open ones herdr created, and herdr refuses
+`Remove worktree...` lists only the open ones herdr created, and herdr refuses
 one with uncommitted or untracked changes. `Esc` there backs out to the command
 list rather than closing the palette.
 
-Entries that need a name you must type — `Rename tab…`, `Rename workspace…`,
-`Rename pane…` — open an input instead of a list. They act on what you were
+Entries that need a name you must type — `Rename tab...`, `Rename workspace...`,
+`Rename pane...` — open an input instead of a list. They act on what you were
 looking at when the palette opened, not on something you pick, and the input
 starts from that thing's current name so renaming is an edit rather than a
-retype. `New worktree…` asks for a branch name the same way and starts empty.
+retype. `New worktree...` asks for a branch name the same way and starts empty.
 `Enter` runs it, `Esc` backs out. A name may contain spaces; it reaches
 herdr as one argument.
 
@@ -173,9 +173,9 @@ it unnecessary.
   Focus pane: left                                  prefix+h
   Zoom pane: toggle                                 prefix+z
   Swap pane: left
-  Rename pane…                                prefix+shift+p
-  Move pane to tab…
-27/27 · esc to close                                  v0.2.0
+  Rename pane...                              prefix+shift+p
+  Move pane to tab...
+27/27 ⋅ esc to close                                  v0.2.0
 ```
 
 The key shown is **your** key. Herdr's shipped defaults come from
@@ -195,7 +195,7 @@ names are a separate vocabulary from the argv the catalog runs — `tab rename` 
 `rename_tab`.
 
 A blank key means one of two things, both deliberate. Some entries are not the
-same command as any bound action — `Close tab…` picks a tab while Herdr's
+same command as any bound action — `Close tab...` picks a tab while Herdr's
 `close_tab` closes the current one — so claiming its key would be a lie. Others
 name an action Herdr binds but does not list in `herdr --default-config`
 (`Swap pane: …`); set one yourself and it appears.

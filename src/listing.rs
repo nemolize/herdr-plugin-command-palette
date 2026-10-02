@@ -2,6 +2,8 @@
 //! Pure, so the label rules are testable without a herdr binary — `herdr.rs`
 //! holds the only process seam.
 
+use crate::glyph::SEPARATOR;
+
 /// A row from one of the list APIs, reduced to what a candidate needs.
 #[derive(Debug)]
 pub struct Target {
@@ -139,7 +141,7 @@ pub fn target_from_row(
         Some(ws) if !workspaces.is_empty() => workspaces
             .iter()
             .find(|(wid, _)| wid == ws)
-            .map(|(_, name)| format!("{name} · {own}"))
+            .map(|(_, name)| format!("{name}{SEPARATOR}{own}"))
             .unwrap_or_else(|| own.to_string()),
         _ => own.to_string(),
     };
@@ -194,8 +196,8 @@ mod tests {
         let b = json!({"tab_id": "w3Y:t1", "label": "1", "workspace_id": "w3Y"});
         let a = target_from_row(&a, "tab_id", &workspaces()).unwrap();
         let b = target_from_row(&b, "tab_id", &workspaces()).unwrap();
-        assert_eq!(a.label, "wevox-front · 1");
-        assert_eq!(b.label, "command-palette · 1");
+        assert_eq!(a.label, "wevox-front ⋅ 1");
+        assert_eq!(b.label, "command-palette ⋅ 1");
         assert_ne!(a.label, b.label);
     }
 
@@ -203,7 +205,7 @@ mod tests {
     fn the_focused_row_says_so() {
         let row = json!({"tab_id": "w46:t1", "label": "1", "workspace_id": "w46", "focused": true});
         let t = target_from_row(&row, "tab_id", &workspaces()).unwrap();
-        assert_eq!(t.label, "wevox-front · 1 (current)");
+        assert_eq!(t.label, "wevox-front ⋅ 1 (current)");
     }
 
     #[test]

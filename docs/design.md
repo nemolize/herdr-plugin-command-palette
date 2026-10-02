@@ -257,7 +257,7 @@ substituted:
 ```toml
 [[command]]
 id = "tab.focus"
-title = "Focus tab…"
+title = "Focus tab..."
 args = ["tab", "focus", "{}"]
 resolve = "tab list"
 contexts = ["global", "workspace", "tab", "pane"]

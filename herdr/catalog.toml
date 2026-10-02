@@ -189,7 +189,7 @@ binding = "swap_pane_down"
 # No picker: the context already names the pane the palette was opened from.
 [[command]]
 id = "pane.rename"
-title = "Rename pane…"
+title = "Rename pane..."
 args = ["pane", "rename", "{pane}", "{text}"]
 prompt = "New pane name"
 contexts = ["pane"]
@@ -208,7 +208,7 @@ binding = "close_pane"
 # `--split`: without it the CLI prints its usage and moves nothing.
 [[command]]
 id = "pane.move.tab"
-title = "Move pane to tab…"
+title = "Move pane to tab..."
 args = ["pane", "move", "{pane}", "--tab", "{}", "--split", "right"]
 resolve = "tab list"
 contexts = ["pane"]
@@ -232,7 +232,7 @@ contexts = ["global", "workspace", "tab", "pane"]
 
 [[command]]
 id = "tab.focus"
-title = "Focus tab…"
+title = "Focus tab..."
 args = ["tab", "focus", "{}"]
 resolve = "tab list"
 contexts = ["global", "workspace", "tab", "pane"]
@@ -241,7 +241,7 @@ contexts = ["global", "workspace", "tab", "pane"]
 # thing in front of you, and the context already names it.
 [[command]]
 id = "tab.rename"
-title = "Rename tab…"
+title = "Rename tab..."
 args = ["tab", "rename", "{tab}", "{text}"]
 prompt = "New tab name"
 contexts = ["tab", "pane"]
@@ -249,7 +249,7 @@ binding = "rename_tab"
 
 [[command]]
 id = "tab.close"
-title = "Close tab…"
+title = "Close tab..."
 args = ["tab", "close", "{}"]
 resolve = "tab list"
 contexts = ["global", "workspace", "tab", "pane"]
@@ -266,14 +266,14 @@ binding = "new_workspace"
 
 [[command]]
 id = "workspace.focus"
-title = "Focus workspace…"
+title = "Focus workspace..."
 args = ["workspace", "focus", "{}"]
 resolve = "workspace list"
 contexts = ["global", "workspace", "tab", "pane"]
 
 [[command]]
 id = "workspace.rename"
-title = "Rename workspace…"
+title = "Rename workspace..."
 args = ["workspace", "rename", "{workspace}", "{text}"]
 prompt = "New workspace name"
 contexts = ["workspace", "tab", "pane"]
@@ -281,7 +281,7 @@ binding = "rename_workspace"
 
 [[command]]
 id = "workspace.close"
-title = "Close workspace…"
+title = "Close workspace..."
 args = ["workspace", "close", "{}"]
 resolve = "workspace list"
 contexts = ["global", "workspace", "tab", "pane"]
@@ -298,7 +298,7 @@ contexts = ["global", "workspace", "tab", "pane"]
 
 [[command]]
 id = "worktree.create"
-title = "New worktree…"
+title = "New worktree..."
 args = ["worktree", "create", "--cwd", "{repo}", "--branch", "{text}", "--focus"]
 prompt = "New branch name"
 contexts = ["workspace", "tab", "pane"]
@@ -306,7 +306,7 @@ contexts = ["workspace", "tab", "pane"]
 # An already-open worktree is focused rather than opened twice.
 [[command]]
 id = "worktree.open"
-title = "Open worktree…"
+title = "Open worktree..."
 args = ["worktree", "open", "--cwd", "{repo}", "--path", "{}", "--focus"]
 resolve = "worktree list"
 contexts = ["workspace", "tab", "pane"]
@@ -315,7 +315,7 @@ contexts = ["workspace", "tab", "pane"]
 # this entry has in place of a confirmation.
 [[command]]
 id = "worktree.remove"
-title = "Remove worktree…"
+title = "Remove worktree..."
 args = ["worktree", "remove", "--workspace", "{}"]
 resolve = "worktree list"
 contexts = ["workspace", "tab", "pane"]
