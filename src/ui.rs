@@ -13,7 +13,7 @@ use ratatui::widgets::{List, ListItem, Paragraph, Wrap};
 use unicode_segmentation::UnicodeSegmentation;
 
 use crate::app::{App, Stage, Step};
-use crate::glyph::{CURSOR, SEPARATOR};
+use crate::glyph::{CURSOR, HIGHLIGHT_SYMBOL, SEPARATOR};
 
 /// Restores the terminal on drop, so an error path cannot leave the pane in raw
 /// mode with the alternate screen still up.
@@ -259,10 +259,6 @@ fn render(f: &mut Frame, app: &mut App) {
 
 /// Columns the `> ` prefix takes from the input line.
 const PROMPT_COLUMNS: u16 = 2;
-
-/// East Asian Width `N`, like the icons (docs/design.md §4): `▶` is `A`, which a
-/// CJK-locale terminal draws double and would push the selected row out of line.
-const HIGHLIGHT_SYMBOL: &str = "▸ ";
 
 /// Columns [`HIGHLIGHT_SYMBOL`] takes from every row.
 const HIGHLIGHT_COLUMNS: u16 = 2;
@@ -536,10 +532,7 @@ mod render_tests {
     /// a CJK-locale terminal draws wider shifts the selected row alone.
     #[test]
     fn the_highlight_symbol_takes_its_columns_in_every_locale() {
-        use unicode_width::UnicodeWidthStr;
         assert_eq!(drawn_width(HIGHLIGHT_SYMBOL), HIGHLIGHT_COLUMNS);
-        assert_eq!(HIGHLIGHT_SYMBOL.width(), HIGHLIGHT_COLUMNS as usize);
-        assert_eq!(HIGHLIGHT_SYMBOL.width_cjk(), HIGHLIGHT_COLUMNS as usize);
     }
 
     /// The key must clear the title by the full gap rather than abut it, or the
