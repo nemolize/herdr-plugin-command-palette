@@ -37,8 +37,8 @@ pub fn load(config_dir: Option<&Path>) -> (Settings, Option<String>) {
     }
 }
 
-fn unusable(path: &Path, why: &str) -> String {
-    format!("{}: {why} — using defaults", path.display())
+pub fn unusable(path: &Path, why: &str) -> String {
+    format!("{}: {why} - using defaults", path.display())
 }
 
 #[cfg(test)]

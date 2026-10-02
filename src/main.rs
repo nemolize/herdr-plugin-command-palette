@@ -174,17 +174,12 @@ fn run() -> Result<(), String> {
     // as a footer note rather than a refusal, because most entries still work.
     if let (Some(required), Some(actual)) = (checked_against.as_deref(), herdr.version()) {
         if catalog::is_older(&actual, required) == Some(true) {
-            app.add_status(format!(
-                "herdr {actual} is older than the catalog's {required} — some entries may fail"
-            ));
+            app.add_status(outdated_note(&actual, required));
         }
     }
 
     if !rejected.is_empty() {
-        app.add_status(format!(
-            "catalog: {} skipped — search `skipped`",
-            rejected.len()
-        ));
+        app.add_status(skipped_note(rejected.len()));
     }
 
     if let Some(problem) = settings_problem {
@@ -372,9 +367,30 @@ fn argv(outcome: Outcome) -> (String, Vec<String>) {
     }
 }
 
+fn outdated_note(actual: &str, required: &str) -> String {
+    format!("herdr {actual} is older than the catalog's {required} - some entries may fail")
+}
+
+fn skipped_note(count: usize) -> String {
+    format!("catalog: {count} skipped - search `skipped`")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Issue #138.
+    #[test]
+    fn every_status_note_takes_the_same_cells_in_every_locale() {
+        use unicode_width::UnicodeWidthStr;
+        for note in [
+            outdated_note("0.1.0", "0.2.0"),
+            skipped_note(2),
+            settings::unusable(std::path::Path::new("settings.toml"), "bad"),
+        ] {
+            assert_eq!(note.width(), note.width_cjk(), "{note}");
+        }
+    }
 
     /// Both refusals are decided before anything is spawned, so the bin path
     /// is never reached.

@@ -307,7 +307,7 @@ fn row_line(icon: Option<&str>, title: &str, key: &str, width: u16) -> Line<'sta
     Line::from(spans)
 }
 
-/// Draws the typed name with a block cursor after it (docs/design.md §4).
+/// Draws the typed name with a cursor after it (docs/design.md §4).
 ///
 /// The cursor is reserved a cell BEFORE the text is measured, which is what
 /// makes clipping it away with the text unreachable rather than a calculation
