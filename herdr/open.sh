@@ -3,7 +3,7 @@
 # pane and exits — all rendering lives in the pane entrypoint.
 #
 # It also meets popup collision (§6): Herdr allows one popup per session, so a
-# second press arrives as `popup already open`.
+# second press arrives as an error.
 set -eu
 
 : "${HERDR_BIN_PATH:?not running under herdr}"
@@ -24,9 +24,9 @@ json_str() {
 # too, and only the body says which.
 # `--placement` is deliberately not passed: the manifest's [[panes]] entry
 # already declares `popup`, and it governs when the flag is omitted (verified —
-# a second open still collides with `popup already open`). Omitting it keeps the
-# runtime path off `popup`, the one placement value the CLI accepts but does not
-# document, so a future release tightening its parser cannot break the hop.
+# a second open still collides). Omitting it keeps the runtime path off `popup`,
+# the one placement value the CLI accepts but does not document, so a future
+# release tightening its parser cannot break the hop.
 response=$("$HERDR_BIN_PATH" plugin pane open \
   --plugin "$HERDR_PLUGIN_ID" \
   --entrypoint "$ENTRYPOINT" \
@@ -48,11 +48,11 @@ if [ -z "$error_message" ]; then
   exit 1
 fi
 
-# The collision is named in the message, not the code — the code is the generic
-# `plugin_pane_open_failed`, which also covers failures that must not be read as
-# a collision.
-case "$error_message" in
-  *"popup already open"*) ;;
+# Two shapes, one per herdr line (docs/design.md §6): 0.9 names the collision in
+# its code, 0.8.2 only in the message under the generic `plugin_pane_open_failed`.
+error_code=$(printf '%s' "$response" | json_str code)
+case "$error_code:$error_message" in
+  ui_busy:* | *:*"popup already open"*) ;;
   *)
     printf 'command palette: %s\n' "$error_message" >&2
     exit 1

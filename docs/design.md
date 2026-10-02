@@ -178,7 +178,7 @@ Two constraints measured on a live device (#2), both worth knowing before
 writing the pane logic:
 
 - **Only one popup can exist at a time** — a second `plugin.pane.open` fails with
-  `popup already open`. What the palette does then is §6.
+  a collision error (`popup already open` on 0.8.2). What the palette does then is §6.
 - **Percentages resolve against the tab, not the pane.** Splitting a tab does not
   shrink the denominator, so a popup always covers its sibling panes.
 
@@ -525,7 +525,7 @@ it beyond the height floor above.
 ## 6. Popup collision — report it and touch nothing
 
 Herdr allows one popup per session, so pressing the palette key while a popup is
-up gets `popup already open`. Two different situations hide behind that one
+up gets a collision error (its shape per version is at the end of Behaviour). Two different situations hide behind that one
 error, and they want opposite responses:
 
 | What is open | Response the design wanted |
@@ -565,7 +565,7 @@ palette dismiss another plugin's UI as a side effect of a keypress meant for us.
 
 ### Behaviour
 
-On `popup already open`: report it and exit without touching anything.
+On a collision: report it and exit without touching anything.
 
 That is case 2 of the table, applied to both rows — not because a stranger's
 popup and ours deserve the same response, but because herdr gives no way to
@@ -584,9 +584,22 @@ Note what this costs: the palette's binding opens but does not close it, so
 dismissal is `Esc` alone — which is what the click-outside section below now
 records.
 
-The collision is matched on the error **message**, not the code: the code is the
-generic `plugin_pane_open_failed`, which also covers failures that must not be
-read as a collision.
+The collision is recognised by a different field on each herdr line, because
+the error envelope changed between them:
+
+| herdr | Envelope | Matched on |
+|---|---|---|
+| 0.8.2 | `plugin_pane_open_failed`, `popup already open` | The message — the code is generic and also covers failures that must not be read as a collision |
+| 0.9.x | `ui_busy`, `a popup pane is already open` | The code — the message no longer contains the 0.8.2 wording, and the popup message is the only one 0.9.3 is seen pairing with `ui_busy` |
+
+herdr's API schema types `code` as a free-form string, so nothing guarantees
+`ui_busy` stays exclusive to the popup. Should another busy state reuse it, the
+hop reports a popup collision for it — still exit 1, still touching nothing.
+
+Both are checked on every press, since the manifest's `min_herdr_version` still
+admits 0.8.2. Any other envelope, including `plugin_pane_open_failed` with
+another message, takes the generic error path. `herdr/open-test.py` runs the hop
+against each envelope.
 
 ### Click-outside-to-dismiss is not available
 

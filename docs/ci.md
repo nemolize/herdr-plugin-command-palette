@@ -23,6 +23,7 @@ Two facts shape every choice here:
 | `cargo clippy --locked --all-targets -- -D warnings` | `Lint` | The default lint group is a correctness floor, and the tree already passes at `-D warnings`, so adopting it costs nothing today and catches real bug classes later. |
 | `cargo test --locked` | `Test` | The unit tests, which were being run by hand until now. |
 | `python3 herdr/palette-e2e.py` | `Test` | The unit tests stop at the seams: `Screen` needs a real terminal, so nothing in-process sees a pick become a running command. This drives the built binary through a PTY against a stubbed herdr, and asserts that a rejected dispatch is readable in the pane rather than printed to a stderr the closing popup takes with it — the shape of "I picked it and nothing happened". |
+| `python3 herdr/open-test.py` | `Test` | The action hop tells a popup collision from any other open failure by reading herdr's error envelope, whose shape changed between 0.8.2 and 0.9 (docs/design.md §6). A shape it stops matching shows only as a different message, so this runs the hop against a stub answering each envelope and asserts the message and exit status. |
 | `just release-test` | `Test` | The release publishes from `package.json`'s version while `install.sh` reads `herdr-plugin.toml`'s, and `Cargo.toml`/`Cargo.lock` carry a third copy; a disagreement surfaces only at publish, where fixing it costs a version. This asserts all four agree, and runs the Changesets version step on a fixture repository — bump, one changelog entry per changeset, every manifest synced, changeset consumed — plus the release-planning decisions ("Cutting a release"). |
 | `python3 herdr/catalog-e2e.py` | `E2ETests` | The catalog hand-writes argv for every entry, and the unit tests check it against a `--help` table transcribed at one herdr version, which goes stale silently — three entries shipped broken that way, the last one valid in flags and arity and wrong only in combination (issue #24). This fetches a real herdr and runs every entry against it, so a constraint herdr adds is caught by the tool that added it rather than by a user whose pick does nothing. |
 | `cargo build --release --locked` for both musl targets | `Build` | `cargo test` compiles the test profile only. This is the sole check that exercises `[profile.release]` (LTO, `opt-level = "z"`, strip) and the per-target `rust-lld` pins in `.cargo/config.toml` — breakage that would otherwise surface for the first time at a release tag. It covers the two release assets a Linux runner can build unaided; the macOS and Android assets need another host or the NDK, so `Release` is the only thing that compiles them. |
@@ -37,8 +38,8 @@ which is the reference layout across these repositories; the language differs,
 the conventions should not.
 
 `E2ETests` is the one job that fetches a herdr binary, which is why
-`palette-e2e` rides `Test` instead: it stubs herdr rather than fetching one, so
-it needs nothing the test toolchain has not already installed. The split is by
+`palette-e2e` and `open-test` ride `Test` instead: they stub herdr rather than
+fetching one, so they need nothing the test toolchain has not already installed. The split is by
 what a check must install, not by what kind of test it is.
 
 ## What does not run
@@ -132,7 +133,7 @@ diverge the CI cache from every local build. Clippy's `-D warnings` is passed
 per-invocation instead, where it is scoped to this crate.
 
 `justfile` holds the check definitions and each CI job runs one recipe
-(`just lint`, `just test` plus `just palette-e2e` and `just release-test`,
+(`just lint`, `just test` plus `just palette-e2e`, `just open-test` and `just release-test`,
 `just build-musl`, `just deny`), so the commands exist
 once rather than as lists kept in sync by discipline. `just ci` runs the three CI
 jobs' recipes together, reproducing a CI failure locally with no push — given the
