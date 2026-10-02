@@ -103,7 +103,7 @@ Set `$HERDR_PLUGIN_CONFIG_DIR` (Herdr provides it) and drop a `catalog.toml`
 there to replace the shipped catalog:
 
 ```toml
-checked_against = "0.8.2"
+checked_against = "0.9.3"
 
 [[command]]
 id = "pane.split.right"

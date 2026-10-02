@@ -678,7 +678,7 @@ for any other location; `reviewr` is laid out the same way.
 id = "command-palette"
 name = "Command Palette"
 version = "0.1.0"
-min_herdr_version = "0.8.2"   # the only release anything was verified on
+min_herdr_version = "0.8.2"
 platforms = ["linux", "macos"]
 description = "Fuzzy-search and run Herdr's own commands, plugin actions, and session targets."
 

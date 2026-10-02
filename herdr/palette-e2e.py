@@ -25,6 +25,7 @@ import sys
 import tempfile
 import termios
 import time
+import tomllib
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
@@ -47,8 +48,14 @@ EXIT_TIMEOUT = 10.0
 # interval is what keeps a loaded CI runner from reading as a failure.
 READY_MARKER = "esc to close"
 
+# The shipped catalog's own pin, so the "older than the catalog" footer note —
+# which takes the place of READY_MARKER — stays out of every test but its own.
+STUB_VERSION = tomllib.loads((REPO / "herdr" / "catalog.toml").read_text())[
+    "checked_against"
+]
+
 STUB = """#!/bin/sh
-if [ "$1" = "--version" ]; then echo "herdr 0.8.2"; exit 0; fi
+if [ "$1" = "--version" ]; then echo "herdr %s"; exit 0; fi""" % STUB_VERSION + """
 if [ "$1" = "--default-config" ]; then exit 0; fi
 if [ "$1" = "plugin" ]; then echo '{"result":{"actions":[]}}'; exit 0; fi
 echo "$@" >> "$HERDR_STUB_LOG"
@@ -663,7 +670,7 @@ def every_footer_note_is_kept(scratch: Path) -> bool:
         "all-notes",
         "icon = false\n",
         ready="using defaults",
-        stub_body=ACCEPTS.replace("herdr 0.8.2", "herdr 0.1.0"),
+        stub_body=ACCEPTS.replace(f"herdr {STUB_VERSION}", "herdr 0.1.0"),
         catalog=ONE_SKIPPED,
     )
     squeezed = "".join(drew.split())
