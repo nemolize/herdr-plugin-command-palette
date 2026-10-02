@@ -10,7 +10,7 @@
 # When Herdr changes its CLI this file drifts and nothing detects that
 # automatically — bump this deliberately on each re-check, and read a failed
 # dispatch naming a command id as the report of a drifted entry.
-checked_against = "0.8.2"
+checked_against = "0.9.3"
 
 # `args` is appended to $HERDR_BIN_PATH and run as-is.
 #
