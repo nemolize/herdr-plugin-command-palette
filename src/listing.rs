@@ -81,21 +81,25 @@ pub fn managed_worktree_workspaces(workspace_list: &serde_json::Value) -> Vec<St
         .unwrap_or_default()
 }
 
+/// herdr refuses to open the bare repository and a prunable worktree, whose
+/// directory is gone; `remove` still clears a prunable one.
+fn herdr_can_open(row: &serde_json::Value) -> bool {
+    !["is_bare", "is_prunable"]
+        .iter()
+        .any(|k| row.get(k).and_then(|v| v.as_bool()).unwrap_or(false))
+}
+
 /// Every row's `label` is the repository name, so the branch tells rows apart.
-/// `Workspace` keeps only rows open in one of `managed`. Neither key offers a
-/// bare or prunable row: herdr cannot open either.
+/// `Workspace` keeps only rows open in one of `managed`.
 pub fn worktree_target(
     row: &serde_json::Value,
     key: WorktreeKey,
     managed: &[String],
 ) -> Option<Target> {
-    let flag = |k: &str| row.get(k).and_then(|v| v.as_bool()).unwrap_or(false);
-    if flag("is_bare") || flag("is_prunable") {
-        return None;
-    }
     let path = row.get("path")?.as_str()?;
     let open = row.get("open_workspace_id").and_then(|v| v.as_str());
     let id = match key {
+        WorktreeKey::Path if !herdr_can_open(row) => return None,
         WorktreeKey::Path => path,
         WorktreeKey::Workspace => open.filter(|w| managed.iter().any(|m| m == w))?,
     };
@@ -283,7 +287,7 @@ mod tests {
         assert!(source_repo_root(&json!({"worktrees": []})).is_err());
     }
 
-    fn worktree_rows() -> [serde_json::Value; 6] {
+    fn worktree_rows() -> [serde_json::Value; 4] {
         [
             json!({"branch": "main", "is_linked_worktree": false, "label": "repo",
                    "open_workspace_id": "w1", "path": "/src/repo"}),
@@ -293,8 +297,13 @@ mod tests {
                    "path": "/wt/repo/detached"}),
             json!({"branch": "manual", "is_linked_worktree": true, "label": "repo",
                    "open_workspace_id": "w3", "path": "/src/manual"}),
+        ]
+    }
+
+    fn unopenable_rows() -> [serde_json::Value; 2] {
+        [
             json!({"is_bare": true, "is_linked_worktree": false, "label": "repo",
-                   "open_workspace_id": "w2", "path": "/src/repo.git"}),
+                   "path": "/src/repo.git"}),
             json!({"branch": "gone", "is_linked_worktree": true, "is_prunable": true,
                    "label": "repo", "open_workspace_id": "w2", "path": "/wt/repo/gone"}),
         ]
@@ -328,7 +337,7 @@ mod tests {
     }
 
     #[test]
-    fn opening_offers_every_openable_worktree_by_path() {
+    fn opening_offers_every_worktree_by_path() {
         let ids: Vec<String> = worktree_rows()
             .iter()
             .filter_map(|r| worktree_target(r, WorktreeKey::Path, &[]))
@@ -356,13 +365,20 @@ mod tests {
         assert_eq!(ids, vec!["w2"]);
     }
 
-    /// Both rows sit in a managed workspace, so only their own flag drops them.
     #[test]
-    fn bare_and_prunable_rows_are_offered_under_neither_key() {
-        let managed = managed();
-        for row in &worktree_rows()[4..] {
+    fn opening_offers_neither_a_bare_nor_a_prunable_row() {
+        for row in &unopenable_rows() {
             assert!(worktree_target(row, WorktreeKey::Path, &[]).is_none());
-            assert!(worktree_target(row, WorktreeKey::Workspace, &managed).is_none());
         }
+    }
+
+    #[test]
+    fn removing_still_offers_a_prunable_worktree_herdr_manages() {
+        let ids: Vec<String> = unopenable_rows()
+            .iter()
+            .filter_map(|r| worktree_target(r, WorktreeKey::Workspace, &managed()))
+            .map(|t| t.id)
+            .collect();
+        assert_eq!(ids, vec!["w2"]);
     }
 }
