@@ -143,7 +143,12 @@ def visible(painted: str) -> str:
 
 class Palette:
     def __init__(
-        self, stub: Path, log: Path, errlog: Path, config: Path | None = None
+        self,
+        stub: Path,
+        log: Path,
+        errlog: Path,
+        config: Path | None = None,
+        columns: int = COLUMNS,
     ):
         env = dict(
             os.environ,
@@ -170,7 +175,7 @@ class Palette:
         # Sized because a pty.fork() terminal starts at 0x0 and ratatui draws
         # nothing into an empty area — the palette would appear to render nothing.
         fcntl.ioctl(
-            self.fd, termios.TIOCSWINSZ, struct.pack("HHHH", ROWS, COLUMNS, 0, 0)
+            self.fd, termios.TIOCSWINSZ, struct.pack("HHHH", ROWS, columns, 0, 0)
         )
         os.set_blocking(self.fd, False)
         self.painted = ""
@@ -587,6 +592,7 @@ def opened_with_settings(
     ready: str = READY_MARKER,
     stub_body: str = ACCEPTS,
     catalog: str | None = None,
+    columns: int = COLUMNS,
 ) -> str:
     """What the palette draws on opening with `settings` as its settings.toml,
     or with none at all. `ready` is matched with whitespace removed, because a
@@ -600,13 +606,20 @@ def opened_with_settings(
         (config / "settings.toml").write_text(settings)
     if catalog is not None:
         (config / "catalog.toml").write_text(catalog)
-    palette = Palette(stub, log, scratch / f"{name}.stderr", config)
+    palette = Palette(stub, log, scratch / f"{name}.stderr", config, columns)
     try:
         if not palette.wait_until_squeezed("".join(ready.split()), READY_TIMEOUT):
             return ""
         return visible(palette.painted)
     finally:
         palette.close()
+
+
+def notes_on_one_row(scratch: Path, name: str) -> int:
+    """A pane wide enough for every startup note on one row: the settings
+    note quotes the scratch path, and a status past three rows is cut (#144).
+    200 covers the notes' own text, path aside."""
+    return len(str(scratch / f"config-{name}" / "settings.toml")) + 200
 
 
 def icons_follow_settings(scratch: Path) -> bool:
@@ -632,7 +645,11 @@ def icons_follow_settings(scratch: Path) -> bool:
     )
 
     broken = opened_with_settings(
-        scratch, "settings-broken", "icon = false\n", ready="using defaults"
+        scratch,
+        "settings-broken",
+        "icon = false\n",
+        ready="using defaults",
+        columns=notes_on_one_row(scratch, "settings-broken"),
     )
     squeezed = "".join(broken.split())
     passed &= check(
@@ -672,6 +689,7 @@ def every_footer_note_is_kept(scratch: Path) -> bool:
         ready="using defaults",
         stub_body=ACCEPTS.replace(f"herdr {STUB_VERSION}", "herdr 0.1.0"),
         catalog=ONE_SKIPPED,
+        columns=notes_on_one_row(scratch, "all-notes"),
     )
     squeezed = "".join(drew.split())
     passed = True
