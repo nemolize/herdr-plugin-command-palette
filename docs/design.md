@@ -590,7 +590,11 @@ the error envelope changed between them:
 | herdr | Envelope | Matched on |
 |---|---|---|
 | 0.8.2 | `plugin_pane_open_failed`, `popup already open` | The message — the code is generic and also covers failures that must not be read as a collision |
-| 0.9.x | `ui_busy`, `a popup pane is already open` | The code — it is specific to the collision, and the message no longer contains the 0.8.2 wording |
+| 0.9.x | `ui_busy`, `a popup pane is already open` | The code — the message no longer contains the 0.8.2 wording, and the popup message is the only one 0.9.3 is seen pairing with `ui_busy` |
+
+herdr's API schema types `code` as a free-form string, so nothing guarantees
+`ui_busy` stays exclusive to the popup. Should another busy state reuse it, the
+hop reports a popup collision for it — still exit 1, still touching nothing.
 
 Both are checked on every press, since the manifest's `min_herdr_version` still
 admits 0.8.2. Any other envelope, including `plugin_pane_open_failed` with

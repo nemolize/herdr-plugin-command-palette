@@ -56,6 +56,21 @@ exit 0""",
         0,
         "",
     ),
+    (
+        "exit 0 without a result",
+        """echo '{}'
+exit 0""",
+        1,
+        "command palette: could not open the palette (exit 0): {}\n",
+    ),
+    (
+        "output that is not JSON",
+        """echo "error: unrecognized subcommand 'pane'" >&2
+exit 2""",
+        1,
+        "command palette: could not open the palette (exit 2): "
+        "error: unrecognized subcommand 'pane'\n",
+    ),
 ]
 
 
