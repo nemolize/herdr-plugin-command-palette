@@ -20,32 +20,36 @@ HOP = REPO / "herdr" / "open.sh"
 
 COLLISION = "command palette: a popup is already open (press Esc in it to close)\n"
 
+
+def error_stub(code: str, message: str) -> str:
+    return (
+        f"""echo '{{"error":{{"code":"{code}","message":"{message}"}},"id":"cli:plugin"}}' >&2\n"""
+        "exit 1"
+    )
+
+
 CASES = [
     (
         "0.9 collision",
-        """echo '{"error":{"code":"ui_busy","message":"a popup pane is already open"},"id":"cli:plugin"}' >&2
-exit 1""",
+        error_stub("ui_busy", "a popup pane is already open"),
         1,
         COLLISION,
     ),
     (
         "0.8.2 collision",
-        """echo '{"error":{"code":"plugin_pane_open_failed","message":"popup already open"},"id":"cli:plugin"}' >&2
-exit 1""",
+        error_stub("plugin_pane_open_failed", "popup already open"),
         1,
         COLLISION,
     ),
     (
         "other failure under the 0.8.2 generic code",
-        """echo '{"error":{"code":"plugin_pane_open_failed","message":"plugin popup disappeared"},"id":"cli:plugin"}' >&2
-exit 1""",
+        error_stub("plugin_pane_open_failed", "plugin popup disappeared"),
         1,
         "command palette: plugin popup disappeared\n",
     ),
     (
         "other failure under another code",
-        """echo '{"error":{"code":"invalid_plugin_entrypoint","message":"invalid entrypoint id"},"id":"cli:plugin"}' >&2
-exit 1""",
+        error_stub("invalid_plugin_entrypoint", "invalid entrypoint id"),
         1,
         "command palette: invalid entrypoint id\n",
     ),
@@ -55,6 +59,14 @@ exit 1""",
 exit 0""",
         0,
         "",
+    ),
+    (
+        "a result under a non-zero exit",
+        """echo '{"id":"cli:plugin","result":{"type":"ok"}}'
+exit 1""",
+        1,
+        "command palette: could not open the palette (exit 1): "
+        '{"id":"cli:plugin","result":{"type":"ok"}}\n',
     ),
     (
         "exit 0 without a result",
