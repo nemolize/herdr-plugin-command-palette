@@ -241,7 +241,7 @@ fn render(f: &mut Frame, app: &mut App) {
             })
             .collect();
         f.render_stateful_widget(
-            List::new(items).highlight_symbol("▶ "),
+            List::new(items).highlight_symbol(HIGHLIGHT_SYMBOL),
             list_area,
             &mut app.selection.state,
         );
@@ -259,7 +259,11 @@ fn render(f: &mut Frame, app: &mut App) {
 /// Columns the `> ` prefix takes from the input line.
 const PROMPT_COLUMNS: u16 = 2;
 
-/// Columns the list's own `▶ ` highlight symbol takes from every row.
+/// East Asian Width `N`, like the icons (docs/design.md §4): `▶` is `A`, which a
+/// CJK-locale terminal draws double and would push the selected row out of line.
+const HIGHLIGHT_SYMBOL: &str = "▸ ";
+
+/// Columns [`HIGHLIGHT_SYMBOL`] takes from every row.
 const HIGHLIGHT_COLUMNS: u16 = 2;
 
 const ICON_GAP: u16 = 1;
@@ -489,7 +493,7 @@ mod render_tests {
         let mut app = app_with_key("New tab", "prefix+c");
         let lines = draw(&mut app, 36, 8);
         let row = lines.iter().find(|l| l.contains("New tab")).unwrap();
-        assert!(row.starts_with("▶ ▭ New tab"), "{lines:#?}");
+        assert!(row.starts_with("▸ ▭ New tab"), "{lines:#?}");
         assert!(row.ends_with("prefix+c"), "{lines:#?}");
         assert_eq!(row.chars().count(), 36, "{row:?} in {lines:#?}");
     }
@@ -501,7 +505,7 @@ mod render_tests {
         let mut app = app_with_key("New tab", "");
         let lines = draw(&mut app, 36, 8);
         let row = lines.iter().find(|l| l.contains("New tab")).unwrap();
-        assert_eq!(row, "▶ ▭ New tab", "{lines:#?}");
+        assert_eq!(row, "▸ ▭ New tab", "{lines:#?}");
 
         // The drawn row cannot tell padding from absence — a buffer trims its
         // trailing blanks either way — so the line's own spans are the oracle.
@@ -517,7 +521,7 @@ mod render_tests {
         let lines = draw(&mut app, 24, 8);
         let row = lines.iter().find(|l| l.contains("Rename")).unwrap();
         assert!(!row.contains("prefix"), "key survived a clip: {lines:#?}");
-        assert!(row.starts_with("▶ ▭ Rename workspace…"), "{lines:#?}");
+        assert!(row.starts_with("▸ ▭ Rename workspace…"), "{lines:#?}");
     }
 
     /// A catalog is user-editable and a plugin's title is another author's, so
@@ -529,22 +533,32 @@ mod render_tests {
         assert!(!line.spans.is_empty());
     }
 
+    /// Issue #110: every row is laid out against `HIGHLIGHT_COLUMNS`, so a marker
+    /// a CJK-locale terminal draws wider shifts the selected row alone.
+    #[test]
+    fn the_highlight_symbol_takes_its_columns_in_every_locale() {
+        use unicode_width::UnicodeWidthStr;
+        assert_eq!(drawn_width(HIGHLIGHT_SYMBOL), HIGHLIGHT_COLUMNS);
+        assert_eq!(HIGHLIGHT_SYMBOL.width(), HIGHLIGHT_COLUMNS as usize);
+        assert_eq!(HIGHLIGHT_SYMBOL.width_cjk(), HIGHLIGHT_COLUMNS as usize);
+    }
+
     /// The key must clear the title by the full gap rather than abut it, or the
     /// two read as one string at exactly the width where the row is fullest.
     #[test]
     fn a_key_that_only_just_fits_still_clears_the_title() {
-        // `▶ ` + `▭ ` + `New tab` + the gap + `prefix+c`.
+        // `▸ ` + `▭ ` + `New tab` + the gap + `prefix+c`.
         let exact = 2 + 2 + 7 + 2 + 8;
 
         let mut app = app_with_key("New tab", "prefix+c");
         let lines = draw(&mut app, exact, 8);
         let row = lines.iter().find(|l| l.contains("New tab")).unwrap();
-        assert_eq!(row, "▶ ▭ New tab  prefix+c", "{lines:#?}");
+        assert_eq!(row, "▸ ▭ New tab  prefix+c", "{lines:#?}");
 
         let mut app = app_with_key("New tab", "prefix+c");
         let lines = draw(&mut app, exact - 1, 8);
         let row = lines.iter().find(|l| l.contains("New tab")).unwrap();
-        assert_eq!(row, "▶ ▭ New tab", "{lines:#?}");
+        assert_eq!(row, "▸ ▭ New tab", "{lines:#?}");
     }
 
     /// A target has no shortcut of its own, so the stage that picks one must
@@ -638,7 +652,7 @@ mod render_tests {
         let mut app = App::new(candidates, Frecency::load(Path::new("/nonexistent")));
 
         let expected: [[&str; 7]; 7] = [
-            ["▶", " ", "◫", " ", "P", "a", "n"],
+            ["▸", " ", "◫", " ", "P", "a", "n"],
             [" ", " ", "▭", " ", "T", "a", "b"],
             [" ", " ", "⬚", " ", "W", "o", "r"],
             [" ", " ", "↻", " ", "S", "r", "v"],
@@ -657,7 +671,7 @@ mod render_tests {
         let mut c = entry("p", "Pane", &["pane", "close"]);
         c.icon = Some("✕".into());
         let mut app = app_with(vec![c]);
-        assert_eq!(cells(&mut app, 6, 8, 1), ["▶", " ", "✕", " ", "P", "a"]);
+        assert_eq!(cells(&mut app, 6, 8, 1), ["▸", " ", "✕", " ", "P", "a"]);
     }
 
     /// `icons = false` must give back exactly the row this change started from.
@@ -665,9 +679,9 @@ mod render_tests {
     fn switched_off_icons_leave_the_row_as_it_was() {
         let mut app = app_with_key("New tab", "prefix+c");
         app.icons = false;
-        // `▶ ` + `New tab` + the gap + `prefix+c`: the width the key just fits.
+        // `▸ ` + `New tab` + the gap + `prefix+c`: the width the key just fits.
         let lines = draw(&mut app, 19, 8);
-        assert_eq!(lines[1], "▶ New tab  prefix+c", "{lines:#?}");
+        assert_eq!(lines[1], "▸ New tab  prefix+c", "{lines:#?}");
     }
 
     /// At §5's ~36-column floor the title clips, not the icon — whole clusters
@@ -678,7 +692,7 @@ mod render_tests {
         let mut app = app_with(vec![entry("p", &title, &["pane", "zoom"])]);
         let row = cells(&mut app, 36, 8, 1);
 
-        let mut want = vec!["▶", " ", "◫", " ", "a"];
+        let mut want = vec!["▸", " ", "◫", " ", "a"];
         for _ in 0..15 {
             want.extend(["あ", " "]);
         }
@@ -698,7 +712,7 @@ mod render_tests {
             }],
         );
         let lines = draw(&mut app, 36, 8);
-        assert_eq!(lines[2], "▶ editor", "{lines:#?}");
+        assert_eq!(lines[2], "▸ editor", "{lines:#?}");
     }
 
     /// The icon is drawn beside the title, not part of what the filter reads.
