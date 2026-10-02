@@ -368,7 +368,7 @@ fn argv(outcome: Outcome) -> (String, Vec<String>) {
 }
 
 fn outdated_note(actual: &str, required: &str) -> String {
-    format!("herdr {actual} is older than the catalog's {required} - some entries may fail")
+    format!("herdr {actual} < catalog {required} - some entries may fail")
 }
 
 fn skipped_note(count: usize) -> String {
@@ -385,7 +385,7 @@ mod tests {
         for note in [
             outdated_note("0.1.0", "0.2.0"),
             skipped_note(2),
-            settings::unusable(std::path::Path::new("settings.toml"), "bad"),
+            settings::unusable("bad"),
         ] {
             assert!(glyph::same_width_in_every_locale(&note), "{note}");
         }
