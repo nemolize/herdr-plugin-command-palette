@@ -271,14 +271,7 @@ fn read_response(stdout: &[u8], stderr: &[u8]) -> Result<serde_json::Value, Stri
     let parsed = serde_json::from_slice::<Envelope>(stdout)
         .or_else(|_| serde_json::from_slice::<Envelope>(stderr));
     let body: Envelope = parsed.map_err(|_| {
-        // Preferred over stdout because a herdr that failed before writing its
-        // envelope says why on stderr, and stdout is then empty or a fragment.
-        let stderr = String::from_utf8_lossy(stderr);
-        let text = if stderr.trim().is_empty() {
-            String::from_utf8_lossy(stdout).trim().to_string()
-        } else {
-            stderr.trim().to_string()
-        };
+        let text = what_herdr_said(stdout, stderr);
         if text.is_empty() {
             "herdr returned no output".to_string()
         } else {
@@ -289,8 +282,23 @@ fn read_response(stdout: &[u8], stderr: &[u8]) -> Result<serde_json::Value, Stri
     if let Some(err) = body.error {
         return Err(err.message);
     }
-    body.result
-        .ok_or_else(|| "herdr returned no result".to_string())
+    body.result.ok_or_else(|| {
+        format!(
+            "herdr returned no result: {}",
+            what_herdr_said(stdout, stderr)
+        )
+    })
+}
+
+/// A herdr that went wrong says why on stderr, and stdout is then empty, a
+/// fragment or the envelope.
+fn what_herdr_said(stdout: &[u8], stderr: &[u8]) -> String {
+    let stderr = String::from_utf8_lossy(stderr);
+    if stderr.trim().is_empty() {
+        String::from_utf8_lossy(stdout).trim().to_string()
+    } else {
+        stderr.trim().to_string()
+    }
 }
 
 #[cfg(test)]
@@ -353,7 +361,34 @@ mod tests {
     #[test]
     fn an_envelope_with_neither_result_nor_error_is_a_failure() {
         let err = read_response(b"{}", b"").expect_err("an empty envelope is a failure");
-        assert_eq!(err, "herdr returned no result");
+        assert_eq!(err, "herdr returned no result: {}");
+    }
+
+    /// What herdr said on stderr is the likelier cause than the envelope's
+    /// shape, so it is what goes beside the generic message.
+    #[test]
+    fn an_envelope_with_neither_half_reports_stderr() {
+        let err = read_response(br#"{"id":"1"}"#, b"warning: socket closed early\n")
+            .expect_err("an empty envelope is a failure");
+        assert_eq!(
+            err,
+            "herdr returned no result: warning: socket closed early"
+        );
+    }
+
+    /// A stdout fragment beside it is not what went wrong; the envelope is.
+    #[test]
+    fn an_envelope_with_neither_half_on_stderr_reports_the_json() {
+        let err = read_response(b"partial", b"{\"id\":\"1\"}\n")
+            .expect_err("an empty envelope is a failure");
+        assert_eq!(err, r#"herdr returned no result: {"id":"1"}"#);
+    }
+
+    #[test]
+    fn an_envelope_with_neither_half_and_silent_stderr_reports_the_json() {
+        let err = read_response(b"{\"id\":\"1\"}\n", b"  \n")
+            .expect_err("an empty envelope is a failure");
+        assert_eq!(err, r#"herdr returned no result: {"id":"1"}"#);
     }
 
     fn action(platforms: &[&str]) -> PluginAction {
