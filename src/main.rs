@@ -5,6 +5,7 @@ mod catalog;
 mod context;
 mod frecency;
 mod fuzzy;
+mod glyph;
 mod herdr;
 mod keys;
 mod listing;

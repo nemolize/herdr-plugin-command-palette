@@ -185,6 +185,8 @@ pub fn is_older(actual: &str, required: &str) -> Option<bool> {
 
 #[cfg(test)]
 mod tests {
+    use unicode_width::UnicodeWidthStr;
+
     use super::{is_older, Catalog, Command, WorktreeKey};
 
     fn shipped() -> Catalog {
@@ -214,6 +216,15 @@ mod tests {
                     e.id
                 );
             }
+        }
+    }
+
+    /// Issue #138: `width_cjk` counts an East Asian Ambiguous character as two
+    /// cells, so any one in a shipped title (`…` was) makes the two disagree.
+    #[test]
+    fn no_shipped_title_widens_in_a_cjk_locale() {
+        for e in &shipped().commands {
+            assert_eq!(e.title.width(), e.title.width_cjk(), "{}", e.title);
         }
     }
 

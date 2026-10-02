@@ -13,6 +13,7 @@ use ratatui::widgets::{List, ListItem, Paragraph, Wrap};
 use unicode_segmentation::UnicodeSegmentation;
 
 use crate::app::{App, Stage, Step};
+use crate::glyph::{CURSOR, SEPARATOR};
 
 /// Restores the terminal on drop, so an error path cannot leave the pane in raw
 /// mode with the alternate screen still up.
@@ -312,8 +313,6 @@ fn row_line(icon: Option<&str>, title: &str, key: &str, width: u16) -> Line<'sta
 /// makes clipping it away with the text unreachable rather than a calculation
 /// to keep honest.
 fn render_input(f: &mut Frame, text: &str, area: Rect) {
-    const CURSOR: &str = "▏";
-
     if area.width == 0 {
         return;
     }
@@ -387,8 +386,8 @@ fn render_footer(f: &mut Frame, app: &App, area: Rect) {
     };
     // The typing stage lists nothing, so counts there would read 0/0.
     let counts = match app.stage {
-        Stage::Prompt { .. } => format!("enter to run · {esc}"),
-        _ => format!("{}/{} · {esc}", app.shown(), app.total()),
+        Stage::Prompt { .. } => format!("enter to run{SEPARATOR}{esc}"),
+        _ => format!("{}/{}{SEPARATOR}{esc}", app.shown(), app.total()),
     };
     f.render_widget(Paragraph::new(footer(&counts, area.width)).dim(), area);
 }
@@ -517,11 +516,11 @@ mod render_tests {
     /// the title is what the user is searching by.
     #[test]
     fn a_row_too_narrow_for_both_drops_the_key_not_the_title() {
-        let mut app = app_with_key("Rename workspace…", "prefix+shift+w");
+        let mut app = app_with_key("Rename workspace...", "prefix+shift+w");
         let lines = draw(&mut app, 24, 8);
         let row = lines.iter().find(|l| l.contains("Rename")).unwrap();
         assert!(!row.contains("prefix"), "key survived a clip: {lines:#?}");
-        assert!(row.starts_with("▸ ▭ Rename workspace…"), "{lines:#?}");
+        assert!(row.starts_with("▸ ▭ Rename workspace..."), "{lines:#?}");
     }
 
     /// A catalog is user-editable and a plugin's title is another author's, so
@@ -565,7 +564,7 @@ mod render_tests {
     /// not carry the keys of the command list it came from.
     #[test]
     fn the_targets_stage_shows_no_keys() {
-        let picked = command("focus.tab", "Focus tab…", Some("tabs"));
+        let picked = command("focus.tab", "Focus tab...", Some("tabs"));
         let mut candidate = Candidate::from_command(picked.clone());
         candidate.key = "prefix+shift+t".to_string();
         let mut app = App::new(vec![candidate], Frecency::load(Path::new("/nonexistent")));
@@ -600,7 +599,7 @@ mod render_tests {
     /// visible from inside the pane.
     #[test]
     fn targets_stage_names_the_selected_command() {
-        let picked = command("focus.tab", "Focus tab…", Some("tabs"));
+        let picked = command("focus.tab", "Focus tab...", Some("tabs"));
         let mut app = app_with(vec![picked.clone()]);
         app.enter_targets(
             picked,
@@ -610,7 +609,7 @@ mod render_tests {
             }],
         );
         let lines = draw(&mut app, 36, 8);
-        assert_eq!(lines[0], "Focus tab…", "{lines:#?}");
+        assert_eq!(lines[0], "Focus tab...", "{lines:#?}");
         assert_eq!(lines[1], ">", "{lines:#?}");
     }
 
@@ -702,7 +701,7 @@ mod render_tests {
 
     #[test]
     fn the_targets_stage_shows_no_icons() {
-        let picked = entry("focus.tab", "Focus tab…", &["tab", "focus", "{}"]);
+        let picked = entry("focus.tab", "Focus tab...", &["tab", "focus", "{}"]);
         let mut app = app_with(vec![picked.clone()]);
         app.enter_targets(
             picked,
@@ -763,7 +762,7 @@ mod render_tests {
         let lines = draw(&mut app, 36, 8);
         let footer = lines.last().unwrap();
         assert!(
-            footer.starts_with("1/1 · esc to close"),
+            footer.starts_with("1/1 ⋅ esc to close"),
             "counts kept their place: {lines:#?}"
         );
         assert!(
@@ -788,7 +787,7 @@ mod render_tests {
     /// the right of that one too.
     #[test]
     fn the_targets_stage_footer_carries_the_version() {
-        let picked = command("focus.tab", "Focus tab…", Some("tabs"));
+        let picked = command("focus.tab", "Focus tab...", Some("tabs"));
         let mut app = app_with(vec![picked.clone()]);
         app.enter_targets(
             picked,
@@ -799,7 +798,7 @@ mod render_tests {
         );
         let lines = draw(&mut app, 36, 8);
         let footer = lines.last().unwrap();
-        assert!(footer.starts_with("1/1 · esc to go back"), "{lines:#?}");
+        assert!(footer.starts_with("1/1 ⋅ esc to go back"), "{lines:#?}");
         assert!(
             footer.ends_with(&format!("v{}", env!("CARGO_PKG_VERSION"))),
             "{lines:#?}"
@@ -810,7 +809,7 @@ mod render_tests {
     /// the user can read what the input is asking for.
     #[test]
     fn the_prompt_stage_names_what_it_is_asking_for() {
-        let mut picked = command("tab.rename", "Rename tab…", None);
+        let mut picked = command("tab.rename", "Rename tab...", None);
         picked.args = vec![
             "tab".into(),
             "rename".into(),
@@ -828,7 +827,7 @@ mod render_tests {
             lines
                 .last()
                 .unwrap()
-                .starts_with("enter to run · esc to go back"),
+                .starts_with("enter to run ⋅ esc to go back"),
             "{lines:#?}"
         );
     }
@@ -844,84 +843,84 @@ mod render_tests {
                 "short name",
                 "ab",
                 8,
-                &[">", " ", "a", "b", "▏", " ", " ", " "],
+                &[">", " ", "a", "b", "⎸", " ", " ", " "],
             ),
             (
                 "clipped to the tail, cursor after it",
                 "abcdef",
                 6,
-                &[">", " ", "d", "e", "f", "▏"],
+                &[">", " ", "d", "e", "f", "⎸"],
             ),
             (
                 "a wide glyph owns two cells, the second its continuation",
                 "あい",
                 8,
-                &[">", " ", "あ", " ", "い", " ", "▏", " "],
+                &[">", " ", "あ", " ", "い", " ", "⎸", " "],
             ),
             (
                 "clipped between wide glyphs, never inside one",
                 "あいう",
                 6,
-                &[">", " ", "う", " ", "▏", " "],
+                &[">", " ", "う", " ", "⎸", " "],
             ),
             (
                 "one cluster of width 2 — the case Line::width reports as 1",
                 "ｶﾞ",
                 6,
-                &[">", " ", "ｶﾞ", " ", "▏", " "],
+                &[">", " ", "ｶﾞ", " ", "⎸", " "],
             ),
             (
                 "the cursor glyph typed as a name is still just text",
-                "▏▏",
+                "⎸⎸",
                 8,
-                &[">", " ", "▏", "▏", "▏", " ", " ", " "],
+                &[">", " ", "⎸", "⎸", "⎸", " ", " ", " "],
             ),
             (
                 "a combining mark rides with the letter it sits on",
                 "e\u{301}",
                 8,
-                &[">", " ", "e\u{301}", "▏", " ", " ", " ", " "],
+                &[">", " ", "e\u{301}", "⎸", " ", " ", " ", " "],
             ),
             (
                 "a variation selector rides with its base — round 5's U+FE01",
                 "\u{2018}\u{FE01}",
                 8,
-                &[">", " ", "‘\u{FE01}", " ", "▏", " ", " ", " "],
+                &[">", " ", "‘\u{FE01}", " ", "⎸", " ", " ", " "],
             ),
             (
                 "a ZWJ sequence is one cluster — round 4's family emoji",
                 "\u{1F469}\u{200D}\u{1F4BB}",
                 8,
-                &[">", " ", "👩\u{200D}💻", " ", "▏", " ", " ", " "],
+                &[">", " ", "👩\u{200D}💻", " ", "⎸", " ", " ", " "],
             ),
             (
                 "a skin tone rides with its base — round 4's bare swatch",
                 "\u{1F44D}\u{1F3FD}",
                 8,
-                &[">", " ", "👍🏽", " ", "▏", " ", " ", " "],
+                &[">", " ", "👍🏽", " ", "⎸", " ", " ", " "],
             ),
             (
                 "a flag is one cluster, never half a letter",
                 "\u{1F1EF}\u{1F1F5}",
                 8,
-                &[">", " ", "🇯🇵", " ", "▏", " ", " ", " "],
+                &[">", " ", "🇯🇵", " ", "⎸", " ", " ", " "],
             ),
             (
                 "emoji presentation is drawn wide — round 3's U+FE0F",
                 "\u{2764}\u{FE0F}",
                 8,
-                &[">", " ", "❤\u{FE0F}", " ", "▏", " ", " ", " "],
+                &[">", " ", "❤\u{FE0F}", " ", "⎸", " ", " ", " "],
             ),
             (
                 "a control character has no width and is not drawn",
                 "a\tb",
                 8,
-                &[">", " ", "a", "b", "▏", " ", " ", " "],
+                &[">", " ", "a", "b", "⎸", " ", " ", " "],
             ),
         ];
 
         for (what, name, width, expected) in cases {
-            let mut picked = command("tab.rename", "Rename tab…", None);
+            let mut picked = command("tab.rename", "Rename tab...", None);
             picked.args = vec!["tab".into(), "rename".into(), "t1".into(), "{text}".into()];
             picked.prompt = Some("N".into());
             let mut app = app_with(vec![picked.clone()]);
@@ -941,7 +940,7 @@ mod render_tests {
     #[test]
     fn a_pane_too_narrow_for_the_prefix_still_shows_a_cursor() {
         for width in 1..=3u16 {
-            let mut picked = command("tab.rename", "Rename tab…", None);
+            let mut picked = command("tab.rename", "Rename tab...", None);
             picked.args = vec!["tab".into(), "rename".into(), "t1".into(), "{text}".into()];
             picked.prompt = Some("N".into());
             let mut app = app_with(vec![picked.clone()]);
@@ -952,7 +951,7 @@ mod render_tests {
             let buffer = terminal.backend().buffer();
             let row: String = (0..width).map(|x| buffer[(x, 1)].symbol()).collect();
 
-            assert!(row.contains('▏'), "width {width} drew no cursor: {row:?}");
+            assert!(row.contains('⎸'), "width {width} drew no cursor: {row:?}");
         }
     }
 
@@ -981,7 +980,7 @@ mod render_tests {
     /// read `0/0` here — an empty result rather than a stage with no list.
     #[test]
     fn the_prompt_stage_shows_no_counts() {
-        let mut picked = command("pane.rename", "Rename pane…", None);
+        let mut picked = command("pane.rename", "Rename pane...", None);
         picked.args = vec![
             "pane".into(),
             "rename".into(),
@@ -1069,7 +1068,7 @@ mod render_tests {
     /// than either half being truncated.
     #[test]
     fn a_pane_too_narrow_for_both_drops_the_version() {
-        let counts = "1/1 · esc to close";
+        let counts = "1/1 ⋅ esc to close";
         let version_width = 1 + env!("CARGO_PKG_VERSION").chars().count();
         let one_column_short = counts.chars().count() + version_width;
 
@@ -1100,7 +1099,7 @@ mod render_tests {
             .count();
         assert_eq!(listed, 2, "Commands: {lines:#?}");
 
-        let picked = command("focus.tab", "Focus tab…", Some("tabs"));
+        let picked = command("focus.tab", "Focus tab...", Some("tabs"));
         let mut app = app_with(vec![picked.clone()]);
         app.enter_targets(
             picked,

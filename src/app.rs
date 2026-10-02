@@ -2,6 +2,7 @@
 
 use crate::catalog::Command;
 use crate::frecency::Frecency;
+use crate::glyph::SEPARATOR;
 use crate::herdr::PluginAction;
 use crate::listing::Target;
 use crate::selection::Selection;
@@ -161,7 +162,7 @@ impl App {
     /// hides an earlier one.
     pub fn add_status(&mut self, note: String) {
         self.status = Some(match self.status.take() {
-            Some(earlier) => format!("{earlier} · {note}"),
+            Some(earlier) => format!("{earlier}{SEPARATOR}{note}"),
             None => note,
         });
     }
@@ -486,7 +487,7 @@ mod tests {
         assert_eq!(app.status.as_deref(), Some("first"));
         app.add_status("second".into());
         app.add_status("third".into());
-        assert_eq!(app.status.as_deref(), Some("first · second · third"));
+        assert_eq!(app.status.as_deref(), Some("first ⋅ second ⋅ third"));
     }
 
     #[test]
@@ -629,7 +630,7 @@ mod tests {
     fn renamer() -> Cmd {
         let mut c = cmd(
             "tab.rename",
-            "Rename tab…",
+            "Rename tab...",
             &["tab", "rename", "w3Y:t1", "{text}"],
             None,
         );
@@ -732,7 +733,7 @@ mod tests {
     fn a_name_the_command_would_read_as_a_flag_is_refused() {
         let mut c = cmd(
             "pane.rename",
-            "Rename pane…",
+            "Rename pane...",
             &["pane", "rename", "w3Y:p1", "{text}"],
             None,
         );
@@ -799,7 +800,7 @@ mod tests {
     fn esc_leaves_the_prompt_without_closing_the_palette() {
         let mut app = at_prompt("herdr");
         assert!(app.leave_stage());
-        assert_eq!(app.rows(), vec!["Rename tab…"]);
+        assert_eq!(app.rows(), vec!["Rename tab..."]);
         assert!(!app.leave_stage());
     }
 
@@ -828,7 +829,7 @@ mod tests {
     fn editing_the_name_clears_a_stale_refusal() {
         let mut c = cmd(
             "pane.rename",
-            "Rename pane…",
+            "Rename pane...",
             &["pane", "rename", "w3Y:p1", "{text}"],
             None,
         );
@@ -850,7 +851,7 @@ mod tests {
         app.push_text('z');
         assert!(app.query().is_empty());
         app.leave_stage();
-        assert_eq!(app.rows(), vec!["Rename tab…"], "list intact");
+        assert_eq!(app.rows(), vec!["Rename tab..."], "list intact");
     }
 
     #[test]
