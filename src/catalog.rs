@@ -551,7 +551,8 @@ mod tests {
                 .unwrap_or_else(|| panic!("{bad:?} was accepted"));
             assert!(why.contains(reason), "{bad:?}: {why}");
         }
-        for good in ["✕", "e\u{301}", "!"] {
+        // A lone halfwidth sound mark is `H`: one cell to ratatui and to any terminal.
+        for good in ["✕", "e\u{301}", "!", "\u{FF9E}"] {
             assert_eq!(
                 super::rejection(&entry_with_icon(&["pane", "close"], Some(good))),
                 None,

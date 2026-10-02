@@ -12,8 +12,8 @@ pub const SEPARATOR: &str = " ⋅ ";
 /// Not `▏`, which is `A`.
 pub const CURSOR: &str = "⎸";
 
-/// Whether `text` takes as many cells in a CJK-locale terminal as ratatui lays
-/// out for it, i.e. holds no East Asian Ambiguous character.
+/// Whether `text` holds no East Asian Ambiguous character: its width is the
+/// same whether Ambiguous characters count as one cell or two.
 pub fn same_width_in_every_locale(text: &str) -> bool {
     text.width() == text.width_cjk()
 }
