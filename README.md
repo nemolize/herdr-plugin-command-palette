@@ -229,8 +229,10 @@ mkdir -p bin && cp target/release/herdr-command-palette bin/
 herdr plugin link .
 ```
 
-`just` runs the checks CI runs. Design rationale — every measurement and every
-rejected alternative — is in [`docs/design.md`](docs/design.md).
+`just` runs the checks CI runs except the ones needing a fetched herdr and the
+`cargo deny` audit; [`docs/ci.md`](docs/ci.md) has what runs where. Design
+rationale — every measurement and every rejected alternative — is in
+[`docs/design.md`](docs/design.md).
 
 ## License
 
