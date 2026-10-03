@@ -245,7 +245,15 @@ def resolved_args(entry: dict, ids: dict[str, str]) -> list[str]:
     return [table.get(a, a) for a in args]
 
 
-def note_if_pin_disagrees_with_running_herdr(checked_against: str | None) -> None:
+def running_herdr_version() -> str | None:
+    proc = subprocess.run([HERDR, "--version"], capture_output=True, text=True)
+    words = proc.stdout.split() if proc.returncode == 0 else []
+    return words[-1] if words else None
+
+
+def note_if_pin_disagrees_with_running_herdr(
+    checked_against: str | None, running: str | None
+) -> None:
     """Say so when the catalog's pin names a different herdr than the one that ran.
 
     Not an error — the entries either run here or they do not, and that verdict
@@ -253,14 +261,19 @@ def note_if_pin_disagrees_with_running_herdr(checked_against: str | None) -> Non
     checked on leaves `checked_against` behind what has actually been verified,
     and nothing else in the run would say so.
     """
-    proc = subprocess.run([HERDR, "--version"], capture_output=True, text=True)
-    running = proc.stdout.split()[-1] if proc.returncode == 0 and proc.stdout else None
     if checked_against and running and running != checked_against:
         print(
             f"note: catalog says checked_against = {checked_against}, "
             f"running herdr {running}",
             file=sys.stderr,
         )
+
+
+def success_line(count: int, checked_against: str | None, running: str | None) -> str:
+    line = f"all {count} catalog entries ran against herdr {running or '(version unknown)'}"
+    if checked_against and running != checked_against:
+        line += f" (catalog checked_against = {checked_against})"
+    return line
 
 
 def report_rejected(rejected: list[tuple[str, list[str], int, str]]) -> None:
@@ -348,7 +361,9 @@ def main() -> int:
         print(f"no entries in {CATALOG}", file=sys.stderr)
         return 1
 
-    note_if_pin_disagrees_with_running_herdr(catalog.get("checked_against"))
+    checked_against = catalog.get("checked_against")
+    running = running_herdr_version()
+    note_if_pin_disagrees_with_running_herdr(checked_against, running)
 
     FIXTURE_ROOT.mkdir(parents=True, exist_ok=True)
     rejected: list[tuple[str, list[str], int, str]] = []
@@ -411,11 +426,7 @@ def main() -> int:
     if rejected or broken or unknown_bindings:
         return 1
 
-    print(
-        f"\nall {len(entries)} catalog entries ran against herdr "
-        f"{catalog.get('checked_against', '?')}",
-        file=sys.stderr,
-    )
+    print(f"\n{success_line(len(entries), checked_against, running)}", file=sys.stderr)
     return 0
 
 
