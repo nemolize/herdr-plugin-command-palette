@@ -22,3 +22,6 @@ unicode-width = "0.2.2"
 strip = true
 opt-level = "z"
 lto = true
+
+[dev-dependencies]
+proc-macro2 = { version = "1", features = ["span-locations"] }

@@ -11,6 +11,8 @@ mod keys;
 mod listing;
 mod selection;
 mod settings;
+#[cfg(test)]
+mod source_literals;
 mod ui;
 
 use std::path::PathBuf;
@@ -96,7 +98,7 @@ fn targets_for(
 
 fn run() -> Result<(), String> {
     let bin = std::env::var("HERDR_BIN_PATH")
-        .map_err(|_| "HERDR_BIN_PATH is not set — this runs as a herdr plugin pane".to_string())?;
+        .map_err(|_| "HERDR_BIN_PATH is not set - this runs as a herdr plugin pane".to_string())?;
     let plugin_root =
         env_path("HERDR_PLUGIN_ROOT").ok_or_else(|| "HERDR_PLUGIN_ROOT is not set".to_string())?;
     let state_dir = env_path("HERDR_PLUGIN_STATE_DIR");
@@ -141,7 +143,7 @@ fn run() -> Result<(), String> {
         let why = match rejected.is_empty() {
             true => String::new(),
             false => format!(
-                " — skipped {}",
+                " - skipped {}",
                 rejected
                     .iter()
                     .map(|(id, why)| format!("{id}: {why}"))
@@ -378,14 +380,6 @@ fn skipped_note(count: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// Issue #138.
-    #[test]
-    fn the_catalog_notes_take_the_same_cells_in_every_locale() {
-        for note in [outdated_note("0.1.0", "0.2.0"), skipped_note(2)] {
-            assert!(glyph::same_width_in_every_locale(&note), "{note}");
-        }
-    }
 
     /// Both refusals are decided before anything is spawned, so the bin path
     /// is never reached.
