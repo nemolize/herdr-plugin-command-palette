@@ -365,14 +365,18 @@ def pane_rect(entry_id: str, pane: str, home: Path) -> dict:
             f"{entry_id}: herdr pane layout --pane {pane} exited {proc.returncode}: "
             f"{proc.stderr.strip()}"
         )
-    body = parse_envelope(proc.stdout)
+    return layout_rect(entry_id, pane, proc.stdout)
+
+
+def layout_rect(entry_id: str, pane: str, stdout: str) -> dict:
+    body = parse_envelope(stdout)
     result = body.get("result") if body else None
     layout = result.get("layout") if isinstance(result, dict) else None
     rows = layout.get("panes") if isinstance(layout, dict) else None
     if not isinstance(rows, list):
         raise RuntimeError(
             f"{entry_id}: herdr pane layout --pane {pane} answered without a "
-            f"result.layout.panes list: {proc.stdout.strip()[:200]}"
+            f"result.layout.panes list: {stdout.strip()[:200]}"
         )
     row = next((r for r in rows if isinstance(r, dict) and r.get("pane_id") == pane), None)
     if row is None:
