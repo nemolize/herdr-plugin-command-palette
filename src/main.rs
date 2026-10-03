@@ -381,7 +381,7 @@ mod tests {
 
     /// Issue #138.
     #[test]
-    fn every_status_note_takes_the_same_cells_in_every_locale() {
+    fn the_catalog_notes_take_the_same_cells_in_every_locale() {
         for note in [outdated_note("0.1.0", "0.2.0"), skipped_note(2)] {
             assert!(glyph::same_width_in_every_locale(&note), "{note}");
         }

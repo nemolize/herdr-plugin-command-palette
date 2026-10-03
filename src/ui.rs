@@ -577,7 +577,7 @@ mod render_tests {
     /// Issue #110: every row is laid out against `HIGHLIGHT_COLUMNS`, so a marker
     /// a CJK-locale terminal draws wider shifts the selected row alone.
     #[test]
-    fn the_highlight_symbol_takes_its_columns_in_every_locale() {
+    fn the_highlight_symbol_is_drawn_in_its_columns() {
         assert_eq!(drawn_width(HIGHLIGHT_SYMBOL), HIGHLIGHT_COLUMNS);
     }
 
