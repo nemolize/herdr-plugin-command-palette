@@ -190,7 +190,7 @@ fn render(f: &mut Frame, app: &mut App) {
     let reserved = u16::from(header.is_some())
         + INPUT_ROWS
         + if matches!(app.stage, Stage::Prompt { .. }) {
-            0
+            LIST_MIN_ROWS
         } else {
             FLOOR_CANDIDATES
         }
@@ -211,7 +211,7 @@ fn render(f: &mut Frame, app: &mut App) {
     let chunks = Layout::vertical([
         Constraint::Length(if header.is_some() { 1 } else { 0 }),
         Constraint::Length(INPUT_ROWS),
-        Constraint::Min(1),
+        Constraint::Min(LIST_MIN_ROWS),
         Constraint::Length(status_height),
     ])
     .split(f.area());
@@ -272,7 +272,9 @@ fn render(f: &mut Frame, app: &mut App) {
     render_status(f, app, status, status_cut, chunks[3]);
 }
 
-const MAX_STATUS_ROWS: u16 = 3;
+const MAX_STATUS_ROWS: u16 = 4;
+
+const LIST_MIN_ROWS: u16 = 1;
 
 /// A status message never takes these.
 const FLOOR_CANDIDATES: u16 = 2;
@@ -1097,24 +1099,25 @@ mod render_tests {
     }
 
     #[test]
-    fn a_long_status_takes_three_rows_and_says_it_was_cut() {
+    fn a_long_status_takes_four_rows_and_says_it_was_cut() {
         let mut app = app_with(vec![command("split.right", "Split pane: right", None)]);
         app.status = Some(long_error());
         let lines = draw(&mut app, 36, 20);
         assert_eq!(
-            lines[17..],
+            lines[16..],
             [
                 "herdr: error line 0",
                 "herdr: error line 1",
-                "herdr: error line 2...",
+                "herdr: error line 2",
+                "herdr: error line 3...",
             ],
             "{lines:#?}"
         );
-        assert!(!lines[16].contains("herdr"), "{lines:#?}");
+        assert!(!lines[15].contains("herdr"), "{lines:#?}");
     }
 
-    /// Issue #149. The manifest's 60-column popup is 58 inside Herdr's border
-    /// (docs/design.md §5).
+    /// Issues #149 and #154. The manifest's 60-column popup is 58 inside
+    /// Herdr's border, and a narrow device clamps it to 51 (docs/design.md §5).
     #[test]
     fn every_startup_note_fits_whole_inside_the_popup() {
         let notes = [
@@ -1122,17 +1125,19 @@ mod render_tests {
             crate::skipped_note(1),
             crate::settings::unusable("unknown field `icon`, expected `icons`"),
         ];
-        let mut app = app_with(vec![command("split.right", "Split pane: right", None)]);
-        for note in &notes {
-            app.add_status(note.clone());
+        for width in [58, 51] {
+            let mut app = app_with(vec![command("split.right", "Split pane: right", None)]);
+            for note in &notes {
+                app.add_status(note.clone());
+            }
+            let lines = draw(&mut app, width, 20);
+            let shown: String = lines[16..].concat().split_whitespace().collect();
+            for note in &notes {
+                let note: String = note.split_whitespace().collect();
+                assert!(shown.contains(&note), "{note} is not whole in {lines:#?}");
+            }
+            assert!(!shown.ends_with(CUT_MARKER), "{lines:#?}");
         }
-        let lines = draw(&mut app, 58, 20);
-        let shown: String = lines[17..].concat().split_whitespace().collect();
-        for note in &notes {
-            let note: String = note.split_whitespace().collect();
-            assert!(shown.contains(&note), "{note} is not whole in {lines:#?}");
-        }
-        assert!(!shown.ends_with(CUT_MARKER), "{lines:#?}");
     }
 
     /// A cut wide glyph would overprint the marker, so it is blanked instead.
@@ -1152,9 +1157,9 @@ mod render_tests {
     #[test]
     fn a_cut_marker_after_a_short_row_ending_in_a_two_cell_glyph_is_whole() {
         let mut app = app_with(vec![command("split.right", "Split pane: right", None)]);
-        app.status = Some("one\ntwo\nthree ｶ\u{FF9E}\nfour".to_string());
+        app.status = Some("one\ntwo\nthree\nfour ｶ\u{FF9E}\nfive".to_string());
         let lines = draw(&mut app, 36, 20);
-        assert_eq!(lines[19], "three ｶ\u{FF9E} ...", "{lines:#?}");
+        assert_eq!(lines[19], "four ｶ\u{FF9E} ...", "{lines:#?}");
     }
 
     #[test]
@@ -1162,7 +1167,7 @@ mod render_tests {
         let mut app = app_with(vec![command("split.right", "Split pane: right", None)]);
         app.status = Some(format!("first{}last", "\n".repeat(25)));
         let lines = draw(&mut app, 36, 20);
-        assert_eq!(lines[17..], ["first", "", "..."], "{lines:#?}");
+        assert_eq!(lines[16..], ["first", "", "", "..."], "{lines:#?}");
     }
 
     #[test]
@@ -1193,6 +1198,18 @@ mod render_tests {
             ],
             "{lines:#?}"
         );
+    }
+
+    #[test]
+    fn a_four_row_status_while_typing_at_the_floor_is_marked_cut() {
+        let mut picked = command("pane.rename", "Rename pane", None);
+        picked.args = vec!["pane".into(), "rename".into(), "{text}".into()];
+        picked.prompt = Some("New pane name".into());
+        let mut app = app_with(vec![picked.clone()]);
+        app.enter_prompt(picked, String::new());
+        app.status = Some("line 0\nline 1\nline 2\nline 3".to_string());
+        let lines = draw(&mut app, 36, MIN_ROWS);
+        assert_eq!(lines[3..], ["line 0", "line 1", "line 2..."], "{lines:#?}");
     }
 
     /// The floor's two candidates outrank status rows, so there the status is
