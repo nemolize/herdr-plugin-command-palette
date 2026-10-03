@@ -257,9 +257,8 @@ def note_if_pin_disagrees_with_running_herdr(
     """Say so when the catalog's pin names a different herdr than the one that ran.
 
     Not an error — the entries either run here or they do not, and that verdict
-    stands either way. But a green run against a herdr the catalog was never
-    checked on leaves `checked_against` behind what has actually been verified,
-    and nothing else in the run would say so.
+    stands either way. It prints before the entries run, so a red run reports
+    the mismatch too, where the success line never prints.
     """
     if checked_against and running and running != checked_against:
         print(
