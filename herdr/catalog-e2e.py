@@ -408,6 +408,13 @@ def pane_rect(entry_id: str, pane: str, home: Path) -> dict:
     return layout_rect(entry_id, pane, proc.stdout)
 
 
+def is_numeric_rect(rect: object) -> bool:
+    return isinstance(rect, dict) and all(
+        isinstance(rect.get(f), (int, float)) and not isinstance(rect.get(f), bool)
+        for f in RECT_FIELDS
+    )
+
+
 def layout_rect(entry_id: str, pane: str, stdout: str) -> dict:
     body = parse_envelope(stdout)
     result = body.get("result") if body else None
@@ -422,10 +429,7 @@ def layout_rect(entry_id: str, pane: str, stdout: str) -> dict:
     if row is None:
         raise RuntimeError(f"{entry_id}: pane {pane} is missing from its own layout")
     rect = row.get("rect")
-    if not isinstance(rect, dict) or not all(
-        isinstance(rect.get(f), (int, float)) and not isinstance(rect.get(f), bool)
-        for f in RECT_FIELDS
-    ):
+    if not is_numeric_rect(rect):
         raise RuntimeError(
             f"{entry_id}: pane {pane}'s layout rect is not numeric "
             f"{'/'.join(RECT_FIELDS)}: {json.dumps(rect)}"
@@ -626,8 +630,10 @@ def main() -> int:
 
         try:
             args = resolved_args(entry, fixture.ids)
-            target = effect_target(entry["id"], args)
-            before = pane_rect(entry["id"], target[2], home) if target else None
+            before = None
+            if target := effect_target(entry["id"], args):
+                verb, direction, pane = target
+                before = pane_rect(entry["id"], pane, home)
             proc = herdr(*args, home=home, check=False)
             if proc.returncode != 0:
                 rejected.append((entry["id"], args, proc.returncode, proc.stderr.strip()))
@@ -641,9 +647,9 @@ def main() -> int:
                 after, reason = None, None
                 if target:
                     try:
-                        after = pane_rect(entry["id"], target[2], home)
-                        reason = wrong_action(target[0], proc.stdout, proc.stderr) or missing_effect(
-                            target[0], target[1], before, after
+                        after = pane_rect(entry["id"], pane, home)
+                        reason = wrong_action(verb, proc.stdout, proc.stderr) or missing_effect(
+                            verb, direction, before, after
                         )
                     except RuntimeError as e:
                         after, reason = {}, f"its layout could not be read after the entry ran: {e}"
