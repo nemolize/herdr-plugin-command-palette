@@ -611,7 +611,8 @@ hop reports a popup collision for it — still exit 1, still touching nothing.
 Both are checked on every press, since the manifest's `min_herdr_version` still
 admits 0.8.2. Any other envelope, including `plugin_pane_open_failed` with
 another message, takes the generic error path. `herdr/open-test.py` runs the hop
-against each envelope.
+against each envelope, and `herdr/popup-collision-e2e.py` runs it twice against
+the herdr CI fetches, so the next change to the envelope fails CI (#133).
 
 ### Click-outside-to-dismiss is not available
 

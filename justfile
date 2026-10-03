@@ -63,3 +63,7 @@ fetch-herdr:
 # rather than every other job carrying that cost.
 catalog-e2e:
     python3 herdr/catalog-e2e.py
+
+# Not part of `ci` for the same reason: it needs a fetched herdr too.
+popup-collision-e2e:
+    python3 herdr/popup-collision-e2e.py
