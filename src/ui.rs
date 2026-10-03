@@ -1252,6 +1252,36 @@ mod render_tests {
         assert!(lines.last().unwrap().ends_with("..."), "{lines:#?}");
     }
 
+    /// Issue #102: the skipped-entries note is 37 cells, so at the floor it would
+    /// wrap and take a candidate's row.
+    #[test]
+    fn the_skipped_note_leaves_the_floor_its_two_candidates() {
+        for width in [36, 30] {
+            let mut candidates = vec![Candidate::note("tab.rename", "no {text}")];
+            candidates.extend((0..9).map(|i| {
+                Candidate::from_command(command(&format!("c{i}"), &format!("Cmd {i}"), None))
+            }));
+            let mut app = App::new(candidates, Frecency::load(Path::new("/nonexistent")));
+            assert!(
+                app.selected_note().is_some(),
+                "the skip reason is not shown"
+            );
+            app.add_status(crate::skipped_note(1));
+            let lines = draw(&mut app, width, MIN_ROWS);
+            let listed = lines
+                .iter()
+                .filter(|l| l.contains("Cmd") || l.contains("skipped `"))
+                .count();
+            assert_eq!(listed, 2, "width {width}: {lines:#?}");
+            assert_eq!(
+                lines.last().unwrap(),
+                "catalog: 1 skipped - search...",
+                "width {width}: {lines:#?}"
+            );
+            assert!(!lines[4].contains("catalog"), "width {width}: {lines:#?}");
+        }
+    }
+
     /// Herdr can hand the plugin a region narrower than §5's floor. The counts
     /// are what has to survive there, so the version is dropped whole rather
     /// than either half being truncated.
