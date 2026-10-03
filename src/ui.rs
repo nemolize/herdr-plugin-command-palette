@@ -190,7 +190,7 @@ fn render(f: &mut Frame, app: &mut App) {
     let reserved = u16::from(header.is_some())
         + INPUT_ROWS
         + if matches!(app.stage, Stage::Prompt { .. }) {
-            0
+            LIST_MIN_ROWS
         } else {
             FLOOR_CANDIDATES
         }
@@ -211,7 +211,7 @@ fn render(f: &mut Frame, app: &mut App) {
     let chunks = Layout::vertical([
         Constraint::Length(if header.is_some() { 1 } else { 0 }),
         Constraint::Length(INPUT_ROWS),
-        Constraint::Min(1),
+        Constraint::Min(LIST_MIN_ROWS),
         Constraint::Length(status_height),
     ])
     .split(f.area());
@@ -273,6 +273,8 @@ fn render(f: &mut Frame, app: &mut App) {
 }
 
 const MAX_STATUS_ROWS: u16 = 4;
+
+const LIST_MIN_ROWS: u16 = 1;
 
 /// A status message never takes these.
 const FLOOR_CANDIDATES: u16 = 2;
@@ -1196,6 +1198,18 @@ mod render_tests {
             ],
             "{lines:#?}"
         );
+    }
+
+    #[test]
+    fn a_four_row_status_while_typing_at_the_floor_is_marked_cut() {
+        let mut picked = command("pane.rename", "Rename pane", None);
+        picked.args = vec!["pane".into(), "rename".into(), "{text}".into()];
+        picked.prompt = Some("New pane name".into());
+        let mut app = app_with(vec![picked.clone()]);
+        app.enter_prompt(picked, String::new());
+        app.status = Some("line 0\nline 1\nline 2\nline 3".to_string());
+        let lines = draw(&mut app, 36, MIN_ROWS);
+        assert_eq!(lines[3..], ["line 0", "line 1", "line 2..."], "{lines:#?}");
     }
 
     /// The floor's two candidates outrank status rows, so there the status is

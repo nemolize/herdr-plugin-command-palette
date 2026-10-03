@@ -439,11 +439,12 @@ is kept:
 The two axes take different forms, and for opposite reasons.
 
 **Width is fixed cells because columns never move.** Across every sample in every
-keyboard state the width held at 41 columns. Columns are set by the environment,
-so a percentage silently shrinks the one axis with a hard readability floor — at
-`50%` the popup came back 25 columns wide and command titles were already
-truncating. The floor is **~36 columns**; below it a smaller box does not help,
-only different rendering would.
+keyboard state the width held at 41 columns, for a popup requested `80%` as
+wide as the tab. Columns are set by the environment, so a percentage silently
+shrinks the one axis with a hard readability floor — at `50%` the popup came
+back 25 columns wide and command titles were already truncating. The floor is
+**~36 columns**; below it a smaller box does not help, only different rendering
+would.
 
 **Height is a percentage because rows are elastic within a single environment** —
 they swung roughly 1.5× on one device without anything being reconfigured. Fixed
@@ -471,7 +472,7 @@ fewer when more would take those two candidates; a longer one ends in `...`
 (#144). Herdr's errors are quoted whole, so without the cap one long error
 leaves the list no room. Four rather than three is what fits all three startup
 notes at the 51 columns the measured device gives (#154); they still end in
-`...` at the ~36-column floor, and when the settings error is longer than a
+`...` below about 42 columns, and when the settings error is longer than a
 misspelt key.
 
 The first draft's floor was 8, never measured — #2 recorded it as a starting
