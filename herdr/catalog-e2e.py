@@ -79,21 +79,28 @@ def herdr(*args: str, home: Path, check: bool = True) -> subprocess.CompletedPro
     return proc
 
 
-def answer_field(call: str, node: object, path: str, within: str = "") -> object:
-    """The value at dotted `path` under `node`, the part of herdr's answer to
-    `call` found at `within`. A reshaped answer raises a RuntimeError naming the
-    call and the missing key, which `main` reports as that entry's BROKE line
-    where a KeyError would abort the whole run (#173)."""
+def answer_field(
+    call: str, node: object, path: str, kind: type = str, within: str = ""
+) -> object:
+    """The `kind` value at dotted `path` under `node`, the part of herdr's answer
+    to `call` found at `within`. A reshaped answer raises a RuntimeError naming the
+    call and the key, which `main` reports as that entry's BROKE line where a
+    KeyError or TypeError would abort the whole run (#173)."""
     walked = within
     for key in path.split("."):
         walked = f"{walked}.{key}" if walked else key
         if not isinstance(node, dict) or key not in node:
             raise RuntimeError(f"fixture setup: herdr {call} answered without {walked}")
         node = node[key]
+    if not isinstance(node, kind):
+        raise RuntimeError(
+            f"fixture setup: herdr {call} answered {walked} as a "
+            f"{type(node).__name__}, not a {kind.__name__}"
+        )
     return node
 
 
-def answer(call: str, stdout: str, path: str) -> object:
+def answer(call: str, stdout: str, path: str, kind: type = str) -> object:
     """`answer_field` on the `result` of herdr's answer to `call`."""
     body = parse_envelope(stdout)
     if body is None:
@@ -101,7 +108,7 @@ def answer(call: str, stdout: str, path: str) -> object:
             f"fixture setup: herdr {call} answered without a JSON envelope: "
             f"{stdout.strip()[:200]}"
         )
-    return answer_field(call, body, f"result.{path}")
+    return answer_field(call, body, f"result.{path}", kind)
 
 
 def start_server_and_await_readiness(home: Path) -> subprocess.Popen:
@@ -203,7 +210,7 @@ class Fixture:
             "worktree", "create", "--workspace", self.ids["{workspace}"],
             "--branch", "e2e-existing", "--no-focus", home=self.home,
         )
-        row = answer("worktree create", proc.stdout, "worktree")
+        row = answer("worktree create", proc.stdout, "worktree", dict)
         workspace, path = (
             answer_field("worktree create", row, key, within="result.worktree")
             for key in ("open_workspace_id", "path")
@@ -227,12 +234,9 @@ class Fixture:
         }
 
     def _read_ids(self) -> dict[str, str]:
-        rows = answer("pane list", herdr("pane", "list", home=self.home).stdout, "panes")
-        if not isinstance(rows, list) or not rows:
-            raise RuntimeError(
-                f"fixture setup: herdr pane list answered without a non-empty "
-                f"result.panes list: {json.dumps(rows)[:200]}"
-            )
+        rows = answer("pane list", herdr("pane", "list", home=self.home).stdout, "panes", list)
+        if not rows:
+            raise RuntimeError("fixture setup: herdr pane list answered an empty result.panes")
         for i, row in enumerate(rows):
             for key in ("pane_id", "tab_id", "workspace_id"):
                 answer_field("pane list", row, key, within=f"result.panes[{i}]")

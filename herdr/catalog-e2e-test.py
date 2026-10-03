@@ -153,6 +153,18 @@ class FixtureAnswer(unittest.TestCase):
             ):
                 answer(call, stdout, path)
 
+    def test_raises_naming_the_call_and_the_key_on_a_value_of_another_type(self):
+        for stdout, kind, message in (
+            ('{"result":{"pane":{"pane_id":null}}}', str, "result.pane.pane_id as a NoneType, not a str"),
+            ('{"result":{"pane":{"pane_id":7}}}', str, "result.pane.pane_id as a int, not a str"),
+            ('{"result":{"pane":"p9"}}', dict, "result.pane as a str, not a dict"),
+        ):
+            path = "pane.pane_id" if kind is str else "pane"
+            with self.subTest(stdout=stdout), self.assertRaisesRegex(
+                RuntimeError, rf"^fixture setup: herdr pane split answered {re.escape(message)}$"
+            ):
+                answer("pane split", stdout, path, kind)
+
     def test_raises_naming_the_call_on_an_answer_that_is_not_json(self):
         with self.assertRaisesRegex(
             RuntimeError, r"^fixture setup: herdr pane list answered without a JSON envelope: oops$"
@@ -214,6 +226,9 @@ case "$1 $2" in
     {"pane_id":"p1","tab_id":"t1","workspace_id":"w1","focused":true},
     {"pane_id":"p2","tab_id":"t2","workspace_id":"w1"}]}}' ;;
   "workspace create"|"tab create") echo '{"result":{"type":"ok"}}' ;;
+  "worktree create") [ -n "$STUB_WORKTREE" ] && { echo "$STUB_WORKTREE"; exit 0; }
+    echo '{"result":{"worktree":{"open_workspace_id":"w2","path":"/wt"}}}' ;;
+  "worktree list") echo '{"result":{"source":{"repo_root":"/repo"}}}' ;;
   "pane split") [ -n "$STUB_SPLIT" ] && { echo "$STUB_SPLIT"; exit 0; }
     echo '{"result":{"pane":{"pane_id":"p9"}}}' ;;
   "pane layout")
@@ -346,18 +361,33 @@ class MainVerdict(unittest.TestCase):
         self.assertIn("herdr answered 'pane_resize', not 'pane_swap'", output)
 
     def test_reports_a_reshaped_fixture_answer_as_unchecked_naming_the_call(self):
-        for name, value, message in (
-            ("STUB_SPLIT", '{"result":{"pane":{}}}', "herdr pane split answered without result.pane.pane_id"),
-            ("STUB_PANES", '{"result":{"panes":[{"pane_id":"p1","workspace_id":"w1"}]}}',
+        remove = ("worktree.remove", '["worktree", "remove", "--workspace", "{}"]')
+        for entry, name, value, message in (
+            (None, "STUB_SPLIT", '{"result":{"pane":{}}}',
+             "herdr pane split answered without result.pane.pane_id"),
+            (None, "STUB_SPLIT", '{"result":{"pane":{"pane_id":null}}}',
+             "herdr pane split answered result.pane.pane_id as a NoneType, not a str"),
+            (None, "STUB_PANES", '{"result":{"panes":[{"pane_id":"p1","workspace_id":"w1"}]}}',
              "herdr pane list answered without result.panes[0].tab_id"),
+            (None, "STUB_PANES", '{"result":{"panes":[]}}',
+             "herdr pane list answered an empty result.panes"),
+            (remove, "STUB_WORKTREE", '{"result":{"worktree":{"path":"/wt"}}}',
+             "herdr worktree create answered without result.worktree.open_workspace_id"),
         ):
-            with self.subTest(name=name), mock.patch.dict(os.environ, {name: value}):
+            with self.subTest(message=message), mock.patch.dict(os.environ, {name: value}):
+                entry_id, args = entry or ("pane.close", '["pane", "close", "{pane}"]')
+                self.use_entry(entry_id, args)
                 code, output = self.run_main('{"id":"cli:pane","result":{"type":"ok"}}')
                 self.assertEqual(code, 1, output)
-                self.assertIn("BROKE pane.close", output)
+                self.assertIn(f"BROKE {entry_id}", output)
                 self.assertIn("could not be checked", output)
                 self.assertIn(message, output)
                 self.assertNotIn("Traceback", output)
+
+    def test_passes_a_worktree_entry_on_well_formed_fixture_answers(self):
+        self.use_entry("worktree.remove", '["worktree", "remove", "--workspace", "{}"]')
+        code, output = self.run_main('{"id":"cli:worktree","result":{"type":"ok"}}')
+        self.assertEqual(code, 0, output)
 
     def test_passes_a_swap_that_moves_the_pane_the_named_way(self):
         self.use_entry("pane.swap.left", SWAP_LEFT)
