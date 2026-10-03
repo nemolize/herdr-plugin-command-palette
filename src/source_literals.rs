@@ -1,7 +1,7 @@
 //! The string and char literals a source file ships: its tokens outside test
 //! code and doc comments.
 
-use proc_macro2::{Delimiter, TokenStream, TokenTree};
+use proc_macro2::{Delimiter, LexError, TokenStream, TokenTree};
 
 #[derive(Debug, PartialEq)]
 pub struct Literal {
@@ -12,11 +12,10 @@ pub struct Literal {
 
 /// Every string and char literal in `src`, except those in doc comments and in
 /// the item, field, arm or parameter a `#[cfg(test)]` attribute marks.
-pub fn shipped_literals(src: &str) -> Vec<Literal> {
-    let tokens: TokenStream = src.parse().expect("source tokenizes");
+pub fn shipped_literals(src: &str) -> Result<Vec<Literal>, LexError> {
     let mut out = Vec::new();
-    collect(tokens, &mut out);
-    out
+    collect(src.parse()?, &mut out);
+    Ok(out)
 }
 
 fn collect(tokens: TokenStream, out: &mut Vec<Literal>) {
@@ -24,12 +23,12 @@ fn collect(tokens: TokenStream, out: &mut Vec<Literal>) {
     while let Some(token) = tokens.next() {
         match token {
             TokenTree::Punct(p) if p.as_char() == '#' => {
-                let inner =
-                    matches!(tokens.peek(), Some(TokenTree::Punct(p)) if p.as_char() == '!');
-                if inner {
-                    tokens.next();
-                }
-                let Some(TokenTree::Group(attr)) = tokens.next() else {
+                let inner = tokens
+                    .next_if(|t| matches!(t, TokenTree::Punct(p) if p.as_char() == '!'))
+                    .is_some();
+                let Some(TokenTree::Group(attr)) = tokens.next_if(
+                    |t| matches!(t, TokenTree::Group(g) if g.delimiter() == Delimiter::Bracket),
+                ) else {
                     continue;
                 };
                 if !is_cfg_test(&attr.stream()) {
@@ -113,7 +112,11 @@ mod tests {
     use crate::glyph::same_width_in_every_locale;
 
     fn texts(src: &str) -> Vec<String> {
-        shipped_literals(src).into_iter().map(|l| l.text).collect()
+        shipped_literals(src)
+            .unwrap()
+            .into_iter()
+            .map(|l| l.text)
+            .collect()
     }
 
     /// Runtime values inside a note are not covered: only what the source spells.
@@ -127,7 +130,9 @@ mod tests {
                 continue;
             }
             let src = std::fs::read_to_string(&path).unwrap();
-            for Literal { line, text } in shipped_literals(&src) {
+            let literals = shipped_literals(&src)
+                .unwrap_or_else(|e| panic!("{} does not tokenize: {e}", path.display()));
+            for Literal { line, text } in literals {
                 assert!(
                     same_width_in_every_locale(&text),
                     "{}:{line}: {text:?}",
@@ -178,7 +183,36 @@ mod tests {
     #[test]
     fn a_literal_reports_the_line_it_starts_on() {
         let src = "\n\"one\nline two\"\n\"a\\u{A}b\"\n\"four\"";
-        let lines: Vec<usize> = shipped_literals(src).iter().map(|l| l.line).collect();
+        let lines: Vec<usize> = shipped_literals(src)
+            .unwrap()
+            .iter()
+            .map(|l| l.line)
+            .collect();
         assert_eq!(lines, [2, 4, 5]);
+    }
+
+    #[test]
+    fn an_inner_test_attribute_skips_the_rest_of_its_module() {
+        let src = "fn a() { \"kept\"; }\n\
+                   mod m { #![cfg(test)] fn t() { \"dropped\"; } \"dropped too\"; }\n\
+                   fn b() { \"kept too\"; }";
+        assert_eq!(texts(src), ["kept", "kept too"]);
+    }
+
+    #[test]
+    fn an_attribute_argument_is_read_but_a_doc_comment_is_not() {
+        let src = "/// \"doc\"\n#[error(\"in attr\")]\nstruct E;";
+        assert_eq!(texts(src), ["in attr"]);
+    }
+
+    #[test]
+    fn source_that_does_not_tokenize_is_an_error() {
+        assert!(shipped_literals("fn f() { \"unterminated }").is_err());
+    }
+
+    #[test]
+    fn a_hash_that_opens_no_attribute_keeps_the_token_after_it() {
+        let src = "macro_rules! m { () => { # \"after hash\" }; }";
+        assert_eq!(texts(src), ["after hash"]);
     }
 }
