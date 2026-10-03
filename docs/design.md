@@ -222,12 +222,15 @@ changes its CLI.** Three mitigations:
   Each entry gets its own fixture session under `XDG_CONFIG_HOME`, so the
   destructive entries are safe to run and no entry depends on what a previous
   one left behind. herdr's clap layer accepts a wrong flag *combination* and its
-  runtime rejects it — exit 2 with usage on stderr — so the exit code alone
+  runtime rejects it — exit 2 with usage on stderr — so the exit code
   separates a runnable entry from a broken one, with no transcription to keep
   current. This is what the unit tests in `src/catalog.rs` cannot reach: they
   encode a hand-copied `--help` table (`required`, `catalog.rs`), which goes
   stale the moment herdr adds a constraint the table does not carry. That is
-  exactly how `pane.move.tab` shipped with `--tab` and no `--split`.
+  exactly how `pane.move.tab` shipped with `--tab` and no `--split`. An entry
+  that exits 0 must also answer with the envelope `read_response` accepts — a
+  non-null `result` and no `error` — or the palette would report an action that
+  worked as a failure (#146).
 - Pin the catalog's `checked_against` and bump it deliberately when the catalog
   is re-checked against a new release. It is deliberately not called
   `min_herdr_version`: the manifest's key of that name is a hard install gate,
