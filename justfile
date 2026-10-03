@@ -3,7 +3,7 @@
 
 default: ci
 
-ci: lint test palette-e2e open-test release-test build-musl
+ci: lint test palette-e2e open-test catalog-e2e-test release-test build-musl
 
 fmt:
     cargo fmt --all
@@ -33,6 +33,10 @@ palette-e2e:
 # Part of `ci` for the same reason: the action hop runs against a stubbed herdr.
 open-test:
     python3 herdr/open-test.py
+
+# Part of `ci` too: it unit-tests catalog-e2e's response check without a herdr.
+catalog-e2e-test:
+    python3 herdr/catalog-e2e-test.py
 
 # One release asset. release.yml calls this per matrix target, so the build
 # invocation has one definition rather than a copy per consumer.

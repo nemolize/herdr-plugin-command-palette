@@ -9,7 +9,9 @@ positional count was right (docs/design.md §4, issue #24).
 
 This asks herdr instead. herdr's clap layer accepts that combination and its
 runtime rejects it, writing usage to stderr and exiting non-zero, so the exit
-code alone separates a runnable entry from a broken one.
+code separates a runnable entry from a broken one. An entry that exits 0 must
+also answer with an envelope the palette accepts — a non-null `result` and no
+`error` — because the palette reports anything else as a failed action (#146).
 
 Every entry gets its own fixture session, built from nothing and torn down
 after. That is what makes running the destructive entries (`pane close`,
@@ -245,6 +247,32 @@ def resolved_args(entry: dict, ids: dict[str, str]) -> list[str]:
     return [table.get(a, a) for a in args]
 
 
+def parse_envelope(text: str) -> dict | None:
+    try:
+        body = json.loads(text)
+    except ValueError:
+        return None
+    return body if isinstance(body, dict) else None
+
+
+def unaccepted_response(stdout: str, stderr: str) -> str | None:
+    """Why `read_response` in src/herdr.rs would call this answer a failure, or
+    None when it would accept it. Mirrors its order: the envelope from stdout,
+    else from stderr; then `error`; then a `result` that is absent or null."""
+    body = parse_envelope(stdout)
+    if body is None:
+        body = parse_envelope(stderr)
+    if body is None:
+        return "no JSON envelope"
+    if body.get("error") is not None:
+        return f"an error: {json.dumps(body['error'])}"
+    if "result" not in body:
+        return "no result"
+    if body["result"] is None:
+        return "a null result"
+    return None
+
+
 def running_herdr_version() -> str | None:
     proc = subprocess.run([HERDR, "--version"], capture_output=True, text=True)
     words = proc.stdout.split() if proc.returncode == 0 else []
@@ -287,6 +315,26 @@ def report_rejected(rejected: list[tuple[str, list[str], int, str]]) -> None:
         print(f"    exit: {code}", file=sys.stderr)
         for line in stderr.splitlines()[:4]:
             print(f"    {line}", file=sys.stderr)
+        print(file=sys.stderr)
+
+
+def report_unaccepted(unaccepted: list[tuple[str, list[str], str, str, str]]) -> None:
+    """Report separately from rejections: herdr ran these and exited 0, so the
+    argv is fine — it is the answer that changed, and the palette would show a
+    failure for an action that worked."""
+    plural = "y" if len(unaccepted) == 1 else "ies"
+    print(
+        f"\n{len(unaccepted)} catalog entr{plural} herdr ran but answered with "
+        "a response the palette reports as a failure:\n",
+        file=sys.stderr,
+    )
+    for entry_id, args, reason, stdout, stderr in unaccepted:
+        print(f"  {entry_id}", file=sys.stderr)
+        print(f"    argv: herdr {' '.join(args)}", file=sys.stderr)
+        print(f"    answered with {reason}", file=sys.stderr)
+        for name, text in (("stdout", stdout), ("stderr", stderr)):
+            for line in text.splitlines()[:4]:
+                print(f"    {name}: {line}", file=sys.stderr)
         print(file=sys.stderr)
 
 
@@ -366,6 +414,7 @@ def main() -> int:
 
     FIXTURE_ROOT.mkdir(parents=True, exist_ok=True)
     rejected: list[tuple[str, list[str], int, str]] = []
+    unaccepted: list[tuple[str, list[str], str, str, str]] = []
     broken: list[tuple[str, str]] = []
 
     bindings_home = Path(tempfile.mkdtemp(dir=FIXTURE_ROOT))
@@ -401,6 +450,11 @@ def main() -> int:
             if proc.returncode != 0:
                 rejected.append((entry["id"], args, proc.returncode, proc.stderr.strip()))
                 print(f"FAIL {entry['id']}", file=sys.stderr)
+            elif (reason := unaccepted_response(proc.stdout, proc.stderr)) is not None:
+                unaccepted.append(
+                    (entry["id"], args, reason, proc.stdout.strip(), proc.stderr.strip())
+                )
+                print(f"FAIL {entry['id']}", file=sys.stderr)
             else:
                 print(f"ok   {entry['id']}", file=sys.stderr)
         except RuntimeError as e:
@@ -412,6 +466,8 @@ def main() -> int:
 
     if rejected:
         report_rejected(rejected)
+    if unaccepted:
+        report_unaccepted(unaccepted)
     if broken:
         report_broken(broken)
     if unknown_bindings:
@@ -422,7 +478,7 @@ def main() -> int:
         )
         for entry_id, action in unknown_bindings:
             print(f"  {entry_id}: binding = \"{action}\"", file=sys.stderr)
-    if rejected or broken or unknown_bindings:
+    if rejected or unaccepted or broken or unknown_bindings:
         return 1
 
     print(f"\n{success_line(len(entries), checked_against, running)}", file=sys.stderr)
