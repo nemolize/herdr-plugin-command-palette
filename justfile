@@ -34,7 +34,8 @@ palette-e2e:
 open-test:
     python3 herdr/open-test.py
 
-# Part of `ci` too: it unit-tests catalog-e2e's response check without a herdr.
+# Part of `ci` too: it tests catalog-e2e's response check and its verdict,
+# running the harness against a stubbed herdr rather than a fetched one.
 catalog-e2e-test:
     python3 herdr/catalog-e2e-test.py
 
