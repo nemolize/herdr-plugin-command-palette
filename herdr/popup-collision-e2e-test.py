@@ -56,7 +56,7 @@ def completed(result: dict) -> subprocess.CompletedProcess:
     return subprocess.CompletedProcess([], 0, json.dumps({"result": result}), "")
 
 
-class Press(unittest.TestCase):
+class RunOpenAction(unittest.TestCase):
     """herdr lists logs oldest first today; nothing promises it, so the run is
     picked by the id `invoke` returns rather than by its position."""
 
@@ -76,7 +76,7 @@ class Press(unittest.TestCase):
 
         with mock.patch.object(popup_collision_e2e.catalog_e2e, "herdr", herdr), \
                 mock.patch.object(popup_collision_e2e.time, "sleep"):
-            run = popup_collision_e2e.press(Path("/nonexistent"))
+            run = popup_collision_e2e.run_open_action(Path("/nonexistent"))
         self.assertEqual(run, finished)
 
     def test_names_the_call_that_failed_rather_than_fixture_setup(self):
@@ -85,12 +85,12 @@ class Press(unittest.TestCase):
 
         with mock.patch.object(popup_collision_e2e.catalog_e2e, "herdr", herdr):
             with self.assertRaisesRegex(RuntimeError, r"^herdr plugin action invoke .* exited 1"):
-                popup_collision_e2e.press(Path("/nonexistent"))
+                popup_collision_e2e.run_open_action(Path("/nonexistent"))
 
 
 class MainVerdict(unittest.TestCase):
-    """Runs `main()` with each press stubbed, so the call site of `failure()`
-    and the run's exit status are covered, not only the verdict function."""
+    """Runs `main()` with each run stubbed, so the call site of `failure()`,
+    the run's exit status and the server's shutdown are covered."""
 
     def run_main(self, *runs: dict | Exception) -> tuple[int, str]:
         catalog_e2e = popup_collision_e2e.catalog_e2e
@@ -98,12 +98,13 @@ class MainVerdict(unittest.TestCase):
         with tempfile.TemporaryDirectory() as root, \
                 mock.patch.object(catalog_e2e, "HERDR", "herdr"), \
                 mock.patch.object(catalog_e2e, "FIXTURE_ROOT", Path(root)), \
-                mock.patch.object(catalog_e2e, "Fixture"), \
+                mock.patch.object(catalog_e2e, "Fixture") as fixture, \
                 mock.patch.object(catalog_e2e, "herdr"), \
                 mock.patch.object(catalog_e2e, "running_herdr_version", return_value="0.9.3"), \
-                mock.patch.object(popup_collision_e2e, "press", side_effect=runs), \
+                mock.patch.object(popup_collision_e2e, "run_open_action", side_effect=runs), \
                 redirect_stderr(stderr):
             code = popup_collision_e2e.main()
+        fixture.return_value.close.assert_called_once_with()
         return code, stderr.getvalue()
 
     def test_passes_an_open_then_the_collision(self):

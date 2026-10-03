@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Press the palette key twice against a real herdr and assert the second press
-is reported as a popup collision.
+"""Invoke the palette's open action twice against a real herdr and assert the
+second run is reported as a popup collision.
 
 `herdr/open.sh` recognises the collision by herdr's error envelope, and #99
 shipped broken because herdr 0.9 changed that envelope while `open-test`, which
@@ -74,7 +74,7 @@ def herdr_result(*args: str, home: Path) -> dict:
     return result
 
 
-def press(home: Path) -> dict:
+def run_open_action(home: Path) -> dict:
     """Invoke the action once and return its log entry once the hop has exited."""
     invoked = herdr_result("plugin", "action", "invoke", "open", "--plugin", PLUGIN_ID, home=home)
     log_id = (invoked.get("log") or {}).get("log_id")
@@ -132,8 +132,8 @@ def main() -> int:
             plugin.mkdir()
             (plugin / "herdr-plugin.toml").write_text(MANIFEST)
             catalog_e2e.herdr("plugin", "link", str(plugin), home=home)
-            first = press(home)
-            second = press(home)
+            first = run_open_action(home)
+            second = run_open_action(home)
         finally:
             fixture.close()
     except RuntimeError as e:
