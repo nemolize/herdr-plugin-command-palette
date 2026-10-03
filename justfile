@@ -3,7 +3,7 @@
 
 default: ci
 
-ci: lint test palette-e2e open-test catalog-e2e-test release-test build-musl
+ci: lint test palette-e2e open-test catalog-e2e-test popup-collision-e2e-test release-test build-musl
 
 fmt:
     cargo fmt --all
@@ -38,6 +38,10 @@ open-test:
 # running the harness against a stubbed herdr rather than a fetched one.
 catalog-e2e-test:
     python3 herdr/catalog-e2e-test.py
+
+# Part of `ci` too: it tests popup-collision-e2e's verdict against stubbed runs.
+popup-collision-e2e-test:
+    python3 herdr/popup-collision-e2e-test.py
 
 # One release asset. release.yml calls this per matrix target, so the build
 # invocation has one definition rather than a copy per consumer.

@@ -58,30 +58,38 @@ command = ["sh", {json.dumps(str(HOP))}]
 """
 
 
-def finished_runs(home: Path) -> list[dict]:
-    proc = catalog_e2e.herdr("plugin", "log", "list", home=home)
+def herdr_result(*args: str, home: Path) -> dict:
+    """The `result` of a call made after setup, failing with its own argv —
+    `catalog_e2e.herdr` would label any failure as fixture setup."""
+    proc = catalog_e2e.herdr(*args, home=home, check=False)
     try:
-        logs = json.loads(proc.stdout)["result"]["logs"]
+        result = json.loads(proc.stdout)["result"]
     except (ValueError, KeyError, TypeError):
-        logs = None
-    if not isinstance(logs, list):
-        raise RuntimeError(f"`plugin log list` answered without a log list:\n{proc.stdout}")
-    return [
-        log for log in logs
-        if log.get("plugin_id") == PLUGIN_ID and log.get("finished_unix_ms") is not None
-    ]
+        result = None
+    if proc.returncode != 0 or not isinstance(result, dict):
+        raise RuntimeError(
+            f"herdr {' '.join(args)} exited {proc.returncode}\n"
+            f"{(proc.stdout + proc.stderr).strip()}"
+        )
+    return result
 
 
-def press(home: Path, count_before: int) -> dict:
+def press(home: Path) -> dict:
     """Invoke the action once and return its log entry once the hop has exited."""
-    catalog_e2e.herdr("plugin", "action", "invoke", "open", "--plugin", PLUGIN_ID, home=home)
+    invoked = herdr_result("plugin", "action", "invoke", "open", "--plugin", PLUGIN_ID, home=home)
+    log_id = (invoked.get("log") or {}).get("log_id")
+    if not log_id:
+        raise RuntimeError(f"`plugin action invoke` named no log_id: {json.dumps(invoked)}")
     deadline = time.monotonic() + RUN_TIMEOUT_SECS
     while time.monotonic() < deadline:
-        runs = finished_runs(home)
-        if len(runs) > count_before:
-            return runs[count_before]
+        logs = herdr_result("plugin", "log", "list", home=home).get("logs")
+        if not isinstance(logs, list):
+            raise RuntimeError(f"`plugin log list` answered without a log list: {logs!r}")
+        run = next((log for log in logs if log.get("log_id") == log_id), None)
+        if run is not None and run.get("finished_unix_ms") is not None:
+            return run
         time.sleep(RUN_POLL_SECS)
-    raise RuntimeError(f"the hop did not finish within {RUN_TIMEOUT_SECS}s")
+    raise RuntimeError(f"the hop ({log_id}) did not finish within {RUN_TIMEOUT_SECS}s")
 
 
 def describe(run: dict) -> str:
@@ -124,8 +132,8 @@ def main() -> int:
             plugin.mkdir()
             (plugin / "herdr-plugin.toml").write_text(MANIFEST)
             catalog_e2e.herdr("plugin", "link", str(plugin), home=home)
-            first = press(home, 0)
-            second = press(home, 1)
+            first = press(home)
+            second = press(home)
         finally:
             fixture.close()
     except RuntimeError as e:
