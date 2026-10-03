@@ -230,7 +230,10 @@ changes its CLI.** Three mitigations:
   exactly how `pane.move.tab` shipped with `--tab` and no `--split`. An entry
   that exits 0 must also answer with the envelope `read_response` accepts — a
   non-null `result` and no `error` — or the palette would report an action that
-  worked as a failure (#146).
+  worked as a failure (#146). Resize and swap entries must also move their
+  pane, read from `herdr pane layout` before and after: herdr answers both
+  well when they change nothing, so the fixture surrounds `{pane}` with a
+  neighbour on every side and a no-op or wrong-way entry fails (#119).
 - Pin the catalog's `checked_against` and bump it deliberately when the catalog
   is re-checked against a new release. It is deliberately not called
   `min_herdr_version`: the manifest's key of that name is a hard install gate,
@@ -242,8 +245,8 @@ changes its CLI.** Three mitigations:
   instead of silently doing nothing.
 
 The E2E's limit is worth naming, because one of the three shipped defects falls
-outside it: it proves herdr *accepts* an entry's argv, never that the entry does
-what its title claims. `tab.rename` and `pane.move.tab` were both rejections and
+outside it: outside resize and swap, it proves herdr *accepts* an entry's argv,
+never that the entry does what its title claims. `tab.rename` and `pane.move.tab` were both rejections and
 both would be caught. The `--current` defect was not — the argv was well-formed
 and herdr ran it happily, against the palette's own popup rather than the pane
 behind it. Catching that class means asserting post-state per entry, a much
