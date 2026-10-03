@@ -236,7 +236,7 @@ case "$1 $2" in
     [ "$rect" = '"gone"' ] && { echo "no such pane" >&2; exit 1; }
     [ "$rect" = '"no panes"' ] && { echo '{"result":{"layout":{"tabs":[]}}}'; exit 0; }
     printf '{"result":{"layout":{"panes":[{"pane_id":"p1","rect":%s}]}}}\n' "$rect" ;;
-  *) : > "$HOME/stub-acted"; echo "$STUB_ANSWER" >&"${STUB_FD:-1}"; exit "${STUB_EXIT:-0}" ;;
+  *) : > "$HOME/stub-acted"; [ -n "$STUB_ARGV" ] && echo "$*" >> "$STUB_ARGV"; echo "$STUB_ANSWER" >&"${STUB_FD:-1}"; exit "${STUB_EXIT:-0}" ;;
 esac
 """
 
@@ -265,9 +265,10 @@ class MainVerdict(unittest.TestCase):
             self.addCleanup(setattr, catalog_e2e, name, getattr(catalog_e2e, name))
             setattr(catalog_e2e, name, value)
 
-    def use_entry(self, entry_id: str, args: str) -> None:
+    def use_entry(self, entry_id: str, args: str, resolve: str | None = None) -> None:
+        line = f'resolve = "{resolve}"\n' if resolve else ""
         self.catalog.write_text(
-            f'[[command]]\nid = "{entry_id}"\ntitle = "{entry_id}"\nargs = {args}\n'
+            f'[[command]]\nid = "{entry_id}"\ntitle = "{entry_id}"\nargs = {args}\n{line}'
         )
 
     def run_main(
@@ -384,10 +385,20 @@ class MainVerdict(unittest.TestCase):
                 self.assertIn(message, output)
                 self.assertNotIn("Traceback", output)
 
-    def test_passes_a_worktree_entry_on_well_formed_fixture_answers(self):
-        self.use_entry("worktree.remove", '["worktree", "remove", "--workspace", "{}"]')
-        code, output = self.run_main('{"id":"cli:worktree","result":{"type":"ok"}}')
-        self.assertEqual(code, 0, output)
+    def test_runs_worktree_entries_with_the_ids_worktree_create_answered(self):
+        for entry_id, args, ran in (
+            ("worktree.remove", '["worktree", "remove", "--workspace", "{}"]',
+             ["worktree remove --workspace w2"]),
+            ("worktree.open", '["worktree", "open", "--cwd", "{repo}", "--path", "{}", "--focus"]',
+             ["workspace close w2", "worktree open --cwd /repo --path /wt --focus"]),
+        ):
+            with self.subTest(entry_id=entry_id):
+                self.use_entry(entry_id, args, resolve="worktree list")
+                argv = self.catalog.parent / f"{entry_id}.argv"
+                with mock.patch.dict(os.environ, {"STUB_ARGV": str(argv)}):
+                    code, output = self.run_main('{"id":"cli:worktree","result":{"type":"ok"}}')
+                self.assertEqual(code, 0, output)
+                self.assertEqual(argv.read_text().splitlines(), ran)
 
     def test_passes_a_swap_that_moves_the_pane_the_named_way(self):
         self.use_entry("pane.swap.left", SWAP_LEFT)
