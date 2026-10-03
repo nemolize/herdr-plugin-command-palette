@@ -65,7 +65,7 @@ jobs:
 
   # The unit tests check the catalog against a transcribed `--help` table, which
   # goes stale silently; this runs every entry against a real herdr (issue #24).
-  # It also presses the palette key twice there, since open-test's stubbed
+  # It also invokes the palette's open action twice there, since open-test's stubbed
   # collision envelope goes stale the same way (issue #133).
   E2ETests:
     runs-on: ubuntu-24.04
