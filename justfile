@@ -63,7 +63,7 @@ deny:
 fetch-herdr:
     sh herdr/fetch-herdr.sh ./bin
 
-# Not part of `ci`: it needs a herdr binary, which the Catalog job fetches
+# Not part of `ci`: it needs a herdr binary, which the E2ETests job fetches
 # rather than every other job carrying that cost.
 catalog-e2e:
     python3 herdr/catalog-e2e.py

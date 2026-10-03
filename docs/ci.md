@@ -33,9 +33,9 @@ Two facts shape every choice here:
 | `cargo deny --locked check` | `Audit` | See the group table below. |
 | `cargo build --release --locked` for all five targets | `Release` | Cuts the release (docs/design.md §11). Adds the two assets `Build` cannot reach — macOS needs its own runner, Android the NDK — so the first time those two compile is a tag, unless the `workflow_dispatch` dry run is used first. |
 
-`Lint`, `Test`, `E2ETests` and `Build` are separate jobs rather than one
-`just ci` step, so a red X names which check failed without opening the log, and
-the four run concurrently. The shape — job ids as the displayed name,
+`Lint`, `Test`, `E2ETests` and `Build` are separate jobs rather than one, so a
+red X names which check failed without opening the log, and the four run
+concurrently. The shape — job ids as the displayed name,
 capitalised, on a pinned `ubuntu-24.04` — follows `nemolize/web-app-template`,
 which is the reference layout across these repositories; the language differs,
 the conventions should not.
@@ -141,8 +141,9 @@ per-invocation instead, where it is scoped to this crate.
 the commands exist once rather than as lists kept in sync by discipline; which
 job runs which recipe is read from `.github/workflows/ci.yml` and `audit.yml`.
 `just ci` runs the recipes of every `ci.yml` job but `E2ETests` (those need a
-fetched herdr), reproducing a CI failure locally with no push — given the two
-tools CI pins and installs for itself:
+fetched herdr), reproducing a CI failure locally with no push. Of the two tools
+CI pins and installs for itself, `just ci` needs `just`, and `cargo-deny` is for
+`just deny`:
 
 ```sh
 cargo install just --version 1.58.0 --locked
