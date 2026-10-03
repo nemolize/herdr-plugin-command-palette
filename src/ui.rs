@@ -13,7 +13,7 @@ use ratatui::widgets::{List, ListItem, Paragraph, Wrap};
 use unicode_segmentation::UnicodeSegmentation;
 
 use crate::app::{App, Stage, Step};
-use crate::glyph::{CURSOR, HIGHLIGHT_SYMBOL, SEPARATOR};
+use crate::glyph::{CURSOR, CURSOR_COLUMNS, HIGHLIGHT_COLUMNS, HIGHLIGHT_SYMBOL, SEPARATOR};
 
 /// Restores the terminal on drop, so an error path cannot leave the pane in raw
 /// mode with the alternate screen still up.
@@ -320,9 +320,6 @@ fn mark_cut(buffer: &mut Buffer, area: Rect) {
 /// Columns the `> ` prefix takes from the input line.
 const PROMPT_COLUMNS: u16 = 2;
 
-/// Columns [`HIGHLIGHT_SYMBOL`] takes from every row.
-const HIGHLIGHT_COLUMNS: u16 = 2;
-
 const ICON_GAP: u16 = 1;
 
 /// Blank columns between a title and the key flush right, so the two read as
@@ -378,7 +375,7 @@ fn render_input(f: &mut Frame, text: &str, area: Rect) {
     let text = text.as_str();
     // The cursor outranks the prefix when the pane cannot hold both: it is what
     // says the field is live, and a lone `>` says nothing.
-    let (line, cursor_column) = match area.width.checked_sub(PROMPT_COLUMNS + 1) {
+    let (line, cursor_column) = match area.width.checked_sub(PROMPT_COLUMNS + CURSOR_COLUMNS) {
         None => (String::new(), 0),
         Some(room) => {
             let shown = tail_within(text, room);
@@ -392,7 +389,7 @@ fn render_input(f: &mut Frame, text: &str, area: Rect) {
         Rect {
             x: area.x + cursor_column,
             y: area.y,
-            width: 1,
+            width: CURSOR_COLUMNS,
             height: area.height,
         },
     );
@@ -1120,10 +1117,14 @@ mod render_tests {
     /// Herdr's border, and a narrow device clamps it to 51 (docs/design.md §5).
     #[test]
     fn every_startup_note_fits_whole_inside_the_popup() {
+        let dir = std::env::temp_dir().join(format!("palette-ui-notes-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join(crate::settings::FILE_NAME), "icon = false\n").unwrap();
+        let (_, unusable) = crate::settings::load(Some(&dir));
         let notes = [
             crate::outdated_note("0.1.0", "0.8.2"),
             crate::skipped_note(1),
-            crate::settings::unusable("unknown field `icon`, expected `icons`"),
+            unusable.expect("a misspelt key is reported"),
         ];
         for width in [58, 51] {
             let mut app = app_with(vec![command("split.right", "Split pane: right", None)]);
