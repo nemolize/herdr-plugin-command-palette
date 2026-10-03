@@ -630,10 +630,9 @@ def main() -> int:
 
         try:
             args = resolved_args(entry, fixture.ids)
-            before = None
-            if target := effect_target(entry["id"], args):
-                verb, direction, pane = target
-                before = pane_rect(entry["id"], pane, home)
+            target = effect_target(entry["id"], args)
+            verb, direction, pane = target or (None, None, None)
+            before = pane_rect(entry["id"], pane, home) if target else None
             proc = herdr(*args, home=home, check=False)
             if proc.returncode != 0:
                 rejected.append((entry["id"], args, proc.returncode, proc.stderr.strip()))
