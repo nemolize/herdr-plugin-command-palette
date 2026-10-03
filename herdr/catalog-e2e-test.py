@@ -106,7 +106,7 @@ class EffectTarget(unittest.TestCase):
                 effect_target("pane.resize.left", args)
 
 
-def layout(*rows: dict) -> str:
+def layout(*rows: object) -> str:
     return json.dumps({"result": {"layout": {"panes": list(rows)}}})
 
 
