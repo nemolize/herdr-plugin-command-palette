@@ -3,7 +3,7 @@
 
 default: ci
 
-ci: lint test palette-e2e open-test catalog-e2e-test release-test build-musl
+ci: lint test palette-e2e open-test catalog-e2e-test popup-collision-e2e-test release-test build-musl
 
 fmt:
     cargo fmt --all
@@ -39,6 +39,10 @@ open-test:
 catalog-e2e-test:
     python3 herdr/catalog-e2e-test.py
 
+# Part of `ci` too: it tests popup-collision-e2e's verdict against stubbed runs.
+popup-collision-e2e-test:
+    python3 herdr/popup-collision-e2e-test.py
+
 # One release asset. release.yml calls this per matrix target, so the build
 # invocation has one definition rather than a copy per consumer.
 build-release target:
@@ -63,3 +67,7 @@ fetch-herdr:
 # rather than every other job carrying that cost.
 catalog-e2e:
     python3 herdr/catalog-e2e.py
+
+# Not part of `ci` for the same reason: it needs a fetched herdr too.
+popup-collision-e2e:
+    python3 herdr/popup-collision-e2e.py
