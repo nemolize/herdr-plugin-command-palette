@@ -6,11 +6,15 @@ use unicode_width::UnicodeWidthStr;
 /// Marks the selected row. Not `▶`, which is `A`.
 pub const HIGHLIGHT_SYMBOL: &str = "▸ ";
 
+pub const HIGHLIGHT_COLUMNS: u16 = 2;
+
 /// Not `·`, which is `A`.
 pub const SEPARATOR: &str = " ⋅ ";
 
 /// Not `▏`, which is `A`.
 pub const CURSOR: &str = "⎸";
+
+pub const CURSOR_COLUMNS: u16 = 1;
 
 /// Whether `text` holds no East Asian Ambiguous character: its width is the
 /// same whether Ambiguous characters count as one cell or two.
@@ -22,12 +26,19 @@ pub fn same_width_in_every_locale(text: &str) -> bool {
 mod tests {
     use unicode_width::UnicodeWidthStr;
 
-    use super::{same_width_in_every_locale, CURSOR, HIGHLIGHT_SYMBOL, SEPARATOR};
+    use super::{
+        same_width_in_every_locale, CURSOR, CURSOR_COLUMNS, HIGHLIGHT_COLUMNS, HIGHLIGHT_SYMBOL,
+        SEPARATOR,
+    };
 
     #[test]
     fn every_glyph_takes_the_same_cells_in_every_locale() {
-        for (glyph, cells) in [(HIGHLIGHT_SYMBOL, 2), (SEPARATOR, 3), (CURSOR, 1)] {
-            assert_eq!(glyph.width(), cells, "{glyph:?}");
+        for (glyph, cells) in [
+            (HIGHLIGHT_SYMBOL, HIGHLIGHT_COLUMNS),
+            (SEPARATOR, 3),
+            (CURSOR, CURSOR_COLUMNS),
+        ] {
+            assert_eq!(glyph.width(), usize::from(cells), "{glyph:?}");
             assert!(same_width_in_every_locale(glyph), "{glyph:?}");
         }
     }

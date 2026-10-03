@@ -39,13 +39,13 @@ pub fn load(config_dir: Option<&Path>) -> (Settings, Option<String>) {
 
 /// Names the file alone: the full path would take most of the status area
 /// beside the other startup notes (#149).
-pub fn unusable(why: &str) -> String {
+fn unusable(why: &str) -> String {
     format!("{FILE_NAME}: {why} - using defaults")
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{load, Settings, FILE_NAME};
+    use super::{load, unusable, Settings, FILE_NAME};
     use std::path::{Path, PathBuf};
 
     fn dir_with(name: &str, contents: Option<&str>) -> PathBuf {
@@ -103,6 +103,13 @@ mod tests {
             assert_eq!(settings, Settings { icons: true }, "{name}");
             assert!(why.unwrap().contains(FILE_NAME), "{name}");
         }
+    }
+
+    /// Issue #138.
+    #[test]
+    fn the_unusable_note_takes_the_same_cells_in_every_locale() {
+        let note = unusable("bad");
+        assert!(crate::glyph::same_width_in_every_locale(&note), "{note}");
     }
 
     /// A read error other than absence — here the name is a directory — is not
