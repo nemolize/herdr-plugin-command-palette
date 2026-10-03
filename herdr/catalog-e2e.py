@@ -12,6 +12,8 @@ runtime rejects it, writing usage to stderr and exiting non-zero, so the exit
 code separates a runnable entry from a broken one. An entry that exits 0 must
 also answer with an envelope the palette accepts — a non-null `result` and no
 `error` — because the palette reports anything else as a failed action (#146).
+A resize or swap entry must also move its pane, since herdr answers both well
+when they change nothing (#119).
 
 Every entry gets its own fixture session, built from nothing and torn down
 after. That is what makes running the destructive entries (`pane close`,
@@ -130,7 +132,9 @@ class Fixture:
     """A session holding two tabs, so an entry that needs a second target has one.
 
     `pane.move.tab` moves a pane into a *different* tab, and `tab.focus` is only
-    meaningful with somewhere to switch to. The workspace is rooted in a Git
+    meaningful with somewhere to switch to. The first tab is split into a cross
+    whose centre pane is `{pane}`, so a resize or swap has a neighbour on every
+    side to act against rather than being a no-op (#119). The workspace is rooted in a Git
     repository so the worktree entries have one to act on, and `worktree` adds
     a linked worktree — `remove` refuses the main checkout, so acting on that
     one would prove nothing. `closed` closes its workspace, so `open` opens it
@@ -147,12 +151,27 @@ class Fixture:
         try:
             herdr("workspace", "create", "--cwd", str(repo), home=home)
             herdr("tab", "create", home=home)
+            self._surround(self._read_ids()["{pane}"])
             self.ids = self._read_ids()
             if worktree:
                 self.ids.update(self._create_worktree(closed))
         except BaseException:
             self.close()
             raise
+
+    def _surround(self, pane: str) -> None:
+        """left | (top / centre / bottom) | right, focusing the centre last so
+        `_read_ids` picks it as `{pane}`."""
+
+        def split(target: str, direction: str, focus: str = "--no-focus") -> str:
+            proc = herdr("pane", "split", "--pane", target, "--direction", direction,
+                         focus, home=self.home)
+            return json.loads(proc.stdout)["result"]["pane"]["pane_id"]
+
+        split(pane, "right")
+        middle = split(pane, "right")
+        split(middle, "down")
+        split(middle, "down", "--focus")
 
     def _create_worktree(self, closed: bool) -> dict[str, str]:
         proc = herdr(
@@ -273,6 +292,51 @@ def unaccepted_response(stdout: str, stderr: str) -> str | None:
     return None
 
 
+DIRECTIONS = {"left": ("x", -1), "right": ("x", 1), "up": ("y", -1), "down": ("y", 1)}
+
+
+def effect_target(entry_id: str, args: list[str]) -> tuple[str, str, str] | None:
+    """(verb, direction, pane) for an entry whose effect is checked, else None.
+
+    Only resize and swap: herdr exits 0 with `changed: false` when they have
+    nothing to act on, so the exit code and envelope cannot tell a working
+    entry from a no-op (#119). The direction comes from the id, not the argv,
+    so an argv aimed the wrong way fails rather than checking itself."""
+    group, verb, direction = (entry_id.split(".") + ["", "", ""])[:3]
+    if group != "pane" or verb not in ("resize", "swap"):
+        return None
+    if direction not in DIRECTIONS:
+        raise RuntimeError(
+            f"{entry_id}: its id names no direction this harness can check"
+        )
+    return verb, direction, args[args.index("--pane") + 1]
+
+
+def missing_effect(verb: str, direction: str, before: dict, after: dict) -> str | None:
+    """Why the pane's rect shows no effect of the entry, or None when it does.
+
+    A resize must change the pane's extent along the named axis; a swap must
+    move the pane in the named direction."""
+    if verb == "resize":
+        extent = "width" if direction in ("left", "right") else "height"
+        if after[extent] != before[extent]:
+            return None
+        return f"its {extent} stayed {before[extent]}"
+
+    axis, sign = DIRECTIONS[direction]
+    if (after[axis] - before[axis]) * sign > 0:
+        return None
+    return f"its {axis} went {before[axis]} -> {after[axis]}, not {direction}"
+
+
+def pane_rect(pane: str, home: Path) -> dict:
+    layout = json.loads(herdr("pane", "layout", "--pane", pane, home=home).stdout)
+    for row in layout["result"]["layout"]["panes"]:
+        if row["pane_id"] == pane:
+            return row["rect"]
+    raise RuntimeError(f"pane {pane} is missing from its own layout")
+
+
 def running_herdr_version() -> str | None:
     proc = subprocess.run([HERDR, "--version"], capture_output=True, text=True)
     words = proc.stdout.split() if proc.returncode == 0 else []
@@ -335,6 +399,25 @@ def report_unaccepted(unaccepted: list[tuple[str, list[str], str, str, str]]) ->
         for name, text in (("stdout", stdout), ("stderr", stderr)):
             for line in text.splitlines()[:4]:
                 print(f"    {name}: {line}", file=sys.stderr)
+        print(file=sys.stderr)
+
+
+def report_ineffective(ineffective: list[tuple[str, list[str], str, dict, dict]]) -> None:
+    """Report separately from rejections and unaccepted answers: herdr ran these
+    and answered well, so argv and envelope are fine — the entry did not do
+    what its title says to the pane it names."""
+    plural = "y" if len(ineffective) == 1 else "ies"
+    print(
+        f"\n{len(ineffective)} catalog entr{plural} herdr ran without the "
+        "effect the entry names:\n",
+        file=sys.stderr,
+    )
+    for entry_id, args, reason, before, after in ineffective:
+        print(f"  {entry_id}", file=sys.stderr)
+        print(f"    argv: herdr {' '.join(args)}", file=sys.stderr)
+        print(f"    the pane's rect: {reason}", file=sys.stderr)
+        print(f"    before: {json.dumps(before, sort_keys=True)}", file=sys.stderr)
+        print(f"    after:  {json.dumps(after, sort_keys=True)}", file=sys.stderr)
         print(file=sys.stderr)
 
 
@@ -415,6 +498,7 @@ def main() -> int:
     FIXTURE_ROOT.mkdir(parents=True, exist_ok=True)
     rejected: list[tuple[str, list[str], int, str]] = []
     unaccepted: list[tuple[str, list[str], str, str, str]] = []
+    ineffective: list[tuple[str, list[str], str, dict, dict]] = []
     broken: list[tuple[str, str]] = []
 
     bindings_home = Path(tempfile.mkdtemp(dir=FIXTURE_ROOT))
@@ -446,6 +530,8 @@ def main() -> int:
 
         try:
             args = resolved_args(entry, fixture.ids)
+            target = effect_target(entry["id"], args)
+            before = pane_rect(target[2], home) if target else None
             proc = herdr(*args, home=home, check=False)
             if proc.returncode != 0:
                 rejected.append((entry["id"], args, proc.returncode, proc.stderr.strip()))
@@ -456,7 +542,13 @@ def main() -> int:
                 )
                 print(f"FAIL {entry['id']}", file=sys.stderr)
             else:
-                print(f"ok   {entry['id']}", file=sys.stderr)
+                after = pane_rect(target[2], home) if target else None
+                reason = target and missing_effect(target[0], target[1], before, after)
+                if reason:
+                    ineffective.append((entry["id"], args, reason, before, after))
+                    print(f"FAIL {entry['id']}", file=sys.stderr)
+                else:
+                    print(f"ok   {entry['id']}", file=sys.stderr)
         except RuntimeError as e:
             broken.append((entry["id"], str(e)))
             print(f"BROKE {entry['id']}", file=sys.stderr)
@@ -468,6 +560,8 @@ def main() -> int:
         report_rejected(rejected)
     if unaccepted:
         report_unaccepted(unaccepted)
+    if ineffective:
+        report_ineffective(ineffective)
     if broken:
         report_broken(broken)
     if unknown_bindings:
@@ -478,7 +572,7 @@ def main() -> int:
         )
         for entry_id, action in unknown_bindings:
             print(f"  {entry_id}: binding = \"{action}\"", file=sys.stderr)
-    if rejected or unaccepted or broken or unknown_bindings:
+    if rejected or unaccepted or ineffective or broken or unknown_bindings:
         return 1
 
     print(f"\n{success_line(len(entries), checked_against, running)}", file=sys.stderr)
