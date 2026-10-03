@@ -134,11 +134,11 @@ class Fixture:
     `pane.move.tab` moves a pane into a *different* tab, and `tab.focus` is only
     meaningful with somewhere to switch to. The first tab is split into a cross
     whose centre pane is `{pane}`, so a resize or swap has a neighbour on every
-    side to act against rather than being a no-op (#119). The workspace is rooted in a Git
-    repository so the worktree entries have one to act on, and `worktree` adds
-    a linked worktree — `remove` refuses the main checkout, so acting on that
-    one would prove nothing. `closed` closes its workspace, so `open` opens it
-    rather than focusing what is already there.
+    side to act against rather than being a no-op (#119). The workspace is
+    rooted in a Git repository so the worktree entries have one to act on, and
+    `worktree` adds a linked worktree — `remove` refuses the main checkout, so
+    acting on that one would prove nothing. `closed` closes its workspace, so
+    `open` opens it rather than focusing what is already there.
     """
 
     def __init__(self, home: Path, worktree: bool = False, closed: bool = False):
@@ -315,22 +315,49 @@ def effect_target(entry_id: str, args: list[str]) -> tuple[str, str, str] | None
 def missing_effect(verb: str, direction: str, before: dict, after: dict) -> str | None:
     """Why the pane's rect shows no effect of the entry, or None when it does.
 
-    A resize must change the pane's extent along the named axis; a swap must
-    move the pane in the named direction."""
-    if verb == "resize":
-        extent = "width" if direction in ("left", "right") else "height"
-        if after[extent] != before[extent]:
-            return None
-        return f"its {extent} stayed {before[extent]}"
-
+    A resize must push the pane's edge on the named side outward. A swap must
+    move the pane's centre mostly along the named direction: the cross's side
+    neighbours are full height, so a sideways swap also shifts `y`."""
     axis, sign = DIRECTIONS[direction]
-    if (after[axis] - before[axis]) * sign > 0:
+    extent = "width" if axis == "x" else "height"
+    if verb == "resize":
+        def edge(rect: dict) -> int:
+            return rect[axis] + (rect[extent] if sign > 0 else 0)
+
+        if (edge(after) - edge(before)) * sign > 0:
+            return None
+        return f"its {direction} edge went {edge(before)} -> {edge(after)}, not outward"
+
+    def shift(a: str) -> float:
+        span = "width" if a == "x" else "height"
+        return (after[a] + after[span] / 2) - (before[a] + before[span] / 2)
+
+    other = "y" if axis == "x" else "x"
+    if shift(axis) * sign > 0 and abs(shift(axis)) > abs(shift(other)):
         return None
-    return f"its {axis} went {before[axis]} -> {after[axis]}, not {direction}"
+    return f"its centre moved {shift('x'):+g}, {shift('y'):+g}, not {direction}"
+
+
+def wrong_action(verb: str, stdout: str, stderr: str) -> str | None:
+    """Why herdr's answer names another action than the id's verb, or None.
+
+    The rect alone cannot tell them apart: a swap pushes the named edge out as
+    a resize does, and a resize nudges the centre the named way as a swap does."""
+    result = (parse_envelope(stdout) or parse_envelope(stderr) or {}).get("result")
+    answered = result.get("type") if isinstance(result, dict) else None
+    if answered == f"pane_{verb}":
+        return None
+    return f"herdr answered {answered!r}, not 'pane_{verb}'"
 
 
 def pane_rect(pane: str, home: Path) -> dict:
-    layout = json.loads(herdr("pane", "layout", "--pane", pane, home=home).stdout)
+    proc = herdr("pane", "layout", "--pane", pane, home=home, check=False)
+    if proc.returncode != 0:
+        raise RuntimeError(
+            f"herdr pane layout --pane {pane} exited {proc.returncode}: "
+            f"{proc.stderr.strip()}"
+        )
+    layout = json.loads(proc.stdout)
     for row in layout["result"]["layout"]["panes"]:
         if row["pane_id"] == pane:
             return row["rect"]
@@ -403,9 +430,8 @@ def report_unaccepted(unaccepted: list[tuple[str, list[str], str, str, str]]) ->
 
 
 def report_ineffective(ineffective: list[tuple[str, list[str], str, dict, dict]]) -> None:
-    """Report separately from rejections and unaccepted answers: herdr ran these
-    and answered well, so argv and envelope are fine — the entry did not do
-    what its title says to the pane it names."""
+    """Report separately from rejections and unaccepted answers: herdr accepted
+    these, but they did not do what their id names to the pane."""
     plural = "y" if len(ineffective) == 1 else "ies"
     print(
         f"\n{len(ineffective)} catalog entr{plural} herdr ran without the "
@@ -415,7 +441,7 @@ def report_ineffective(ineffective: list[tuple[str, list[str], str, dict, dict]]
     for entry_id, args, reason, before, after in ineffective:
         print(f"  {entry_id}", file=sys.stderr)
         print(f"    argv: herdr {' '.join(args)}", file=sys.stderr)
-        print(f"    the pane's rect: {reason}", file=sys.stderr)
+        print(f"    missing effect: {reason}", file=sys.stderr)
         print(f"    before: {json.dumps(before, sort_keys=True)}", file=sys.stderr)
         print(f"    after:  {json.dumps(after, sort_keys=True)}", file=sys.stderr)
         print(file=sys.stderr)
@@ -423,12 +449,13 @@ def report_ineffective(ineffective: list[tuple[str, list[str], str, dict, dict]]
 
 def report_broken(broken: list[tuple[str, str]]) -> None:
     """Report separately from rejections: this is the harness failing to build a
-    session, not the catalog being wrong, and reading one as the other sends
-    whoever is on the red build to edit a file that is fine."""
+    session or to read an entry it does not know, not the catalog being wrong,
+    and reading one as the other sends whoever is on the red build to edit a
+    file that is fine."""
     plural = "y" if len(broken) == 1 else "ies"
     print(
-        f"\n{len(broken)} entr{plural} could not be checked — the fixture "
-        "failed to build, which is a harness fault rather than catalog drift:\n",
+        f"\n{len(broken)} entr{plural} could not be checked — the harness "
+        "could not set it up, which is a harness fault rather than catalog drift:\n",
         file=sys.stderr,
     )
     for entry_id, message in broken:
@@ -542,8 +569,15 @@ def main() -> int:
                 )
                 print(f"FAIL {entry['id']}", file=sys.stderr)
             else:
-                after = pane_rect(target[2], home) if target else None
-                reason = target and missing_effect(target[0], target[1], before, after)
+                after, reason = None, None
+                if target:
+                    try:
+                        after = pane_rect(target[2], home)
+                        reason = wrong_action(target[0], proc.stdout, proc.stderr) or missing_effect(
+                            target[0], target[1], before, after
+                        )
+                    except RuntimeError as e:
+                        after, reason = {}, f"its layout could not be read after the entry ran: {e}"
                 if reason:
                     ineffective.append((entry["id"], args, reason, before, after))
                     print(f"FAIL {entry['id']}", file=sys.stderr)

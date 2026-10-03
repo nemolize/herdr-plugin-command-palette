@@ -92,41 +92,40 @@ class EffectTarget(unittest.TestCase):
             effect_target("pane.resize", ["pane", "resize", "--pane", "p1"])
 
 
+# What herdr 0.9.3 left `{pane}` at after each action, from CENTRE in the cross.
+OBSERVED = {
+    ("resize", "left"): rect(27, 10, 33, 10),
+    ("resize", "right"): rect(33, 10, 33, 10),
+    ("resize", "up"): rect(30, 9, 30, 11),
+    ("resize", "down"): rect(30, 11, 30, 11),
+    ("swap", "left"): rect(0, 0, 30, 40),
+    ("swap", "right"): rect(60, 0, 60, 40),
+    ("swap", "up"): rect(30, 0, 30, 10),
+    ("swap", "down"): rect(30, 20, 30, 20),
+}
+
+
 class MissingEffect(unittest.TestCase):
-    def test_accepts_a_resize_that_changes_the_named_extent(self):
-        self.assertIsNone(missing_effect("resize", "left", CENTRE, rect(27, 10, 33, 10)))
-        self.assertIsNone(missing_effect("resize", "down", CENTRE, rect(30, 11, 30, 11)))
+    def test_accepts_what_herdr_does_for_the_named_direction(self):
+        for (verb, direction), after in OBSERVED.items():
+            with self.subTest(verb=verb, direction=direction):
+                self.assertIsNone(missing_effect(verb, direction, CENTRE, after))
 
-    def test_rejects_a_resize_that_changes_only_the_other_extent(self):
+    def test_rejects_what_herdr_does_for_any_other_direction(self):
+        for (verb, done), after in OBSERVED.items():
+            for named in ("left", "right", "up", "down"):
+                if named != done:
+                    with self.subTest(verb=verb, named=named, done=done):
+                        self.assertIsNotNone(missing_effect(verb, named, CENTRE, after))
+
+    def test_rejects_a_pane_left_in_place(self):
         self.assertEqual(
-            missing_effect("resize", "right", CENTRE, rect(30, 9, 30, 11)),
-            "its width stayed 30",
+            missing_effect("resize", "right", CENTRE, CENTRE),
+            "its right edge went 60 -> 60, not outward",
         )
-        self.assertEqual(
-            missing_effect("resize", "up", CENTRE, rect(27, 10, 33, 10)),
-            "its height stayed 10",
-        )
-
-    def test_accepts_a_swap_that_moves_the_pane_the_named_way(self):
-        for direction, after in (
-            ("left", rect(0, 0, 30, 40)),
-            ("right", rect(60, 0, 60, 40)),
-            ("up", rect(30, 0, 30, 10)),
-            ("down", rect(30, 20, 30, 20)),
-        ):
-            with self.subTest(direction):
-                self.assertIsNone(missing_effect("swap", direction, CENTRE, after))
-
-    def test_rejects_a_swap_that_moves_the_pane_the_other_way(self):
-        self.assertEqual(
-            missing_effect("swap", "left", CENTRE, rect(60, 0, 60, 40)),
-            "its x went 30 -> 60, not left",
-        )
-
-    def test_rejects_a_swap_that_leaves_the_pane_in_place(self):
         self.assertEqual(
             missing_effect("swap", "up", CENTRE, CENTRE),
-            "its y went 10 -> 10, not up",
+            "its centre moved +0, +0, not up",
         )
 
 
@@ -143,15 +142,17 @@ case "$1 $2" in
   "pane split") echo '{"result":{"pane":{"pane_id":"p9"}}}' ;;
   "pane layout")
     rect=$STUB_BEFORE; [ -f "$HOME/stub-acted" ] && rect=$STUB_AFTER
+    [ "$rect" = '"gone"' ] && { echo "no such pane" >&2; exit 1; }
     printf '{"result":{"layout":{"panes":[{"pane_id":"p1","rect":%s}]}}}\n' "$rect" ;;
   *) : > "$HOME/stub-acted"; echo "$STUB_ANSWER" >&"${STUB_FD:-1}"; exit "${STUB_EXIT:-0}" ;;
 esac
 """
 
 
-OK_ANSWER = '{"id":"cli:pane","result":{"type":"ok"}}'
 RESIZE_LEFT = '["pane", "resize", "--pane", "{pane}", "--direction", "left"]'
 SWAP_LEFT = '["pane", "swap", "--pane", "{pane}", "--direction", "left"]'
+RESIZED = '{"id":"cli:pane:resize","result":{"type":"pane_resize"}}'
+SWAPPED = '{"id":"cli:pane:swap","result":{"type":"pane_swap"}}'
 
 
 class MainVerdict(unittest.TestCase):
@@ -179,7 +180,7 @@ class MainVerdict(unittest.TestCase):
 
     def run_main(
         self, answer: str, fd: int = 1, exit_code: int = 0,
-        before: dict = CENTRE, after: dict = CENTRE,
+        before: dict = CENTRE, after: dict | str = CENTRE,
     ) -> tuple[int, str]:
         stub_env = {
             "STUB_ANSWER": answer, "STUB_FD": str(fd), "STUB_EXIT": str(exit_code),
@@ -208,27 +209,42 @@ class MainVerdict(unittest.TestCase):
 
     def test_fails_a_resize_that_leaves_the_pane_unchanged(self):
         self.use_entry("pane.resize.left", RESIZE_LEFT)
-        code, output = self.run_main(OK_ANSWER)
+        code, output = self.run_main(RESIZED)
         self.assertEqual(code, 1, output)
         self.assertIn("without the effect the entry names", output)
         self.assertIn("pane.resize.left", output)
-        self.assertIn("its width stayed 30", output)
+        self.assertIn("its left edge went 30 -> 30, not outward", output)
 
     def test_passes_a_resize_that_changes_the_pane(self):
         self.use_entry("pane.resize.left", RESIZE_LEFT)
-        code, output = self.run_main(OK_ANSWER, after=rect(27, 10, 33, 10))
+        code, output = self.run_main(RESIZED, after=rect(27, 10, 33, 10))
         self.assertEqual(code, 0, output)
 
     def test_fails_a_swap_that_moves_the_pane_the_other_way(self):
         self.use_entry("pane.swap.left", SWAP_LEFT)
-        code, output = self.run_main(OK_ANSWER, after=rect(60, 0, 60, 40))
+        code, output = self.run_main(SWAPPED, after=rect(60, 0, 60, 40))
         self.assertEqual(code, 1, output)
         self.assertIn("pane.swap.left", output)
-        self.assertIn("its x went 30 -> 60, not left", output)
+        self.assertIn("its centre moved +45, +5, not left", output)
+
+    def test_reports_a_layout_unreadable_after_the_entry_as_its_missing_effect(self):
+        self.use_entry("pane.swap.left", SWAP_LEFT)
+        code, output = self.run_main(SWAPPED, after="gone")
+        self.assertEqual(code, 1, output)
+        self.assertIn("without the effect the entry names", output)
+        self.assertIn("could not be read after the entry ran", output)
+        self.assertNotIn("could not be checked", output)
+
+    def test_fails_a_swap_entry_that_herdr_ran_as_a_resize(self):
+        self.use_entry("pane.swap.left", SWAP_LEFT)
+        code, output = self.run_main(RESIZED, after=rect(0, 0, 30, 40))
+        self.assertEqual(code, 1, output)
+        self.assertIn("pane.swap.left", output)
+        self.assertIn("herdr answered 'pane_resize', not 'pane_swap'", output)
 
     def test_passes_a_swap_that_moves_the_pane_the_named_way(self):
         self.use_entry("pane.swap.left", SWAP_LEFT)
-        code, output = self.run_main(OK_ANSWER, after=rect(0, 0, 30, 40))
+        code, output = self.run_main(SWAPPED, after=rect(0, 0, 30, 40))
         self.assertEqual(code, 0, output)
 
 
