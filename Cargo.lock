@@ -466,6 +466,7 @@ name = "herdr-command-palette"
 version = "0.6.0"
 dependencies = [
  "crossterm",
+ "proc-macro2",
  "ratatui",
  "serde",
  "serde_json",

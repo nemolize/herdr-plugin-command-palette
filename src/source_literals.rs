@@ -1,137 +1,110 @@
-//! The string and char literals a source file ships, read without a Rust
-//! parser: enough to guard what text can reach the screen.
+//! The string and char literals a source file ships: its tokens outside test
+//! code and doc comments.
 
-/// `text` has its `\u{..}` escapes decoded, so an escaped character is checked
-/// like a typed one.
+use proc_macro2::{Delimiter, TokenStream, TokenTree};
+
 #[derive(Debug, PartialEq)]
 pub struct Literal {
     pub line: usize,
+    /// Escapes other than `\u{..}` are kept as written; they are all ASCII.
     pub text: String,
 }
 
-/// Every string and char literal in `src`, except those inside comments and
-/// inside the item a `#[cfg(test)]` attribute marks.
+/// Every string and char literal in `src`, except those in doc comments and in
+/// the item, field, arm or parameter a `#[cfg(test)]` attribute marks.
 pub fn shipped_literals(src: &str) -> Vec<Literal> {
-    let chars: Vec<char> = src.chars().collect();
+    let tokens: TokenStream = src.parse().expect("source tokenizes");
     let mut out = Vec::new();
-    let mut line = 1;
-    let mut i = 0;
-    let mut nesting = 0usize;
-    let mut code_without_comments = String::new();
-    let mut test_item_nesting: Option<usize> = None;
-
-    while i < chars.len() {
-        let c = chars[i];
-        let next = chars.get(i + 1).copied();
-        if c == '/' && next == Some('/') {
-            while i < chars.len() && chars[i] != '\n' {
-                i += 1;
-            }
-            continue;
-        }
-        if c == '/' && next == Some('*') {
-            let mut depth = 0;
-            while i < chars.len() {
-                match (chars[i], chars.get(i + 1).copied()) {
-                    ('/', Some('*')) => (depth, i) = (depth + 1, i + 2),
-                    ('*', Some('/')) => (depth, i) = (depth - 1, i + 2),
-                    (ch, _) => {
-                        line += usize::from(ch == '\n');
-                        i += 1;
-                    }
-                }
-                if depth == 0 {
-                    break;
-                }
-            }
-            continue;
-        }
-        let prev_ident = i > 0 && (chars[i - 1].is_alphanumeric() || chars[i - 1] == '_');
-        let raw_hashes = (c == 'r' && !prev_ident)
-            .then(|| chars[i + 1..].iter().take_while(|&&h| h == '#').count())
-            .filter(|&n| chars.get(i + 1 + n) == Some(&'"'));
-        if c == '"' || raw_hashes.is_some() {
-            let start = line;
-            let (text, end) = match raw_hashes {
-                Some(n) => raw_string(&chars, i + 2 + n, n),
-                None => cooked(&chars, i + 1, '"'),
-            };
-            line += text.matches('\n').count();
-            if test_item_nesting.is_none() {
-                out.push(Literal { line: start, text });
-            }
-            code_without_comments.push('"');
-            i = end;
-            continue;
-        }
-        if c == '\'' && is_char_literal(&chars, i) {
-            let (text, end) = cooked(&chars, i + 1, '\'');
-            if test_item_nesting.is_none() {
-                out.push(Literal { line, text });
-            }
-            code_without_comments.push('\'');
-            i = end;
-            continue;
-        }
-
-        line += usize::from(c == '\n');
-        code_without_comments.push(c);
-        match c {
-            '(' | '[' | '{' => nesting += 1,
-            ')' | ']' | '}' => {
-                nesting -= 1;
-                if c == '}' && test_item_nesting == Some(nesting) {
-                    test_item_nesting = None;
-                }
-            }
-            ';' if test_item_nesting == Some(nesting) => test_item_nesting = None,
-            _ => {}
-        }
-        // After the `]` above, so the item is measured at the attribute's own nesting.
-        if code_without_comments.ends_with("#[cfg(test)]") {
-            test_item_nesting.get_or_insert(nesting);
-        }
-        i += 1;
-    }
+    collect(tokens, &mut out);
     out
 }
 
-/// A `'` opens a char literal unless it is a lifetime or label (`'a`, `'_`).
-fn is_char_literal(chars: &[char], i: usize) -> bool {
-    matches!(
-        (chars.get(i + 1), chars.get(i + 2)),
-        (Some('\\'), _) | (Some(_), Some('\''))
-    )
+fn collect(tokens: TokenStream, out: &mut Vec<Literal>) {
+    let mut tokens = tokens.into_iter().peekable();
+    while let Some(token) = tokens.next() {
+        match token {
+            TokenTree::Punct(p) if p.as_char() == '#' => {
+                let inner =
+                    matches!(tokens.peek(), Some(TokenTree::Punct(p)) if p.as_char() == '!');
+                if inner {
+                    tokens.next();
+                }
+                let Some(TokenTree::Group(attr)) = tokens.next() else {
+                    continue;
+                };
+                if !is_cfg_test(&attr.stream()) {
+                    if !is_doc(&attr.stream()) {
+                        collect(attr.stream(), out);
+                    }
+                    continue;
+                }
+                if inner {
+                    return;
+                }
+                // The marked item ends at its body, a `;`, or a `,` between fields,
+                // arms or parameters.
+                for t in tokens.by_ref() {
+                    match t {
+                        TokenTree::Group(g) if g.delimiter() == Delimiter::Brace => break,
+                        TokenTree::Punct(p) if matches!(p.as_char(), ';' | ',') => break,
+                        _ => {}
+                    }
+                }
+            }
+            TokenTree::Group(g) => collect(g.stream(), out),
+            TokenTree::Literal(lit) => {
+                if let Some(text) = contents(&lit.to_string()) {
+                    out.push(Literal {
+                        line: lit.span().start().line,
+                        text,
+                    });
+                }
+            }
+            _ => {}
+        }
+    }
 }
 
-/// Reads up to the closing `quote`, decoding `\u{..}`.
-fn cooked(chars: &[char], from: usize, quote: char) -> (String, usize) {
+fn is_cfg_test(attr: &TokenStream) -> bool {
+    attr.to_string().replace(' ', "") == "cfg(test)"
+}
+
+fn is_doc(attr: &TokenStream) -> bool {
+    matches!(attr.clone().into_iter().next(), Some(TokenTree::Ident(i)) if i == "doc")
+}
+
+/// The contents of a string or char literal as written; None for a number.
+fn contents(token: &str) -> Option<String> {
+    let body = token.trim_start_matches(['b', 'c']);
+    if let Some(raw) = body.strip_prefix('r') {
+        let hashes = raw.len() - raw.trim_start_matches('#').len();
+        return Some(raw[hashes + 1..raw.len() - hashes - 1].to_string());
+    }
+    let quote = body.chars().next().filter(|q| matches!(q, '"' | '\''))?;
+    Some(decode(&body[1..body.rfind(quote).unwrap()]))
+}
+
+fn decode(escaped: &str) -> String {
     let mut text = String::new();
-    let mut i = from;
-    while i < chars.len() && chars[i] != quote {
-        if chars[i] == '\\' && chars.get(i + 1) == Some(&'u') {
-            let close = (i..chars.len()).find(|&j| chars[j] == '}').unwrap();
-            let hex: String = chars[i + 3..close].iter().collect();
-            text.extend(u32::from_str_radix(&hex, 16).ok().and_then(char::from_u32));
-            i = close + 1;
+    let mut chars = escaped.chars();
+    while let Some(c) = chars.next() {
+        if c != '\\' {
+            text.push(c);
             continue;
         }
-        if chars[i] == '\\' {
-            text.push(chars[i]);
-            i += 1;
+        match chars.next() {
+            Some('u') => {
+                let hex: String = chars.by_ref().take_while(|&h| h != '}').collect();
+                let digits = hex.trim_start_matches('{').replace('_', "");
+                let decoded = u32::from_str_radix(&digits, 16)
+                    .ok()
+                    .and_then(char::from_u32);
+                text.push(decoded.unwrap_or_else(|| panic!("bad escape \\u{hex}}}")));
+            }
+            other => text.extend(std::iter::once('\\').chain(other)),
         }
-        text.extend(chars.get(i));
-        i += 1;
     }
-    (text, i + 1)
-}
-
-fn raw_string(chars: &[char], from: usize, hashes: usize) -> (String, usize) {
-    let closes = |j: usize| chars[j] == '"' && (1..=hashes).all(|k| chars.get(j + k) == Some(&'#'));
-    let end = (from..chars.len())
-        .find(|&j| closes(j))
-        .unwrap_or(chars.len());
-    (chars[from..end].iter().collect(), end + 1 + hashes)
+    text
 }
 
 #[cfg(test)]
@@ -143,8 +116,7 @@ mod tests {
         shipped_literals(src).into_iter().map(|l| l.text).collect()
     }
 
-    /// Any text the palette draws is built from these literals plus runtime
-    /// values, so an Ambiguous one would shift its row in a CJK locale.
+    /// Runtime values inside a note are not covered: only what the source spells.
     #[test]
     fn no_shipped_literal_widens_in_a_cjk_locale() {
         let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
@@ -168,36 +140,45 @@ mod tests {
     }
 
     #[test]
-    fn literals_in_code_are_read_and_comments_are_not() {
-        let src = "let a = \"x\"; // \"in a comment\"\n/* \"block\" */ let b = 'y';";
+    fn literals_in_code_are_read_and_comments_and_docs_are_not() {
+        let src = "/// \"doc\"\nlet a = \"x\"; // \"in a comment\"\n/* \"block\" */ let b = 'y';";
         assert_eq!(texts(src), ["x", "y"]);
     }
 
     #[test]
-    fn a_test_item_nesting_is_skipped_through_its_closing_brace_or_semicolon() {
+    fn a_test_item_is_skipped_through_its_closing_brace_or_semicolon() {
         let src = "fn a() { \"kept\"; }\n\
+                   #[cfg(test)]\nconst X: &str = \"dropped too\";\n\
                    #[cfg(test)]\nmod tests { fn t() { \"dropped\"; } fn u() {} \"still dropped\"; }\n\
-                   #[cfg(test)]\nuse x::{y};\n\
                    fn b() { \"kept too\"; }";
         assert_eq!(texts(src), ["kept", "kept too"]);
     }
 
     #[test]
-    fn an_escaped_character_is_decoded_and_a_lifetime_is_not_a_literal() {
-        let src = "fn f<'a>(s: &'a str) { \"\\u{2014}\"; '\\''; '\\u{25A1}'; }";
-        assert_eq!(texts(src), ["\u{2014}", "\\'", "\u{25A1}"]);
+    fn a_test_field_arm_or_parameter_is_skipped_through_its_comma() {
+        let src = "struct S { #[cfg(test)] a: u8, b: u8 }\n\
+                   fn f(#[cfg(test)] x: u8, y: u8) { \"param\"; }\n\
+                   fn g(n: u8) { match n { #[cfg(test)] 0 => \"arm\", _ => \"other\" } }\n\
+                   fn h() { \"after\"; }";
+        assert_eq!(texts(src), ["param", "other", "after"]);
     }
 
     #[test]
-    fn a_raw_string_ends_at_its_own_hashes() {
-        let src = "let a = r#\"say \"hi\"\"#; let b = r\"\\d\"; let c = \"//\";";
-        assert_eq!(texts(src), ["say \"hi\"", "\\d", "//"]);
+    fn a_unicode_escape_is_decoded_with_its_underscores() {
+        let src = "fn f<'a>(s: &'a str) { \"\\u{2014}\"; '\\''; '\\u{25_A1}'; \"\\\\u{2014}\"; }";
+        assert_eq!(texts(src), ["\u{2014}", "\\'", "\u{25A1}", "\\\\u{2014}"]);
+    }
+
+    #[test]
+    fn a_raw_string_keeps_its_contents_as_written() {
+        let src = "let a = r#\"say \"hi\"\"#; let b = br\"\\\"; let c = \"//\";";
+        assert_eq!(texts(src), ["say \"hi\"", "\\", "//"]);
     }
 
     #[test]
     fn a_literal_reports_the_line_it_starts_on() {
-        let src = "\n\"one\nline two\"\n\"three\"";
+        let src = "\n\"one\nline two\"\n\"a\\u{A}b\"\n\"four\"";
         let lines: Vec<usize> = shipped_literals(src).iter().map(|l| l.line).collect();
-        assert_eq!(lines, [2, 4]);
+        assert_eq!(lines, [2, 4, 5]);
     }
 }
