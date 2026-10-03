@@ -11,6 +11,7 @@ import importlib.util
 import io
 import json
 import os
+import re
 import shutil
 import tempfile
 import unittest
@@ -25,6 +26,7 @@ spec.loader.exec_module(catalog_e2e)
 unaccepted_response = catalog_e2e.unaccepted_response
 effect_target = catalog_e2e.effect_target
 missing_effect = catalog_e2e.missing_effect
+layout_rect = catalog_e2e.layout_rect
 
 
 class UnacceptedResponse(unittest.TestCase):
@@ -91,6 +93,44 @@ class EffectTarget(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             effect_target("pane.resize", ["pane", "resize", "--pane", "p1"])
 
+    def test_raises_naming_the_entry_when_the_argv_has_no_pane(self):
+        for args in (
+            ["pane", "resize", "--direction", "left"],
+            ["pane", "resize", "--direction", "left", "--pane"],
+        ):
+            with self.subTest(args=args), self.assertRaisesRegex(
+                RuntimeError, r"^pane\.resize\.left: .*no --pane value"
+            ):
+                effect_target("pane.resize.left", args)
+
+
+def layout(*rows: dict) -> str:
+    return json.dumps({"result": {"layout": {"panes": list(rows)}}})
+
+
+class LayoutRect(unittest.TestCase):
+    def test_returns_the_named_pane_rect(self):
+        self.assertEqual(
+            layout_rect("e", "p1", layout({"pane_id": "p1", "rect": CENTRE})), CENTRE
+        )
+
+    def test_raises_naming_the_entry_on_each_reshaped_answer(self):
+        for stdout, part in (
+            ("layout unavailable", "without a result.layout.panes list"),
+            ('{"result":{"layout":{"tabs":[]}}}', "without a result.layout.panes list"),
+            (layout({"pane_id": "p9", "rect": CENTRE}), "pane p1 is missing from its own layout"),
+            (layout("p1"), "pane p1 is missing from its own layout"),
+            (layout({"pane_id": "p1"}), "rect is not numeric"),
+            (layout({"pane_id": "p1", "rect": None}), "rect is not numeric"),
+            (layout({"pane_id": "p1", "rect": {"x": 30, "y": 10}}), "rect is not numeric"),
+            (layout({"pane_id": "p1", "rect": {**CENTRE, "width": "30"}}), "rect is not numeric"),
+            (layout({"pane_id": "p1", "rect": {**CENTRE, "width": True}}), "rect is not numeric"),
+        ):
+            with self.subTest(stdout=stdout), self.assertRaisesRegex(
+                RuntimeError, rf"^pane\.resize\.left: .*{re.escape(part)}"
+            ):
+                layout_rect("pane.resize.left", "p1", stdout)
+
 
 # What herdr 0.9.3 left `{pane}` at after each action, from CENTRE in the cross.
 OBSERVED = {
@@ -143,6 +183,7 @@ case "$1 $2" in
   "pane layout")
     rect=$STUB_BEFORE; [ -f "$HOME/stub-acted" ] && rect=$STUB_AFTER
     [ "$rect" = '"gone"' ] && { echo "no such pane" >&2; exit 1; }
+    [ "$rect" = '"no panes"' ] && { echo '{"result":{"layout":{"tabs":[]}}}'; exit 0; }
     printf '{"result":{"layout":{"panes":[{"pane_id":"p1","rect":%s}]}}}\n' "$rect" ;;
   *) : > "$HOME/stub-acted"; echo "$STUB_ANSWER" >&"${STUB_FD:-1}"; exit "${STUB_EXIT:-0}" ;;
 esac
@@ -180,7 +221,7 @@ class MainVerdict(unittest.TestCase):
 
     def run_main(
         self, answer: str, fd: int = 1, exit_code: int = 0,
-        before: dict = CENTRE, after: dict | str = CENTRE,
+        before: dict | str = CENTRE, after: dict | str = CENTRE,
     ) -> tuple[int, str]:
         stub_env = {
             "STUB_ANSWER": answer, "STUB_FD": str(fd), "STUB_EXIT": str(exit_code),
@@ -232,7 +273,33 @@ class MainVerdict(unittest.TestCase):
         code, output = self.run_main(SWAPPED, after="gone")
         self.assertEqual(code, 1, output)
         self.assertIn("without the effect the entry names", output)
-        self.assertIn("could not be read after the entry ran", output)
+        self.assertIn(
+            "could not be read after the entry ran: "
+            "pane.swap.left: herdr pane layout --pane p1 exited 1", output
+        )
+        self.assertNotIn("could not be checked", output)
+
+    def test_reports_an_entry_without_a_pane_as_unchecked_naming_it(self):
+        self.use_entry("pane.resize.left", '["pane", "resize", "--direction", "left"]')
+        code, output = self.run_main(RESIZED)
+        self.assertEqual(code, 1, output)
+        self.assertIn("could not be checked", output)
+        self.assertIn("pane.resize.left: its argv has no --pane value", output)
+        self.assertNotIn("Traceback", output)
+
+    def test_reports_a_reshaped_layout_before_the_entry_as_unchecked_naming_it(self):
+        self.use_entry("pane.resize.left", RESIZE_LEFT)
+        code, output = self.run_main(RESIZED, before="no panes")
+        self.assertEqual(code, 1, output)
+        self.assertIn("could not be checked", output)
+        self.assertIn("pane.resize.left: herdr pane layout --pane p1 answered without", output)
+
+    def test_reports_a_reshaped_layout_after_the_entry_as_its_missing_effect(self):
+        self.use_entry("pane.swap.left", SWAP_LEFT)
+        code, output = self.run_main(SWAPPED, after="no panes")
+        self.assertEqual(code, 1, output)
+        self.assertIn("without the effect the entry names", output)
+        self.assertIn("could not be read after the entry ran: pane.swap.left: ", output)
         self.assertNotIn("could not be checked", output)
 
     def test_fails_a_swap_entry_that_herdr_ran_as_a_resize(self):
