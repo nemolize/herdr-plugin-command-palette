@@ -144,21 +144,33 @@ pub fn rejection(c: &Command) -> Option<String> {
 /// The icon column is one cell wide on every row, so an override drawn wider or
 /// narrower would push its own title out of line with every other.
 fn icon_rejection(icon: &str) -> Option<String> {
+    // Named by code point: printing the icon would draw the very glyph rejected.
+    let named = code_points(icon);
     // Before `cell_width`, which panics on a control character in a debug build.
     if icon.chars().any(char::is_control) {
-        return Some(format!("`icon` {icon:?} contains a control character"));
+        return Some(format!("`icon` {named} contains a control character"));
     }
     let clusters = icon.graphemes(true).count();
     if clusters != 1 {
-        return Some(format!("`icon` {icon:?} is {clusters} glyphs, expected 1"));
+        return Some(format!("`icon` {named} is {clusters} glyphs, expected 1"));
     }
     match icon.cell_width() {
         1 if !same_width_in_every_locale(icon) => Some(format!(
-            "`icon` {icon:?} is East Asian Ambiguous width, drawn 2 cells wide in a CJK locale"
+            "`icon` {named} is East Asian Ambiguous width, drawn 2 cells wide in a CJK locale"
         )),
         1 => None,
-        cells => Some(format!("`icon` {icon:?} is {cells} cells wide, expected 1")),
+        cells => Some(format!("`icon` {named} is {cells} cells wide, expected 1")),
     }
+}
+
+fn code_points(text: &str) -> String {
+    if text.is_empty() {
+        return "\"\"".into();
+    }
+    text.chars()
+        .map(|c| format!("U+{:04X}", u32::from(c)))
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// Compares dotted numeric versions, ignoring any trailing suffix. Returns None
@@ -217,7 +229,6 @@ mod tests {
         }
     }
 
-    /// Issue #138.
     #[test]
     fn no_shipped_text_widens_in_a_cjk_locale() {
         for e in &shipped().commands {
@@ -537,19 +548,20 @@ mod tests {
     #[test]
     fn an_icon_that_is_not_one_cell_is_rejected() {
         let cases = [
-            ("", "0 glyphs"),
-            ("◫◫", "2 glyphs"),
-            ("\t", "control character"),
-            ("あ", "2 cells"),
-            ("👩\u{200D}💻", "2 cells"),
-            ("\u{200B}", "0 cells"),
-            ("□", "Ambiguous"),
-            ("○", "Ambiguous"),
+            ("", "`icon` \"\" is 0 glyphs"),
+            ("◫◫", "`icon` U+25EB U+25EB is 2 glyphs"),
+            ("\t", "`icon` U+0009 contains a control character"),
+            ("あ", "`icon` U+3042 is 2 cells"),
+            ("👩\u{200D}💻", "`icon` U+1F469 U+200D U+1F4BB is 2 cells"),
+            ("\u{200B}", "`icon` U+200B is 0 cells"),
+            ("□", "`icon` U+25A1 is East Asian Ambiguous"),
+            ("○", "`icon` U+25CB is East Asian Ambiguous"),
         ];
         for (bad, reason) in cases {
             let why = super::rejection(&entry_with_icon(&["pane", "close"], Some(bad)))
                 .unwrap_or_else(|| panic!("{bad:?} was accepted"));
-            assert!(why.contains(reason), "{bad:?}: {why}");
+            assert!(why.starts_with(reason), "{bad:?}: {why}");
+            assert!(bad.is_empty() || !why.contains(bad), "{bad:?} drawn: {why}");
         }
         // A lone halfwidth sound mark is `H`: one cell to ratatui and to any terminal.
         for good in ["✕", "e\u{301}", "!", "\u{FF9E}"] {
