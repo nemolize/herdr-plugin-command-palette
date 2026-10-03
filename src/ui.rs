@@ -182,10 +182,11 @@ fn render(f: &mut Frame, app: &mut App) {
         ),
     };
 
-    let status = app
-        .status
-        .as_ref()
-        .map(|msg| Paragraph::new(msg.clone()).wrap(Wrap { trim: false }).dim());
+    let status = app.status.as_ref().map(|msg| {
+        Paragraph::new(msg.trim_end().to_string())
+            .wrap(Wrap { trim: false })
+            .dim()
+    });
     let reserved = u16::from(header.is_some())
         + INPUT_ROWS
         + if matches!(app.stage, Stage::Prompt { .. }) {
@@ -201,7 +202,7 @@ fn render(f: &mut Frame, app: &mut App) {
     let status_room = rows.saturating_sub(reserved).clamp(1, MAX_STATUS_ROWS);
     let (status_height, status_cut) = match &status {
         Some(p) => {
-            let needed = wrapped_height(p, f.area());
+            let needed = wrapped_height(p, f.area().width);
             (needed.min(status_room), needed > status_room)
         }
         None => (FOOTER_ROWS, false),
@@ -445,23 +446,12 @@ fn render_footer(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(Paragraph::new(footer(&counts, area.width)).dim(), area);
 }
 
-/// Measured by rendering because counting characters under-counts a word-wrapped
-/// message, cutting the row that names the cause; ratatui's own `line_count`
-/// would answer this but sits behind an unstable feature.
-fn wrapped_height(status: &Paragraph, area: Rect) -> u16 {
-    if area.width == 0 || area.height == 0 {
-        return 1;
-    }
-    let probe = Rect::new(0, 0, area.width, area.height);
-    let mut buffer = Buffer::empty(probe);
-    status.render(probe, &mut buffer);
-
-    let used = (0..probe.height)
-        .rev()
-        .find(|&y| (0..probe.width).any(|x| buffer[(x, y)].symbol().trim() != ""))
-        .map(|y| y + 1)
-        .unwrap_or(1);
-    used.max(1)
+/// Counted rather than rendered into a probe: a probe only as tall as the pane
+/// misses text after a longer run of blank lines (#151).
+fn wrapped_height(status: &Paragraph, width: u16) -> u16 {
+    u16::try_from(status.line_count(width))
+        .unwrap_or(u16::MAX)
+        .max(1)
 }
 
 /// The counts on the left, the running version flush right. Herdr can hand the
@@ -1165,6 +1155,23 @@ mod render_tests {
         app.status = Some("one\ntwo\nthree ｶ\u{FF9E}\nfour".to_string());
         let lines = draw(&mut app, 36, 20);
         assert_eq!(lines[19], "three ｶ\u{FF9E} ...", "{lines:#?}");
+    }
+
+    #[test]
+    fn text_after_more_blank_lines_than_the_pane_has_rows_is_marked_cut() {
+        let mut app = app_with(vec![command("split.right", "Split pane: right", None)]);
+        app.status = Some(format!("first{}last", "\n".repeat(25)));
+        let lines = draw(&mut app, 36, 20);
+        assert_eq!(lines[17..], ["first", "", "..."], "{lines:#?}");
+    }
+
+    #[test]
+    fn trailing_blank_lines_take_no_rows_and_are_not_marked_cut() {
+        let mut app = app_with(vec![command("split.right", "Split pane: right", None)]);
+        app.status = Some(format!("only line{}", "\n".repeat(25)));
+        let lines = draw(&mut app, 36, 20);
+        assert_eq!(lines[19], "only line", "{lines:#?}");
+        assert!(!lines[18].contains("only line"), "{lines:#?}");
     }
 
     /// The typing stage lists nothing, so it keeps no rows for candidates.
