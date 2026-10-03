@@ -79,6 +79,38 @@ def herdr(*args: str, home: Path, check: bool = True) -> subprocess.CompletedPro
     return proc
 
 
+def answer_field(
+    call: str, node: object, path: str, kind: type = str, within: str = ""
+) -> object:
+    """The `kind` value at dotted `path` under `node`, the part of herdr's answer
+    to `call` found at `within`. A reshaped answer raises a RuntimeError naming the
+    call and the key, which `main` reports as that entry's BROKE line where a
+    KeyError or TypeError would abort the whole run (#173)."""
+    walked = within
+    for key in path.split("."):
+        walked = f"{walked}.{key}" if walked else key
+        if not isinstance(node, dict) or key not in node:
+            raise RuntimeError(f"fixture setup: herdr {call} answered without {walked}")
+        node = node[key]
+    if not isinstance(node, kind):
+        raise RuntimeError(
+            f"fixture setup: herdr {call} answered {walked} as a "
+            f"{type(node).__name__}, not a {kind.__name__}"
+        )
+    return node
+
+
+def answer(call: str, stdout: str, path: str, kind: type = str) -> object:
+    """`answer_field` on the `result` of herdr's answer to `call`."""
+    body = parse_envelope(stdout)
+    if body is None:
+        raise RuntimeError(
+            f"fixture setup: herdr {call} answered without a JSON envelope: "
+            f"{stdout.strip()[:200]}"
+        )
+    return answer_field(call, body, f"result.{path}", kind)
+
+
 def start_server_and_await_readiness(home: Path) -> subprocess.Popen:
     env = fixture_env(home)
     log = (home / "server.log").open("w")
@@ -166,7 +198,7 @@ class Fixture:
         def split(target: str, direction: str, focus: str = "--no-focus") -> str:
             proc = herdr("pane", "split", "--pane", target, "--direction", direction,
                          focus, home=self.home)
-            return json.loads(proc.stdout)["result"]["pane"]["pane_id"]
+            return answer("pane split", proc.stdout, "pane.pane_id")
 
         split(pane, "right")
         middle = split(pane, "right")
@@ -178,28 +210,36 @@ class Fixture:
             "worktree", "create", "--workspace", self.ids["{workspace}"],
             "--branch", "e2e-existing", "--no-focus", home=self.home,
         )
-        row = json.loads(proc.stdout)["result"]["worktree"]
+        row = answer("worktree create", proc.stdout, "worktree", dict)
+        workspace, path = (
+            answer_field("worktree create", row, key, within="result.worktree")
+            for key in ("open_workspace_id", "path")
+        )
         # The linked worktree's workspace is where `create` and `open` refuse to
         # start from, so the context is moved there while it stays open.
         listing = herdr(
-            "worktree", "list", "--workspace", row["open_workspace_id"], home=self.home
+            "worktree", "list", "--workspace", workspace, home=self.home
         )
-        repo = json.loads(listing.stdout)["result"]["source"]["repo_root"]
+        repo = answer("worktree list", listing.stdout, "source.repo_root")
         ids = {}
         if closed:
-            herdr("workspace", "close", row["open_workspace_id"], home=self.home)
+            herdr("workspace", "close", workspace, home=self.home)
         else:
-            ids["{workspace}"] = row["open_workspace_id"]
+            ids["{workspace}"] = workspace
         return {
             **ids,
             "{repo}": repo,
-            "{worktree path}": row["path"],
-            "{worktree workspace}": row["open_workspace_id"],
+            "{worktree path}": path,
+            "{worktree workspace}": workspace,
         }
 
     def _read_ids(self) -> dict[str, str]:
-        panes = json.loads(herdr("pane", "list", home=self.home).stdout)
-        rows = panes["result"]["panes"]
+        rows = answer("pane list", herdr("pane", "list", home=self.home).stdout, "panes", list)
+        if not rows:
+            raise RuntimeError("fixture setup: herdr pane list answered an empty result.panes")
+        for i, row in enumerate(rows):
+            for key in ("pane_id", "tab_id", "workspace_id"):
+                answer_field("pane list", row, key, within=f"result.panes[{i}]")
         focused = next((p for p in rows if p.get("focused")), rows[0])
         tabs = {p["tab_id"] for p in rows}
         another_tab = next((t for t in sorted(tabs) if t != focused["tab_id"]), None)
