@@ -91,6 +91,16 @@ class EffectTarget(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             effect_target("pane.resize", ["pane", "resize", "--pane", "p1"])
 
+    def test_raises_naming_the_entry_when_the_argv_has_no_pane(self):
+        for args in (
+            ["pane", "resize", "--direction", "left"],
+            ["pane", "resize", "--direction", "left", "--pane"],
+        ):
+            with self.subTest(args=args), self.assertRaisesRegex(
+                RuntimeError, r"^pane\.resize\.left: .*no --pane value"
+            ):
+                effect_target("pane.resize.left", args)
+
 
 # What herdr 0.9.3 left `{pane}` at after each action, from CENTRE in the cross.
 OBSERVED = {
@@ -143,6 +153,8 @@ case "$1 $2" in
   "pane layout")
     rect=$STUB_BEFORE; [ -f "$HOME/stub-acted" ] && rect=$STUB_AFTER
     [ "$rect" = '"gone"' ] && { echo "no such pane" >&2; exit 1; }
+    [ "$rect" = '"not json"' ] && { echo "layout unavailable"; exit 0; }
+    [ "$rect" = '"no panes"' ] && { echo '{"result":{"layout":{"tabs":[]}}}'; exit 0; }
     printf '{"result":{"layout":{"panes":[{"pane_id":"p1","rect":%s}]}}}\n' "$rect" ;;
   *) : > "$HOME/stub-acted"; echo "$STUB_ANSWER" >&"${STUB_FD:-1}"; exit "${STUB_EXIT:-0}" ;;
 esac
@@ -180,7 +192,7 @@ class MainVerdict(unittest.TestCase):
 
     def run_main(
         self, answer: str, fd: int = 1, exit_code: int = 0,
-        before: dict = CENTRE, after: dict | str = CENTRE,
+        before: dict | str = CENTRE, after: dict | str = CENTRE,
     ) -> tuple[int, str]:
         stub_env = {
             "STUB_ANSWER": answer, "STUB_FD": str(fd), "STUB_EXIT": str(exit_code),
@@ -234,6 +246,39 @@ class MainVerdict(unittest.TestCase):
         self.assertIn("without the effect the entry names", output)
         self.assertIn("could not be read after the entry ran", output)
         self.assertNotIn("could not be checked", output)
+
+    def test_reports_an_entry_without_a_pane_as_unchecked_naming_it(self):
+        self.use_entry("pane.resize.left", '["pane", "resize", "--direction", "left"]')
+        code, output = self.run_main(RESIZED)
+        self.assertEqual(code, 1, output)
+        self.assertIn("could not be checked", output)
+        self.assertIn("pane.resize.left: its argv has no --pane value", output)
+        self.assertNotIn("Traceback", output)
+
+    def test_reports_a_reshaped_layout_before_the_entry_as_unchecked_naming_it(self):
+        self.use_entry("pane.resize.left", RESIZE_LEFT)
+        for before, part in (
+            ("not json", "without a result.layout.panes list"),
+            ("no panes", "without a result.layout.panes list"),
+            ({"x": 30, "y": 10}, "rect is not numeric x/y/width/height"),
+            ({"x": 30, "y": 10, "width": "30", "height": 10}, "rect is not numeric"),
+        ):
+            with self.subTest(before=before):
+                code, output = self.run_main(RESIZED, before=before)
+                self.assertEqual(code, 1, output)
+                self.assertIn("could not be checked", output)
+                self.assertIn("pane.resize.left: ", output)
+                self.assertIn(part, output)
+
+    def test_reports_a_reshaped_layout_after_the_entry_as_its_missing_effect(self):
+        self.use_entry("pane.swap.left", SWAP_LEFT)
+        for after in ("not json", "no panes", {"x": 0, "y": 0, "width": 30}):
+            with self.subTest(after=after):
+                code, output = self.run_main(SWAPPED, after=after)
+                self.assertEqual(code, 1, output)
+                self.assertIn("without the effect the entry names", output)
+                self.assertIn("could not be read after the entry ran: pane.swap.left: ", output)
+                self.assertNotIn("could not be checked", output)
 
     def test_fails_a_swap_entry_that_herdr_ran_as_a_resize(self):
         self.use_entry("pane.swap.left", SWAP_LEFT)

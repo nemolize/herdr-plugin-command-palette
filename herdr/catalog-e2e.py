@@ -309,7 +309,12 @@ def effect_target(entry_id: str, args: list[str]) -> tuple[str, str, str] | None
         raise RuntimeError(
             f"{entry_id}: its id names no direction this harness can check"
         )
-    return verb, direction, args[args.index("--pane") + 1]
+    at = args.index("--pane") + 1 if "--pane" in args else len(args)
+    if at >= len(args):
+        raise RuntimeError(
+            f"{entry_id}: its argv has no --pane value to read the layout of"
+        )
+    return verb, direction, args[at]
 
 
 def missing_effect(verb: str, direction: str, before: dict, after: dict) -> str | None:
@@ -350,18 +355,38 @@ def wrong_action(verb: str, stdout: str, stderr: str) -> str | None:
     return f"herdr answered {answered!r}, not 'pane_{verb}'"
 
 
-def pane_rect(pane: str, home: Path) -> dict:
+RECT_FIELDS = ("x", "y", "width", "height")
+
+
+def pane_rect(entry_id: str, pane: str, home: Path) -> dict:
     proc = herdr("pane", "layout", "--pane", pane, home=home, check=False)
     if proc.returncode != 0:
         raise RuntimeError(
-            f"herdr pane layout --pane {pane} exited {proc.returncode}: "
+            f"{entry_id}: herdr pane layout --pane {pane} exited {proc.returncode}: "
             f"{proc.stderr.strip()}"
         )
-    layout = json.loads(proc.stdout)
-    for row in layout["result"]["layout"]["panes"]:
-        if row["pane_id"] == pane:
-            return row["rect"]
-    raise RuntimeError(f"pane {pane} is missing from its own layout")
+    body = parse_envelope(proc.stdout)
+    result = body.get("result") if body else None
+    layout = result.get("layout") if isinstance(result, dict) else None
+    rows = layout.get("panes") if isinstance(layout, dict) else None
+    if not isinstance(rows, list):
+        raise RuntimeError(
+            f"{entry_id}: herdr pane layout --pane {pane} answered without a "
+            f"result.layout.panes list: {proc.stdout.strip()[:200]}"
+        )
+    row = next((r for r in rows if isinstance(r, dict) and r.get("pane_id") == pane), None)
+    if row is None:
+        raise RuntimeError(f"{entry_id}: pane {pane} is missing from its own layout")
+    rect = row.get("rect")
+    if not isinstance(rect, dict) or not all(
+        isinstance(rect.get(f), (int, float)) and not isinstance(rect.get(f), bool)
+        for f in RECT_FIELDS
+    ):
+        raise RuntimeError(
+            f"{entry_id}: pane {pane}'s layout rect is not numeric "
+            f"{'/'.join(RECT_FIELDS)}: {json.dumps(rect)}"
+        )
+    return rect
 
 
 def running_herdr_version() -> str | None:
@@ -558,7 +583,7 @@ def main() -> int:
         try:
             args = resolved_args(entry, fixture.ids)
             target = effect_target(entry["id"], args)
-            before = pane_rect(target[2], home) if target else None
+            before = pane_rect(entry["id"], target[2], home) if target else None
             proc = herdr(*args, home=home, check=False)
             if proc.returncode != 0:
                 rejected.append((entry["id"], args, proc.returncode, proc.stderr.strip()))
@@ -572,7 +597,7 @@ def main() -> int:
                 after, reason = None, None
                 if target:
                     try:
-                        after = pane_rect(target[2], home)
+                        after = pane_rect(entry["id"], target[2], home)
                         reason = wrong_action(target[0], proc.stdout, proc.stderr) or missing_effect(
                             target[0], target[1], before, after
                         )
