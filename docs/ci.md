@@ -137,12 +137,15 @@ red on someone else's code — and it is part of cargo's fingerprint, which woul
 diverge the CI cache from every local build. Clippy's `-D warnings` is passed
 per-invocation instead, where it is scoped to this crate.
 
-`justfile` holds the check definitions and each CI job runs one recipe
-(`just lint`, `just test` plus `just palette-e2e`, `just open-test` and `just release-test`,
-`just build-musl`, `just deny`), so the commands exist
-once rather than as lists kept in sync by discipline. `just ci` runs the three CI
-jobs' recipes together, reproducing a CI failure locally with no push — given the
-two tools CI pins and installs for itself:
+`justfile` holds the check definitions and each CI job runs its checks as
+recipes (`Lint`: `just lint`; `Test`: `just test`, `just palette-e2e`,
+`just open-test`, `just catalog-e2e-test`, `just popup-collision-e2e-test` and
+`just release-test`; `E2ETests`: `just fetch-herdr`, `just catalog-e2e` and
+`just popup-collision-e2e`; `Build`: `just build-musl`; `Audit`: `just deny`),
+so the commands exist once rather than as lists kept in sync by discipline.
+`just ci` runs the `Lint`, `Test` and `Build` recipes together — not
+`E2ETests`', which need a fetched herdr — reproducing a CI failure locally with
+no push, given the two tools CI pins and installs for itself:
 
 ```sh
 cargo install just --version 1.58.0 --locked
