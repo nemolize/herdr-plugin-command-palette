@@ -48,8 +48,8 @@ jobs:
         with:
           tool: just@1.58.0
       - run: just test
-      # Rides this job rather than E2ETests: it stubs herdr instead of fetching
-      # one, so it needs nothing the toolchain above has not installed.
+      # These three ride this job rather than E2ETests: they stub herdr instead
+      # of fetching one, so they need nothing the toolchain above has not installed.
       - run: just palette-e2e
       - run: just open-test
       - run: just catalog-e2e-test
