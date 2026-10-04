@@ -67,8 +67,8 @@ jobs:
           # Keeps GITHUB_TOKEN out of .git/config, where build code could read it.
           persist-credentials: false
 
-      # rustflags: "" for the reason docs/ci.md records — the action's default
-      # `-D warnings` would apply to dependency builds.
+      # rustflags: "" — the action's default `-D warnings` would fail a release on a
+      # warning only a release target or profile raises, which CI's host clippy never compiles.
       - uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
         with:
           rustflags: ""
