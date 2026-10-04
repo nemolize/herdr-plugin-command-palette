@@ -467,9 +467,11 @@ version = "0.6.0"
 dependencies = [
  "crossterm",
  "proc-macro2",
+ "quote",
  "ratatui",
  "serde",
  "serde_json",
+ "syn 2.0.119",
  "toml",
  "unicode-segmentation",
  "unicode-width",
