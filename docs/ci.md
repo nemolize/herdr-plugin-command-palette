@@ -163,7 +163,7 @@ it reads from there, so a bump is one edit. Without mise,
 `gh auth token` for the online audits, and fails rather than running them offline.
 `just zizmor-test` needs the same, plus Node.
 
-All three are installed here at the versions the workflows pin, because a local tool
+All three are installed here at the versions CI installs, because a local tool
 that disagrees with CI's is the "clean here, red there" divergence this setup
 exists to prevent. `brew install just` is fine for everyday use and is what most
 setups already have; it just tracks the current formula rather than 1.58.0, so

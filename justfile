@@ -31,10 +31,10 @@ zizmor path='.':
     filter='.[]
         | select(.ident == "ref-version-mismatch")
         | .locations[0]
-        | "\(.symbolic.key.Local.verbatim_path):\(.concrete.location.start_point.row + 1)"'
+        | "\(.symbolic.key.Local.verbatim_path):\(.concrete.location.start_point.row + 1): the version comment must be exactly the pinned tag"'
     unverified=$(zizmor -q --persona pedantic --format json-v1 --no-exit-codes "$path" | jq -r "$filter")
     if [ -n "$unverified" ]; then
-        printf '%s: the version comment must be exactly the pinned tag\n' $unverified >&2
+        printf '%s\n' "$unverified" >&2
         exit 1
     fi
 

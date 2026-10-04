@@ -12,7 +12,7 @@ const CHECKOUT_TAG = "v7.0.1";
 let fixture;
 
 beforeEach(() => {
-  fixture = mkdtempSync(join(tmpdir(), "zizmor-fixture-"));
+  fixture = mkdtempSync(join(tmpdir(), "zizmor fixture-"));
   mkdirSync(join(fixture, ".github", "workflows"), { recursive: true });
 });
 
