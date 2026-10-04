@@ -24,7 +24,7 @@ read from `.github/workflows/`.
 |---|---|
 | `cargo fmt --all --check` | Zero false positives, about a second, and it keeps diffs reviewable — the scarce resource when an agent writes most of the code and reformats regions it touches. |
 | `cargo clippy --locked --all-targets -- -D warnings` | The default lint group is a correctness floor, and the tree already passes at `-D warnings`, so adopting it costs nothing today and catches real bug classes later. |
-| `just zizmor` | Audits the workflows themselves: every external `uses:` must be a full commit SHA, its trailing version comment must name that SHA's tag, and the known footguns (persisted checkout credentials, caches feeding a release, template injection) fail the job. Suppressions are inline `# zizmor: ignore[...]` comments on the line they excuse, each with its reason beside it — never on a `uses:` line, whose comment must be the tag alone. |
+| `just zizmor` | Audits the workflows themselves: every external `uses:` must be a full commit SHA, its trailing version comment must name that SHA's tag, and the known footguns (persisted checkout credentials, caches feeding a release, template injection) fail the job. Suppressions are inline `# zizmor: ignore[...]` comments on the line they excuse, each with its reason beside it — never on an external `uses:` line, whose comment must be the tag alone. |
 | `cargo test --locked` | The unit tests, which were being run by hand until now. |
 | `python3 herdr/palette-e2e.py` | The unit tests stop at the seams: `Screen` needs a real terminal, so nothing in-process sees a pick become a running command. This drives the built binary through a PTY against a stubbed herdr, and asserts that a rejected dispatch is readable in the pane rather than printed to a stderr the closing popup takes with it — the shape of "I picked it and nothing happened". |
 | `python3 herdr/open-test.py` | The action hop tells a popup collision from any other open failure by reading herdr's error envelope, whose shape changed between 0.8.2 and 0.9 (docs/design.md §6). A shape it stops matching shows only as a different message, so this runs the hop against a stub answering each envelope and asserts the message and exit status. |
@@ -92,7 +92,7 @@ unapproved (below) rather than a routine merge route.
 `continue-on-error` appears nowhere and should not be added: it turns the commit
 status green, which hides a failure rather than making it advisory.
 
-The intended reading of a red `Lint`, `Test` or `Build` is *the diff broke
+The intended reading of a red `Test` or `Build` is *the diff broke
 something* — each fails only for a reason present in the change, which is what
 makes them safe to require. Two required checks hold a weaker version of that
 property, because each watches something that changes outside this repo.
