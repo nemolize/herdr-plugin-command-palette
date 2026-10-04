@@ -154,8 +154,8 @@ jobs:
           retention-days: 1
 
   Publish:
-    # Runs on a dispatch too, so its assertions are rehearsed rather than first
-    # executing under a tag, where a fix would cost a new version.
+    # Runs on a dispatch too, so the checks needing no tag are rehearsed rather
+    # than first executing in a release build, where a fix would cost a version.
     needs: Build
     runs-on: ubuntu-24.04
     timeout-minutes: 10

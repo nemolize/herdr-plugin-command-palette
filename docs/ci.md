@@ -36,7 +36,7 @@ read from `.github/workflows/`.
 | `python3 herdr/popup-collision-e2e.py` | `open-test` asserts the hop's verdict on envelopes transcribed from herdr, so it keeps passing when herdr changes the envelope — which is how #99 shipped. This links a fixture plugin whose popup stays open into a real herdr, has herdr run `open.sh` twice as its action, and asserts the first press opens the popup and the second reports the collision (#133). A first press that opens nothing fails as such, since the second would then have nothing to collide with. |
 | `cargo build --release --locked` for both musl targets | `cargo test` compiles the test profile only. This is the sole check that exercises `[profile.release]` (LTO, `opt-level = "z"`, strip) and the per-target `rust-lld` pins in `.cargo/config.toml` — breakage that would otherwise surface for the first time in the release build itself. It covers the two release assets a Linux runner can build unaided; the macOS and Android assets need another host or the NDK, so `Release` is the only thing that compiles them. |
 | `cargo deny --locked check` | Runs in its own `Audit` workflow rather than CI. See the group table below. |
-| `cargo build --release --locked` for all five targets | Cuts the release (docs/design.md §11), in the `Release` workflow rather than CI. Adds the three assets CI's `Build` job cannot reach — the two macOS targets need their own runner, Android the NDK — so nothing else compiles those three before the release build. On the Changesets route that is `Release Plan` building the release draft's commit, before any tag exists; on the manual tag route it is the run the tag triggers. A `workflow_dispatch` dry run builds them earlier on either route. |
+| `cargo build --release --locked` for all five targets | Cuts the release (docs/design.md §11), in the `Release` workflow rather than CI. Adds the three assets CI's `Build` job cannot reach — the two macOS targets need their own runner, Android the NDK — so nothing else compiles those three before the release build. That is `Release Plan` building the release draft's commit, before any tag exists — on the Changesets route, and on the manual tag route too once the tagged version's commit reaches `main`; only a tag pushed before that makes its own run the first. A `workflow_dispatch` dry run builds them earlier on either route. |
 
 `Lint`, `Test`, `E2ETests` and `Build` are separate jobs rather than one, so a
 red X names which check failed without opening the log, and the four run
@@ -300,12 +300,16 @@ not a pin.
 `workflow_dispatch` builds the matrix against a given ref and publishes nothing.
 It exists because macOS and Android compile nowhere else — CI's `Build` job covers
 only the two musl targets — so without it the first compile of three of the five
-assets would be the release build: `Release Plan`'s build of the draft's commit on
-the Changesets route, the tag's own run on the manual tag route. `Publish` runs on
-a dispatch too, stopping short of the two steps that need a tag (the manifest
-assertion and the upload), so its five-asset check and checksum are rehearsed
-rather than first executing in a release build, where a fix would cost a new
-version.
+assets would be the release build: `Release Plan`'s build of the draft's commit,
+which on the manual tag route too comes first once the tagged version's commit
+reaches `main` — the tag's own run is first only when the tag is pushed before
+that. `Publish` runs on a dispatch too, so its five-asset check and checksum are
+rehearsed rather than first executing in a release build, where a fix would cost
+a new version. It skips five steps there: the manifest assertion and the upload,
+which run only when publishing, and the draft-target assertion with the two steps
+preparing it (checking out the release tooling, setting up Node), which run only
+when `Release Plan` passes a draft's tag. No dry run exercises that assertion's
+wiring, then; `just release-test` covers only the script it runs.
 
 Registering the dispatch needs the workflow on the default branch, so *this*
 workflow could not be rehearsed before it merged. That is a one-time bootstrap
