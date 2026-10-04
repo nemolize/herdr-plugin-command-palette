@@ -18,7 +18,7 @@ Two facts shape every choice here:
 ## What runs
 
 Each check below runs as a `justfile` recipe; which job runs which recipe is
-read from `.github/workflows/`. This table records why each check is in.
+read from `.github/workflows/`.
 
 | Tool | Why it is in |
 |---|---|
@@ -63,7 +63,7 @@ by what kind of test it is.
 
 | Group | Setting | Why |
 |---|---|---|
-| `advisories` | `yanked = "deny"` | The only check that fires on events outside this repo — an advisory published against an unchanged lockfile. That is what the schedule exists for. |
+| `advisories` | `yanked = "deny"` | The only check that fires on events outside this repo — an advisory published against an unchanged lockfile. That is what the `Audit` schedule exists for. |
 | `licenses` | explicit allow-list | `Cargo.toml` declares `license = "MIT"`, a claim a copyleft transitive dependency would falsify in a binary that is actually distributed. |
 | `sources` | `unknown-registry`/`unknown-git = "deny"` | A mechanical assertion that nothing git- or path-sourced enters a shipped binary. The realistic failure is not malice but an agent adding a `git = "..."` dependency to work around an unreleased upstream fix. |
 | `bans` | `multiple-versions = "warn"` | A duplicate version is upstream's resolution, not something the author's diff caused, so failing on it would be red for a reason absent from the change under review. |
@@ -143,8 +143,7 @@ diverge the CI cache from every local build. Clippy's `-D warnings` is passed
 per-invocation instead, where it is scoped to this crate.
 
 `justfile` holds the check definitions and each CI job runs them as recipes, so
-the commands exist once rather than as lists kept in sync by discipline; which
-job runs which recipe is read from `.github/workflows/ci.yml` and `audit.yml`.
+the commands exist once rather than as lists kept in sync by discipline.
 `just ci` runs the recipes of every `ci.yml` job but `E2ETests` (those need a
 fetched herdr), reproducing a CI failure locally with no push. Of the three
 tools CI pins and installs for itself, `just ci` needs `just` and `zizmor`, and
