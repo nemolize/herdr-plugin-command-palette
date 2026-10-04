@@ -21,7 +21,7 @@ Two facts shape every choice here:
 |---|---|---|
 | `cargo fmt --all --check` | `Lint` | Zero false positives, about a second, and it keeps diffs reviewable — the scarce resource when an agent writes most of the code and reformats regions it touches. |
 | `cargo clippy --locked --all-targets -- -D warnings` | `Lint` | The default lint group is a correctness floor, and the tree already passes at `-D warnings`, so adopting it costs nothing today and catches real bug classes later. |
-| `just zizmor` | `Lint` | Audits the workflows themselves: every external `uses:` must be a full commit SHA, its trailing version comment must name that SHA's tag, and the known footguns (persisted checkout credentials, caches feeding a release, template injection) fail the job. Suppressions are inline `# zizmor: ignore[...]` comments on the line they excuse, each with its reason beside it. |
+| `just zizmor` | `Lint` | Audits the workflows themselves: every external `uses:` must be a full commit SHA, its trailing version comment must name that SHA's tag, and the known footguns (persisted checkout credentials, caches feeding a release, template injection) fail the job. Suppressions are inline `# zizmor: ignore[...]` comments on the line they excuse, each with its reason beside it — never on a `uses:` line, whose comment must be the tag alone. |
 | `cargo test --locked` | `Test` | The unit tests, which were being run by hand until now. |
 | `python3 herdr/palette-e2e.py` | `Test` | The unit tests stop at the seams: `Screen` needs a real terminal, so nothing in-process sees a pick become a running command. This drives the built binary through a PTY against a stubbed herdr, and asserts that a rejected dispatch is readable in the pane rather than printed to a stderr the closing popup takes with it — the shape of "I picked it and nothing happened". |
 | `python3 herdr/open-test.py` | `Test` | The action hop tells a popup collision from any other open failure by reading herdr's error envelope, whose shape changed between 0.8.2 and 0.9 (docs/design.md §6). A shape it stops matching shows only as a different message, so this runs the hop against a stub answering each envelope and asserts the message and exit status. |
@@ -156,8 +156,8 @@ cargo install zizmor --version 1.30.1 --locked
 cargo install cargo-deny --version 0.20.2 --locked
 ```
 
-`just zizmor` also needs a logged-in `gh`: outside CI it takes `gh auth token`
-for the online audits, and fails rather than running them offline.
+`just zizmor` also needs `jq` and a logged-in `gh`: outside CI it takes
+`gh auth token` for the online audits, and fails rather than running them offline.
 
 All three are installed here at the versions the workflows pin, because a local tool
 that disagrees with CI's is the "clean here, red there" divergence this setup

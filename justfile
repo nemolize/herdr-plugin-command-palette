@@ -19,20 +19,18 @@ clippy:
 test:
     cargo test --locked
 
-# Without a token zizmor skips its online audits, the version-comment check among
-# them, and its default persona passes a pin that has no version comment at all.
+# Without a token zizmor skips its online audits. Its default persona passes a pin
+# whose comment is not a single tag, missing included; only pedantic reports that.
 zizmor:
     #!/usr/bin/env bash
     set -euo pipefail
     if [ -z "${GH_TOKEN:-}" ]; then GH_TOKEN=$(gh auth token); export GH_TOKEN; fi
     zizmor .
-    rc=0
-    git grep --untracked -nE 'uses:[[:space:]]+["'"'"']?[^.[:space:]"'"'"'][^@[:space:]"'"'"']*@[0-9a-fA-F]{40}["'"'"']?[[:space:]]*(#[[:space:]]*)?$' -- .github || rc=$?
-    case $rc in
-        0) echo "error: the pins above have no version comment" >&2; exit 1 ;;
-        1) ;;
-        *) exit "$rc" ;;
-    esac
+    unverified=$(zizmor -q --persona pedantic --format json --no-exit-codes . | jq -r '.[] | select(.ident == "ref-version-mismatch") | .locations[0] | "\(.symbolic.key.Local.verbatim_path):\(.concrete.location.start_point.row + 1)"')
+    if [ -n "$unverified" ]; then
+        printf '%s: the version comment must be exactly the pinned tag\n' $unverified >&2
+        exit 1
+    fi
 
 # Needs `pnpm install --ignore-scripts` first, for the Changesets CLI the lockfile pins.
 release-test:
