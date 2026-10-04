@@ -17,8 +17,8 @@ Two facts shape every choice here:
 
 ## What runs
 
-Which job runs each check is in `.github/workflows/`; this table records only
-why each check is in.
+Each check below runs as a `justfile` recipe; which job runs which recipe is
+read from `.github/workflows/`. This table records why each check is in.
 
 | Tool | Why it is in |
 |---|---|
@@ -34,8 +34,8 @@ why each check is in.
 | `python3 herdr/catalog-e2e.py` | The catalog hand-writes argv for every entry, and the unit tests check it against a `--help` table transcribed at one herdr version, which goes stale silently — three entries shipped broken that way, the last one valid in flags and arity and wrong only in combination (issue #24). This fetches a real herdr and runs every entry against it, so a constraint herdr adds is caught by the tool that added it rather than by a user whose pick does nothing. Resize and swap entries must also move their pane, since herdr answers both well when they change nothing (issue #119). |
 | `python3 herdr/popup-collision-e2e.py` | `open-test` asserts the hop's verdict on envelopes transcribed from herdr, so it keeps passing when herdr changes the envelope — which is how #99 shipped. This links a fixture plugin whose popup stays open into a real herdr, has herdr run `open.sh` twice as its action, and asserts the first press opens the popup and the second reports the collision (#133). A first press that opens nothing fails as such, since the second would then have nothing to collide with. |
 | `cargo build --release --locked` for both musl targets | `cargo test` compiles the test profile only. This is the sole check that exercises `[profile.release]` (LTO, `opt-level = "z"`, strip) and the per-target `rust-lld` pins in `.cargo/config.toml` — breakage that would otherwise surface for the first time at a release tag. It covers the two release assets a Linux runner can build unaided; the macOS and Android assets need another host or the NDK, so `Release` is the only thing that compiles them. |
-| `cargo deny --locked check` | Runs in its own `Audit` workflow rather than CI, on a schedule as well as on pushes and PRs touching its `paths:`. See the group table below. |
-| `cargo build --release --locked` for all five targets | Cuts the release (docs/design.md §11), in the `Release` workflow rather than CI. Adds the two assets `Build` cannot reach — macOS needs its own runner, Android the NDK — so the first time those two compile is a tag, unless the `workflow_dispatch` dry run is used first. |
+| `cargo deny --locked check` | Runs in its own `Audit` workflow rather than CI. See the group table below. |
+| `cargo build --release --locked` for all five targets | Cuts the release (docs/design.md §11), in the `Release` workflow rather than CI. Adds the three assets CI's `Build` job cannot reach — the two macOS targets need their own runner, Android the NDK — so the first time those three compile is a tag, unless the `workflow_dispatch` dry run is used first. |
 
 `Lint`, `Test`, `E2ETests` and `Build` are separate jobs rather than one, so a
 red X names which check failed without opening the log, and the four run
@@ -44,12 +44,9 @@ capitalised, on a pinned `ubuntu-24.04` — follows `nemolize/web-app-template`,
 which is the reference layout across these repositories; the language differs,
 the conventions should not.
 
-`E2ETests` is the one job that fetches a herdr binary, which is why
-`palette-e2e`, `open-test`, `catalog-e2e-test` and `popup-collision-e2e-test`
-ride `Test` instead: they
-stub herdr or need none, so they need nothing the test toolchain has not already
-installed. The split is by
-what a check must install, not by what kind of test it is.
+`E2ETests` is the one job that fetches a herdr binary; tests that stub herdr or
+need none ride `Test` instead. The split is by what a check must install, not
+by what kind of test it is.
 
 ## What does not run
 
@@ -297,8 +294,8 @@ through to whichever NDK is present, since a pin that degrades to "any NDK" is
 not a pin.
 
 `workflow_dispatch` builds the matrix against a given ref and publishes nothing.
-It exists because macOS and Android compile nowhere else — `Build` covers only
-the two musl targets — so without it the first compile of three of the five
+It exists because macOS and Android compile nowhere else — CI's `Build` job covers
+only the two musl targets — so without it the first compile of three of the five
 assets would be the tag itself. `Publish` runs on a dispatch too, stopping short
 of the two steps that need a tag (the manifest assertion and the upload), so its
 five-asset check and checksum are rehearsed rather than first executing under a
