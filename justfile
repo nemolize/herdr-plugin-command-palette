@@ -26,7 +26,11 @@ zizmor:
     set -euo pipefail
     if [ -z "${GH_TOKEN:-}" ]; then GH_TOKEN=$(gh auth token); export GH_TOKEN; fi
     zizmor .
-    unverified=$(zizmor -q --persona pedantic --format json --no-exit-codes . | jq -r '.[] | select(.ident == "ref-version-mismatch") | .locations[0] | "\(.symbolic.key.Local.verbatim_path):\(.concrete.location.start_point.row + 1)"')
+    filter='.[]
+        | select(.ident == "ref-version-mismatch")
+        | .locations[0]
+        | "\(.symbolic.key.Local.verbatim_path):\(.concrete.location.start_point.row + 1)"'
+    unverified=$(zizmor -q --persona pedantic --format json-v1 --no-exit-codes . | jq -r "$filter")
     if [ -n "$unverified" ]; then
         printf '%s: the version comment must be exactly the pinned tag\n' $unverified >&2
         exit 1

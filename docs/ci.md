@@ -136,11 +136,10 @@ rather than one per consumer.
 
 CI installs it via `actions-rust-lang/setup-rust-toolchain` with no `toolchain:`
 input, which reads the file. That action's `rustflags` input defaults to
-`-D warnings`; it is set to `""` here deliberately. A global `RUSTFLAGS` applies
-to dependency compilation — so an upstream deprecation would turn this repo's CI
-red on someone else's code — and it is part of cargo's fingerprint, which would
-diverge the CI cache from every local build. Clippy's `-D warnings` is passed
-per-invocation instead, where it is scoped to this crate.
+`-D warnings`; it is set to `""` here deliberately. A global `RUSTFLAGS` is part
+of cargo's fingerprint, so it would diverge the CI cache from every local
+build. Clippy's `-D warnings` is passed per-invocation instead, where it is
+scoped to this crate.
 
 `justfile` holds the check definitions and each CI job runs them as recipes, so
 the commands exist once rather than as lists kept in sync by discipline.
