@@ -31,7 +31,7 @@ read from `.github/workflows/`.
 | `python3 herdr/open-test.py` | The action hop tells a popup collision from any other open failure by reading herdr's error envelope, whose shape changed between 0.8.2 and 0.9 (docs/design.md §6). A shape it stops matching shows only as a different message, so this runs the hop against a stub answering each envelope and asserts the message and exit status. |
 | `python3 herdr/catalog-e2e-test.py` | `catalog-e2e` fails an entry herdr ran but answered with a response the palette reports as a failure — no envelope, an `error`, a missing or `null` `result` (issue #146). Against a herdr that answers well that check never fires, so a broken one looks the same as a passing one; this feeds it each answer and asserts the verdict. It does the same for the resize and swap effect check, feeding it layouts where the pane did not move or moved the wrong way, and an answer in which herdr names the other action (issue #119). |
 | `python3 herdr/popup-collision-e2e-test.py` | Against a herdr that collides correctly, `popup-collision-e2e`'s failure branches never fire, so a broken verdict would pass unnoticed. This feeds it each kind of press and asserts the verdict, and checks that each press is read by the run id herdr returns rather than by its place in the log list. |
-| `just release-test` | The release publishes from `package.json`'s version while `install.sh` reads `herdr-plugin.toml`'s, and `Cargo.toml`/`Cargo.lock` carry a third copy; a disagreement surfaces only at publish, where fixing it costs a version. This asserts all four agree, and runs the Changesets version step on a fixture repository — bump, one changelog entry per changeset, every manifest synced, changeset consumed — plus the release-planning decisions ("Cutting a release"). |
+| `just release-test` | The release publishes from `package.json`'s version while `install.sh` reads `herdr-plugin.toml`'s, and `Cargo.toml`/`Cargo.lock` carry a third copy; a disagreement surfaces only at publish. This asserts all four agree, and runs the Changesets version step on a fixture repository — bump, one changelog entry per changeset, every manifest synced, changeset consumed — plus the release-planning decisions ("Cutting a release"). |
 | `python3 herdr/catalog-e2e.py` | The catalog hand-writes argv for every entry, and the unit tests check it against a `--help` table transcribed at one herdr version, which goes stale silently — three entries shipped broken that way, the last one valid in flags and arity and wrong only in combination (issue #24). This fetches a real herdr and runs every entry against it, so a constraint herdr adds is caught by the tool that added it rather than by a user whose pick does nothing. Resize and swap entries must also move their pane, since herdr answers both well when they change nothing (issue #119). |
 | `python3 herdr/popup-collision-e2e.py` | `open-test` asserts the hop's verdict on envelopes transcribed from herdr, so it keeps passing when herdr changes the envelope — which is how #99 shipped. This links a fixture plugin whose popup stays open into a real herdr, has herdr run `open.sh` twice as its action, and asserts the first press opens the popup and the second reports the collision (#133). A first press that opens nothing fails as such, since the second would then have nothing to collide with. |
 | `cargo build --release --locked` for both musl targets | `cargo test` compiles the test profile only. This is the sole check that exercises `[profile.release]` (LTO, `opt-level = "z"`, strip) and the per-target `rust-lld` pins in `.cargo/config.toml` — breakage that would otherwise surface for the first time in the release build itself. It covers the two release assets a Linux runner can build unaided; the macOS and Android assets need another host or the NDK, so `Release` is the only thing that compiles them. |
@@ -198,7 +198,7 @@ merge commit repeating its PR's subject cannot add a second changelog entry
 (#41), and a release still being built cannot make its own changes look
 unreleased (#43).
 
-`Release Plan` runs on every push to `main`:
+`Release Plan` runs on every push to `main` — the Changesets route:
 
 1. **`Version-PR`** — while changesets are pending, `changesets/action` opens or
    updates the single `Version Packages` pull request (branch
@@ -269,12 +269,10 @@ version PR and on every update as changesets land. Approving is the release's
 own review step rather than an extra one, which is why this is accepted rather
 than worked around.
 
-Pushing a tag matching `v[0-9]*.[0-9]*.[0-9]*` by hand still publishes, so a
-release can be cut when `Release Plan` cannot. A tag that already exists when
-`Release Plan` checks for it — pushed before, or together with, its version
-commit reaching `main` — stops `Release Plan` before it builds. That route
-writes no changelog, and the version it tags must already be in `package.json`
-and every manifest `just release-test` checks — the publish asserts
+The manual tag route — pushing a tag matching `v[0-9]*.[0-9]*.[0-9]*` by hand —
+still publishes, so a release can be cut when `Release Plan` cannot. It writes
+no changelog, and the version it tags must already be in `package.json` and
+every manifest `just release-test` checks — the publish asserts
 `herdr-plugin.toml` against the tag. Either way the same matrix builds the five
 assets of §11 with `fail-fast: false`. Three properties are worth stating
 because each fails silently otherwise:
