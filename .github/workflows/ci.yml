@@ -31,12 +31,21 @@ jobs:
         with:
           rustflags: ""
           cache-key: lint
+      - id: zizmor-version
+        name: Read the zizmor version pinned in mise.toml
+        run: python3 -c 'import tomllib; print("version=" + tomllib.load(open("mise.toml", "rb"))["tools"]["zizmor"])' >> "$GITHUB_OUTPUT"
       - uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0 # v2.87.22
         with:
-          tool: just@1.58.0, zizmor@1.30.1
+          tool: just@1.58.0, zizmor@${{ steps.zizmor-version.outputs.version }}
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
       - run: just lint
-      # The token goes to this step only, not to `just lint`'s dependency builds.
+      # The token goes to these steps only, not to `just lint`'s dependency builds.
       - run: just zizmor
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - run: just zizmor-test
         env:
           GH_TOKEN: ${{ github.token }}
 

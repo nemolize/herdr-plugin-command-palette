@@ -3,7 +3,7 @@
 
 default: ci
 
-ci: lint test palette-e2e open-test catalog-e2e-test popup-collision-e2e-test release-test build-musl zizmor
+ci: lint test palette-e2e open-test catalog-e2e-test popup-collision-e2e-test release-test build-musl zizmor zizmor-test
 
 fmt:
     cargo fmt --all
@@ -21,20 +21,27 @@ test:
 
 # Without a token zizmor skips its online audits. Its default persona passes a pin
 # whose comment is not a single tag, missing included; only pedantic reports that.
-zizmor:
+[positional-arguments]
+zizmor path='.':
     #!/usr/bin/env bash
     set -euo pipefail
+    path=$1
     if [ -z "${GH_TOKEN:-}" ]; then GH_TOKEN=$(gh auth token); export GH_TOKEN; fi
-    zizmor .
+    zizmor "$path"
     filter='.[]
         | select(.ident == "ref-version-mismatch")
         | .locations[0]
-        | "\(.symbolic.key.Local.verbatim_path):\(.concrete.location.start_point.row + 1)"'
-    unverified=$(zizmor -q --persona pedantic --format json-v1 --no-exit-codes . | jq -r "$filter")
+        | "\(.symbolic.key.Local.verbatim_path):\(.concrete.location.start_point.row + 1): the version comment must be exactly the pinned tag"'
+    unverified=$(zizmor -q --persona pedantic --format json-v1 --no-exit-codes "$path" | jq -r "$filter")
     if [ -n "$unverified" ]; then
-        printf '%s: the version comment must be exactly the pinned tag\n' $unverified >&2
+        printf '%s\n' "$unverified" >&2
         exit 1
     fi
+
+# The repository's own pins never trip the version-comment check, so a broken
+# check would pass there unnoticed; this runs it on fixtures that must trip it.
+zizmor-test:
+    node --test scripts/zizmor.test.mjs
 
 # Needs `pnpm install --ignore-scripts` first, for the Changesets CLI the lockfile pins.
 release-test:
