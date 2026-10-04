@@ -3,7 +3,7 @@
 
 default: ci
 
-ci: lint zizmor test palette-e2e open-test catalog-e2e-test popup-collision-e2e-test release-test build-musl
+ci: lint test palette-e2e open-test catalog-e2e-test popup-collision-e2e-test release-test build-musl zizmor
 
 fmt:
     cargo fmt --all
@@ -19,10 +19,20 @@ clippy:
 test:
     cargo test --locked
 
-# Without GH_TOKEN it runs offline and skips the online audits, version-comment
-# verification among them; CI always passes one.
+# Without a token zizmor skips its online audits, the version-comment check among
+# them, and its default persona passes a pin that has no version comment at all.
 zizmor:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ -z "${GH_TOKEN:-}" ]; then GH_TOKEN=$(gh auth token); export GH_TOKEN; fi
     zizmor .
+    rc=0
+    git grep --untracked -nE 'uses:[[:space:]]+["'"'"']?[^.[:space:]"'"'"'][^@[:space:]"'"'"']*@[0-9a-fA-F]{40}["'"'"']?[[:space:]]*(#[[:space:]]*)?$' -- .github || rc=$?
+    case $rc in
+        0) echo "error: the pins above have no version comment" >&2; exit 1 ;;
+        1) ;;
+        *) exit "$rc" ;;
+    esac
 
 # Needs `pnpm install --ignore-scripts` first, for the Changesets CLI the lockfile pins.
 release-test:

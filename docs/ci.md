@@ -21,7 +21,7 @@ Two facts shape every choice here:
 |---|---|---|
 | `cargo fmt --all --check` | `Lint` | Zero false positives, about a second, and it keeps diffs reviewable — the scarce resource when an agent writes most of the code and reformats regions it touches. |
 | `cargo clippy --locked --all-targets -- -D warnings` | `Lint` | The default lint group is a correctness floor, and the tree already passes at `-D warnings`, so adopting it costs nothing today and catches real bug classes later. |
-| `zizmor .` | `Lint` | Audits the workflows themselves: every external `uses:` must be a full commit SHA, its trailing version comment must name that SHA's tag, and the known footguns (persisted checkout credentials, caches feeding a release, template injection) fail the job. Suppressions are inline `# zizmor: ignore[...]` comments on the line they excuse, each with its reason beside it. |
+| `just zizmor` | `Lint` | Audits the workflows themselves: every external `uses:` must be a full commit SHA, its trailing version comment must name that SHA's tag, and the known footguns (persisted checkout credentials, caches feeding a release, template injection) fail the job. Suppressions are inline `# zizmor: ignore[...]` comments on the line they excuse, each with its reason beside it. |
 | `cargo test --locked` | `Test` | The unit tests, which were being run by hand until now. |
 | `python3 herdr/palette-e2e.py` | `Test` | The unit tests stop at the seams: `Screen` needs a real terminal, so nothing in-process sees a pick become a running command. This drives the built binary through a PTY against a stubbed herdr, and asserts that a rejected dispatch is readable in the pane rather than printed to a stderr the closing popup takes with it — the shape of "I picked it and nothing happened". |
 | `python3 herdr/open-test.py` | `Test` | The action hop tells a popup collision from any other open failure by reading herdr's error envelope, whose shape changed between 0.8.2 and 0.9 (docs/design.md §6). A shape it stops matching shows only as a different message, so this runs the hop against a stub answering each envelope and asserts the message and exit status. |
@@ -94,20 +94,19 @@ status green, which hides a failure rather than making it advisory.
 
 The intended reading of a red `Lint`, `Test` or `Build` is *the diff broke
 something* — each fails only for a reason present in the change, which is what
-makes them safe to require. One step of `Lint` is the exception: `zizmor`'s
-online audits ask GitHub whether a pinned action has a published advisory, so
-an advisory against an unchanged workflow turns `Lint` red. That is accepted
-rather than split into a second, non-blocking run — the fix is the same bump
-Renovate would propose, and one invocation keeps local and CI identical.
-`E2ETests` is required on a weaker version of that
-property: it resolves a herdr release rather than pinning one, so a constraint
+makes them safe to require. Two required checks hold a weaker version of that
+property, because each watches something that changes outside this repo.
+`E2ETests` resolves a herdr release rather than pinning one, so a constraint
 herdr adds can turn it red against an unchanged catalog. That is the point of
 the job — a silent catalog drift is exactly what issue #24 was opened about —
 but it means a red `E2ETests` is worth reading before assuming the diff caused
-it. `Audit` is kept in its own workflow precisely so it
-cannot dilute that: it is the one job that can fail for reasons outside the diff,
-so requiring it would block a merge on an advisory published against an unchanged
-lockfile.
+it. `Lint`'s `zizmor` step asks GitHub about every pinned action, so a published
+advisory, an upstream tag moved or deleted from under its version comment, or a
+GitHub API error or rate limit turns `Lint` red against an unchanged workflow.
+That is accepted rather than split into a second, non-blocking run: an advisory
+or a moved tag wants the same bump Renovate would propose, and an API error
+clears on a re-run. `Audit` stays outside the required set, so an advisory
+published against an unchanged lockfile reports rather than blocks a merge.
 
 On a scheduled failure `Audit` opens (or comments on) an issue, because a red
 cron run on a repo with one maintainer otherwise reaches nobody. That step is not
@@ -157,13 +156,8 @@ cargo install zizmor --version 1.30.1 --locked
 cargo install cargo-deny --version 0.20.2 --locked
 ```
 
-`just zizmor` without a token runs offline and skips the online audits, the
-version-comment check among them, with only a warning to show for it. Give it
-the same read-only access CI does:
-
-```sh
-GH_TOKEN=$(gh auth token) just zizmor
-```
+`just zizmor` also needs a logged-in `gh`: outside CI it takes `gh auth token`
+for the online audits, and fails rather than running them offline.
 
 All three are installed here at the versions the workflows pin, because a local tool
 that disagrees with CI's is the "clean here, red there" divergence this setup
@@ -179,11 +173,11 @@ the root package, so a release bump has no lockfile copy to leave behind (#95).
 
 Every action is pinned by full commit SHA. A tag is mutable, and a repo that
 audits its Rust dependencies should hold its own workflow supply chain to the
-same standard. `zizmor` enforces it, so a floating tag, a branch reference or a
-version comment that names the wrong release fails `Lint`. Renovate is what
-moves the pins: it opens a PR rewriting the SHA and its comment together. A pin
-changed by hand takes both as well — the SHA of the release's tag and that tag
-as the comment — and `GH_TOKEN=$(gh auth token) just zizmor` confirms they agree.
+same standard. `just zizmor` enforces it, so a floating tag, a branch
+reference, or a version comment that is missing or names the wrong release fails
+`Lint`. Renovate moves the pins (above); a pin changed by hand takes both the
+SHA of the release's tag and that tag as its comment, and `just zizmor` confirms
+they agree.
 
 ## Cutting a release
 
