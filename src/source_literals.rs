@@ -1,7 +1,11 @@
 //! The string and char literals a source file ships: its tokens outside test
 //! code and doc comments.
 
-use proc_macro2::{Delimiter, LexError, TokenStream, TokenTree};
+mod test_code;
+
+use proc_macro2::{Delimiter, TokenStream, TokenTree};
+use syn::visit::Visit;
+use test_code::{is_cfg_test, TestCode};
 
 #[derive(Debug, PartialEq)]
 pub struct Literal {
@@ -11,14 +15,17 @@ pub struct Literal {
 }
 
 /// Every string and char literal in `src`, except those in doc comments and in
-/// the item, field, arm or parameter a `#[cfg(test)]` attribute marks.
-pub fn shipped_literals(src: &str) -> Result<Vec<Literal>, LexError> {
+/// code a `#[cfg(test)]` attribute marks.
+pub fn shipped_literals(src: &str) -> syn::Result<Vec<Literal>> {
+    let tokens: TokenStream = src.parse()?;
+    let mut test_code = TestCode::default();
+    test_code.visit_file(&syn::parse2(tokens.clone())?);
     let mut out = Vec::new();
-    collect(src.parse()?, &mut out);
+    collect(tokens, &test_code, &mut out);
     Ok(out)
 }
 
-fn collect(tokens: TokenStream, out: &mut Vec<Literal>) {
+fn collect(tokens: TokenStream, test_code: &TestCode, out: &mut Vec<Literal>) {
     let mut tokens = tokens.into_iter().peekable();
     while let Some(token) = tokens.next() {
         match token {
@@ -31,30 +38,22 @@ fn collect(tokens: TokenStream, out: &mut Vec<Literal>) {
                 ) else {
                     continue;
                 };
-                if !is_cfg_test(&attr.stream()) {
-                    if !is_doc(&attr.stream()) {
-                        collect(attr.stream(), out);
-                    }
-                    continue;
-                }
-                if inner {
+                if inner && is_cfg_test(&attr.stream()) {
                     return;
                 }
-                // The marked item ends at its body, a `;`, or a `,` between fields,
-                // arms or parameters.
-                for t in tokens.by_ref() {
-                    match t {
-                        TokenTree::Group(g) if g.delimiter() == Delimiter::Brace => break,
-                        TokenTree::Punct(p) if matches!(p.as_char(), ';' | ',') => break,
-                        _ => {}
-                    }
+                if !is_doc(&attr.stream()) {
+                    collect(attr.stream(), test_code, out);
                 }
             }
-            TokenTree::Group(g) => collect(g.stream(), out),
+            TokenTree::Group(g) => collect(g.stream(), test_code, out),
             TokenTree::Literal(lit) => {
+                let start = lit.span().start();
+                if test_code.contains(start) {
+                    continue;
+                }
                 if let Some(text) = contents(&lit.to_string()) {
                     out.push(Literal {
-                        line: lit.span().start().line,
+                        line: start.line,
                         text,
                     });
                 }
@@ -62,10 +61,6 @@ fn collect(tokens: TokenStream, out: &mut Vec<Literal>) {
             _ => {}
         }
     }
-}
-
-fn is_cfg_test(attr: &TokenStream) -> bool {
-    attr.to_string().replace(' ', "") == "cfg(test)"
 }
 
 fn is_doc(attr: &TokenStream) -> bool {
@@ -131,7 +126,7 @@ mod tests {
             }
             let src = std::fs::read_to_string(&path).unwrap();
             let literals = shipped_literals(&src)
-                .unwrap_or_else(|e| panic!("{} does not tokenize: {e}", path.display()));
+                .unwrap_or_else(|e| panic!("{} does not parse: {e}", path.display()));
             for Literal { line, text } in literals {
                 assert!(
                     same_width_in_every_locale(&text),
@@ -146,7 +141,7 @@ mod tests {
 
     #[test]
     fn literals_in_code_are_read_and_comments_and_docs_are_not() {
-        let src = "/// \"doc\"\nlet a = \"x\"; // \"in a comment\"\n/* \"block\" */ let b = 'y';";
+        let src = "/// \"doc\"\nfn f() { let a = \"x\"; // \"in a comment\"\n/* \"block\" */ let b = 'y'; }";
         assert_eq!(texts(src), ["x", "y"]);
     }
 
@@ -154,7 +149,7 @@ mod tests {
     fn a_test_item_is_skipped_through_its_closing_brace_or_semicolon() {
         let src = "fn a() { \"kept\"; }\n\
                    #[cfg(test)]\nconst X: &str = \"dropped too\";\n\
-                   #[cfg(test)]\nmod tests { fn t() { \"dropped\"; } fn u() {} \"still dropped\"; }\n\
+                   #[cfg(test)]\nmod tests { fn t() { \"dropped\"; } fn u() {} const S: &str = \"still dropped\"; }\n\
                    fn b() { \"kept too\"; }";
         assert_eq!(texts(src), ["kept", "kept too"]);
     }
@@ -169,6 +164,58 @@ mod tests {
     }
 
     #[test]
+    fn a_test_arm_or_item_is_skipped_past_braces_before_its_end() {
+        let src = "fn g(n: S) -> &'static str { match n { #[cfg(test)] S { x: 0 } => \"arm\", _ => \"other\" } }\n\
+                   #[cfg(test)]\nconst C: S = S { x: 1 }.named(\"init\");\n\
+                   fn h() { \"after\"; }";
+        assert_eq!(texts(src), ["other", "after"]);
+    }
+
+    #[test]
+    fn a_test_item_is_skipped_past_commas_in_generic_brackets() {
+        let src = "#[cfg(test)] const M: Foo<A, B> = Foo(\"leak\");\n\
+                   fn f(#[cfg(test)] x: Foo<A, B>, y: u8) { \"kept\"; }";
+        assert_eq!(texts(src), ["kept"]);
+    }
+
+    #[test]
+    fn every_node_kind_a_test_attribute_can_mark_is_skipped() {
+        let cases = [
+            ("impl S { #[cfg(test)] const A: &str = \"x\"; }", vec![]),
+            ("trait T { #[cfg(test)] const A: &str = \"x\"; }", vec![]),
+            (
+                "extern \"C\" { #[cfg(test)] static A: [u8; \"x\".len()]; }",
+                vec!["C"],
+            ),
+            ("struct S { #[cfg(test)] a: [u8; \"x\".len()] }", vec![]),
+            (
+                "enum E { #[cfg(test)] A = \"x\".len() as isize, B }",
+                vec![],
+            ),
+            ("fn f(#[cfg(test)] a: [u8; \"x\".len()]) {}", vec![]),
+            ("fn f() { #[cfg(test)] let a = \"x\"; }", vec![]),
+            (
+                "fn f() { let a = [#[cfg(test)] \"x\", \"kept\"]; }",
+                vec!["kept"],
+            ),
+            ("fn f() { S { #[cfg(test)] a: \"x\", b: 1 }; }", vec![]),
+            (
+                "fn f(s: S) { let S { #[cfg(test)] a: \"x\", .. } = s; }",
+                vec![],
+            ),
+            (
+                "struct G<#[cfg(test)] const N: usize = { \"x\".len() }>;",
+                vec![],
+            ),
+            ("fn f() { |#[cfg(test)] a: [u8; \"x\".len()]| (); }", vec![]),
+            ("type F = fn(#[cfg(test)] [u8; \"x\".len()]);", vec![]),
+        ];
+        for (src, kept) in cases {
+            assert_eq!(texts(src), kept, "{src}");
+        }
+    }
+
+    #[test]
     fn a_unicode_escape_is_decoded_with_its_underscores() {
         let src = "fn f<'a>(s: &'a str) { \"\\u{2014}\"; '\\''; '\\u{25_A1}'; \"\\\\u{2014}\"; }";
         assert_eq!(texts(src), ["\u{2014}", "\\'", "\u{25A1}", "\\\\u{2014}"]);
@@ -176,13 +223,13 @@ mod tests {
 
     #[test]
     fn a_raw_string_keeps_its_contents_as_written() {
-        let src = "let a = r#\"say \"hi\"\"#; let b = br\"\\\"; let c = \"//\";";
+        let src = "fn f() { let a = r#\"say \"hi\"\"#; let b = br\"\\\"; let c = \"//\"; }";
         assert_eq!(texts(src), ["say \"hi\"", "\\", "//"]);
     }
 
     #[test]
     fn a_literal_reports_the_line_it_starts_on() {
-        let src = "\n\"one\nline two\"\n\"a\\u{A}b\"\n\"four\"";
+        let src = "fn f() {\n\"one\nline two\";\n\"a\\u{A}b\";\n\"four\"; }";
         let lines: Vec<usize> = shipped_literals(src)
             .unwrap()
             .iter()
@@ -194,7 +241,7 @@ mod tests {
     #[test]
     fn an_inner_test_attribute_skips_the_rest_of_its_module() {
         let src = "fn a() { \"kept\"; }\n\
-                   mod m { #![cfg(test)] fn t() { \"dropped\"; } \"dropped too\"; }\n\
+                   mod m { #![cfg(test)] fn t() { \"dropped\"; } const S: &str = \"dropped too\"; }\n\
                    fn b() { \"kept too\"; }";
         assert_eq!(texts(src), ["kept", "kept too"]);
     }
@@ -206,8 +253,9 @@ mod tests {
     }
 
     #[test]
-    fn source_that_does_not_tokenize_is_an_error() {
+    fn source_that_does_not_tokenize_or_parse_is_an_error() {
         assert!(shipped_literals("fn f() { \"unterminated }").is_err());
+        assert!(shipped_literals("let a = 1;").is_err());
     }
 
     #[test]
