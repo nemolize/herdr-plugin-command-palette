@@ -15,7 +15,7 @@ pub struct Literal {
 }
 
 /// Every string and char literal in `src`, except those in doc comments and in
-/// the item, field, arm, parameter or statement a `#[cfg(test)]` attribute marks.
+/// code a `#[cfg(test)]` attribute marks.
 pub fn shipped_literals(src: &str) -> syn::Result<Vec<Literal>> {
     let tokens: TokenStream = src.parse()?;
     let mut test_code = TestCode::default();
@@ -207,6 +207,8 @@ mod tests {
                 "struct G<#[cfg(test)] const N: usize = { \"x\".len() }>;",
                 vec![],
             ),
+            ("fn f() { |#[cfg(test)] a: [u8; \"x\".len()]| (); }", vec![]),
+            ("type F = fn(#[cfg(test)] [u8; \"x\".len()]);", vec![]),
         ];
         for (src, kept) in cases {
             assert_eq!(texts(src), kept, "{src}");
@@ -253,7 +255,7 @@ mod tests {
     #[test]
     fn source_that_does_not_tokenize_or_parse_is_an_error() {
         assert!(shipped_literals("fn f() { \"unterminated }").is_err());
-        assert!(shipped_literals("fn f( {}").is_err());
+        assert!(shipped_literals("let a = 1;").is_err());
     }
 
     #[test]

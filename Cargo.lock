@@ -471,7 +471,7 @@ dependencies = [
  "ratatui",
  "serde",
  "serde_json",
- "syn 2.0.119",
+ "syn 3.0.4",
  "toml",
  "unicode-segmentation",
  "unicode-width",

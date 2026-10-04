@@ -60,6 +60,8 @@ skip_marked! {
     visit_field_value: FieldValue,
     visit_field_pat: FieldPat,
     visit_generic_param: GenericParam,
+    visit_pat_type: PatType,
+    visit_named_arg: NamedArg,
 }
 
 pub fn is_cfg_test(attr: &TokenStream) -> bool {
