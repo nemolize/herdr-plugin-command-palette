@@ -3,7 +3,7 @@
 
 default: ci
 
-ci: lint test palette-e2e open-test catalog-e2e-test popup-collision-e2e-test release-test build-musl
+ci: lint test palette-e2e open-test catalog-e2e-test popup-collision-e2e-test release-test build-musl zizmor
 
 fmt:
     cargo fmt --all
@@ -18,6 +18,19 @@ clippy:
 
 test:
     cargo test --locked
+
+# Without a token zizmor skips its online audits. Its default persona passes a pin
+# whose comment is not a single tag, missing included; only pedantic reports that.
+zizmor:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ -z "${GH_TOKEN:-}" ]; then GH_TOKEN=$(gh auth token); export GH_TOKEN; fi
+    zizmor .
+    unverified=$(zizmor -q --persona pedantic --format json --no-exit-codes . | jq -r '.[] | select(.ident == "ref-version-mismatch") | .locations[0] | "\(.symbolic.key.Local.verbatim_path):\(.concrete.location.start_point.row + 1)"')
+    if [ -n "$unverified" ]; then
+        printf '%s: the version comment must be exactly the pinned tag\n' $unverified >&2
+        exit 1
+    fi
 
 # Needs `pnpm install --ignore-scripts` first, for the Changesets CLI the lockfile pins.
 release-test:
