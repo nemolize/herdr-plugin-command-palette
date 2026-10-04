@@ -230,7 +230,7 @@ herdr plugin link .
 ```
 
 `just` runs the checks CI runs except the ones needing a fetched herdr and the
-`cargo deny` audit; [`docs/ci.md`](docs/ci.md) has what runs where. Design
+`cargo deny` audit; [`docs/ci.md`](docs/ci.md) has what runs and why. Design
 rationale — every measurement and every rejected alternative — is in
 [`docs/design.md`](docs/design.md).
 
