@@ -73,7 +73,8 @@ jobs:
         with:
           rustflags: ""
           target: ${{ matrix.target }}
-          cache-key: release-${{ matrix.target }}
+          # A published asset must not be built from a cache other runs can write.
+          cache: false
 
       # ANDROID_NDK_ROOT is deliberately not followed: the image carries several
       # NDKs and rotates which one it names (docs/design.md §12).
@@ -230,6 +231,7 @@ jobs:
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: .release-tooling/.node-version
+          package-manager-cache: false
       - if: inputs.tag != ''
         name: Assert the tag's draft still targets this commit
         env:
@@ -241,7 +243,8 @@ jobs:
           node .release-tooling/scripts/assert-draft.mjs --tag "$PUBLISH_TAG" --ref "$REF" \
             < "$RUNNER_TEMP/releases.ndjson"
 
-      - if: env.PUBLISHING == 'true'
+      # Kept over `gh release`: it clears the draft flag only once every asset is attached.
+      - if: env.PUBLISHING == 'true' # zizmor: ignore[superfluous-actions]
         uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
           tag_name: ${{ env.PUBLISH_TAG }}

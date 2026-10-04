@@ -3,7 +3,7 @@
 
 default: ci
 
-ci: lint test palette-e2e open-test catalog-e2e-test popup-collision-e2e-test release-test build-musl
+ci: lint zizmor test palette-e2e open-test catalog-e2e-test popup-collision-e2e-test release-test build-musl
 
 fmt:
     cargo fmt --all
@@ -18,6 +18,11 @@ clippy:
 
 test:
     cargo test --locked
+
+# Without GH_TOKEN it runs offline and skips the online audits, version-comment
+# verification among them; CI always passes one.
+zizmor:
+    zizmor .
 
 # Needs `pnpm install --ignore-scripts` first, for the Changesets CLI the lockfile pins.
 release-test:
