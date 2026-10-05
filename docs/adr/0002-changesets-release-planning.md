@@ -69,9 +69,9 @@ from commit subjects — without changing the merge policy.
 - **A forgotten changeset ships nothing.** A user-visible change merged without
   one reaches no release until a later changeset does. This is the price of
   declared intent; review is what catches it.
-- **Retry needs no new version.** A failed build leaves an untagged draft; the
-  next `Release Plan` run — a re-run, a dispatch, or any push to `main` —
-  rebuilds the commit that draft targets.
+- **A fault in what the release reads from the drafted tree needs a new
+  version.** A failed build leaves an untagged draft that later runs rebuild
+  under the same version (`docs/ci.md`, "Retrying a failed release").
 - **v0.4.0 is the baseline.** It was cut by release-please and is already
   published; the migration adds no changeset for it and cuts no release of its
   own.

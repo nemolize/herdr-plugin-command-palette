@@ -239,20 +239,26 @@ tag comes into existence**, only at that point. Nothing in `Release` reads the
 tag from git: both jobs check out the release commit by SHA, and the manifest
 assertion compares the tag as a string.
 
-**Retrying a failed release.** A failed target leaves the draft unpublished
-and untagged, so nothing is public. Either re-run the failed jobs of that
-`Release Plan` run, or run `Release Plan` by hand (`gh workflow run
-release-plan.yml`) — any later push to `main` does the same. Each rebuilds the
-commit the draft targets under the same version; no new changeset or version
-bump is involved. A failure the draft's commit will always hit (a code or
-build-config fault) cannot be retried away: ship the fix with a changeset as
-the next version, and restate the stuck version's changelog entries in that
-changeset's note — its own section reaches no published release. Until the
-fix's version PR merges, each run rebuilds the broken draft and fails again;
-afterwards nothing targets the old version, so delete its draft
-(`gh release delete <tag>`) and it stays unreleased. An in-progress
-run is never cancelled, so a push landing mid-build waits and then sees the
-published release or the draft to retry.
+**Retrying a failed release.** A failed target leaves the draft unpublished and
+untagged, so nothing is public. Either re-run the failed jobs of that `Release
+Plan` run, or run `Release Plan` by hand (`gh workflow run release-plan.yml`) —
+any later push to `main` does the same. Each rebuilds the commit the draft
+targets under the same version; no new changeset or version bump is involved.
+Only the checkout of the draft's tree is pinned to that commit: `release.yml`
+is called with `./`, which GitHub loads from the run's own commit, and so are
+the scripts it checks out into `.release-tooling`. So a fault in either is
+fixed by merging the fix to `main` without a changeset, and that push rebuilds
+the draft with it, provided the fix needs nothing new from the draft's tree;
+re-running the failed jobs reuses the old workflow and cannot pick the fix up.
+A fault in anything the release jobs read from the draft's tree — the
+`justfile` and toolchain file as much as source and Cargo files — cannot be
+retried away: ship the fix with a changeset as the next version, and restate
+the stuck version's changelog entries in that changeset's note — its own
+section reaches no published release. Until the fix's version PR merges, each
+run rebuilds the broken draft and fails again; afterwards nothing targets the
+old version, so delete its draft (`gh release delete <tag>`) and it stays
+unreleased. An in-progress run is never cancelled, so a push landing mid-build
+waits and then sees the published release or the draft to retry.
 
 None of this starts without a repository setting no file here can carry:
 **Settings → Actions → General → "Allow GitHub Actions to create and approve
