@@ -14,6 +14,7 @@ use unicode_segmentation::UnicodeSegmentation;
 
 use crate::app::{App, Stage, Step};
 use crate::glyph::{CURSOR, CURSOR_COLUMNS, HIGHLIGHT_COLUMNS, HIGHLIGHT_SYMBOL, SEPARATOR};
+use crate::line_edit::{Edit, LineEdit};
 
 /// Restores the terminal on drop, so an error path cannot leave the pane in raw
 /// mode with the alternate screen still up.
@@ -104,7 +105,7 @@ fn apply(app: &mut App, event: Event, drawn_rows: u16) -> Option<Step> {
             Step::Continue
         });
     }
-    let typing = matches!(app.stage, Stage::Prompt { .. });
+    let ctrl = key.modifiers == KeyModifiers::CONTROL;
     Some(match key.code {
         KeyCode::Esc => {
             if app.leave_stage() {
@@ -117,33 +118,25 @@ fn apply(app: &mut App, event: Event, drawn_rows: u16) -> Option<Step> {
             app.move_selection(-1);
             Step::Continue
         }
+        KeyCode::Char('p') if ctrl => {
+            app.move_selection(-1);
+            Step::Continue
+        }
         KeyCode::Down => {
             app.move_selection(1);
             Step::Continue
         }
+        KeyCode::Char('n') if ctrl => {
+            app.move_selection(1);
+            Step::Continue
+        }
         KeyCode::Enter => app.confirm(),
-        // The typing stage has no list to filter, so its keystrokes edit the
-        // argument being composed rather than the query.
-        KeyCode::Backspace => {
-            if typing {
-                app.pop_text();
-            } else {
-                app.pop();
+        _ => {
+            if let Some(edit) = Edit::from_key(key) {
+                app.edit(edit);
             }
             Step::Continue
         }
-        // Modifiers are excluded so a chord (Ctrl-A, Alt-f) is not typed
-        // into the query as its bare letter. SHIFT is what produces capitals
-        // and belongs in the text.
-        KeyCode::Char(c) if (key.modifiers - KeyModifiers::SHIFT).is_empty() => {
-            if typing {
-                app.push_text(c);
-            } else {
-                app.push(c);
-            }
-            Step::Continue
-        }
-        _ => Step::Continue,
     })
 }
 
@@ -226,7 +219,7 @@ fn render(f: &mut Frame, app: &mut App) {
         return;
     }
 
-    f.render_widget(Paragraph::new(format!("> {}", app.query())), chunks[1]);
+    render_input(f, &app.selection.query, chunks[1]);
 
     // Owned rather than borrowed: the list borrows `app` immutably while
     // render_stateful_widget needs `app.selection.state` mutably.
@@ -360,39 +353,56 @@ fn row_line(icon: Option<&str>, title: &str, key: &str, width: u16) -> Line<'sta
     Line::from(spans)
 }
 
-/// Draws the typed name with a cursor after it (docs/design.md §4).
+/// Draws the query or the typed name with the cursor in it (docs/design.md §4).
 ///
 /// The cursor is reserved a cell BEFORE the text is measured, which is what
 /// makes clipping it away with the text unreachable rather than a calculation
-/// to keep honest.
-fn render_input(f: &mut Frame, text: &str, area: Rect) {
+/// to keep honest. The text before the cursor claims the room first, so the
+/// cursor and what was just typed stay on screen.
+fn render_input(f: &mut Frame, line: &LineEdit, area: Rect) {
     if area.width == 0 {
         return;
     }
-    // Dropped because `CellWidth` panics on one in a debug build, and a seeded
-    // name can carry one — herdr stores whatever was set.
-    let text: String = text.chars().filter(|c| !c.is_control()).collect();
-    let text = text.as_str();
+    let (before, after) = line.split();
+    let (before, after) = (drawable(before), drawable(after));
     // The cursor outranks the prefix when the pane cannot hold both: it is what
     // says the field is live, and a lone `>` says nothing.
-    let (line, cursor_column) = match area.width.checked_sub(PROMPT_COLUMNS + CURSOR_COLUMNS) {
-        None => (String::new(), 0),
+    let (left, right, cursor_column) = match area.width.checked_sub(PROMPT_COLUMNS + CURSOR_COLUMNS)
+    {
+        None => (String::new(), "", 0),
         Some(room) => {
-            let shown = tail_within(text, room);
-            (format!("> {shown}"), PROMPT_COLUMNS + drawn_width(shown))
+            let left = tail_within(&before, room);
+            (
+                format!("> {left}"),
+                after.as_str(),
+                PROMPT_COLUMNS + drawn_width(left),
+            )
         }
     };
 
-    f.render_widget(Paragraph::new(line), area);
+    f.render_widget(Paragraph::new(left), area);
+    let cursor = Rect {
+        x: area.x + cursor_column,
+        width: CURSOR_COLUMNS,
+        ..area
+    };
+    f.render_widget(Paragraph::new(CURSOR), cursor);
+    // The right edge clips whole glyphs on its own, unlike the left.
+    let rest = cursor_column + CURSOR_COLUMNS;
     f.render_widget(
-        Paragraph::new(CURSOR),
+        Paragraph::new(right),
         Rect {
-            x: area.x + cursor_column,
-            y: area.y,
-            width: CURSOR_COLUMNS,
-            height: area.height,
+            x: area.x + rest,
+            width: area.width.saturating_sub(rest),
+            ..area
         },
     );
+}
+
+/// `text` without control characters, which `CellWidth` panics on in a debug
+/// build — and a seeded name can carry one, since herdr stores whatever was set.
+fn drawable(text: &str) -> String {
+    text.chars().filter(|c| !c.is_control()).collect()
 }
 
 /// Cells `text` occupies once drawn, per ratatui's own per-cell measurement.
@@ -649,7 +659,7 @@ mod render_tests {
         );
         let lines = draw(&mut app, 36, 8);
         assert_eq!(lines[0], "Focus tab...", "{lines:#?}");
-        assert_eq!(lines[1], ">", "{lines:#?}");
+        assert_eq!(lines[1], "> ⎸", "{lines:#?}");
     }
 
     fn entry(id: &str, title: &str, args: &[&str]) -> Command {
@@ -757,7 +767,7 @@ mod render_tests {
     #[test]
     fn typing_an_icon_matches_nothing() {
         let mut app = app_with(vec![entry("p", "Pane", &["pane", "zoom"])]);
-        app.push('◫');
+        app.edit(Edit::Insert('◫'));
         let lines = draw(&mut app, 36, 8);
         assert_eq!(lines[1], "no matches", "{lines:#?}");
     }
@@ -767,7 +777,7 @@ mod render_tests {
     fn commands_stage_starts_at_the_query_line() {
         let mut app = app_with(vec![command("split.right", "Split pane: right", None)]);
         let lines = draw(&mut app, 36, 8);
-        assert_eq!(lines[0], ">", "{lines:#?}");
+        assert_eq!(lines[0], "> ⎸", "{lines:#?}");
     }
 
     /// Width is the axis docs/design.md §5 gives a readability floor to, and
@@ -971,6 +981,70 @@ mod render_tests {
             let row: Vec<&str> = (0..*width).map(|x| buffer[(x, 1)].symbol()).collect();
 
             assert_eq!(&row, expected, "{what}: {name:?} at width {width}");
+        }
+    }
+
+    /// Literal cells, as above. The text before the cursor claims the room
+    /// first; what follows fills whatever is left.
+    #[test]
+    fn a_cursor_inside_the_text_is_drawn_where_it_stands() {
+        let cases: &[(&str, &str, usize, u16, &[&str])] = &[
+            (
+                "between letters",
+                "abcd",
+                2,
+                8,
+                &[">", " ", "a", "b", "⎸", "c", "d", " "],
+            ),
+            (
+                "at the start of a name too long to show",
+                "abcdef",
+                6,
+                6,
+                &[">", " ", "⎸", "a", "b", "c"],
+            ),
+            (
+                "the text before it wins the room",
+                "abcdef",
+                2,
+                6,
+                &[">", " ", "b", "c", "d", "⎸"],
+            ),
+            (
+                "a wide glyph after it is dropped whole, never halved",
+                "あいう",
+                1,
+                8,
+                &[">", " ", "あ", " ", "い", " ", "⎸", " "],
+            ),
+            (
+                "a combining mark with no base after it is not drawn",
+                "\u{301}ab",
+                3,
+                8,
+                &[">", " ", "⎸", "a", "b", " ", " ", " "],
+            ),
+        ];
+
+        for (what, name, left, width, expected) in cases {
+            let mut picked = command("tab.rename", "Rename tab...", None);
+            picked.args = vec!["tab".into(), "rename".into(), "t1".into(), "{text}".into()];
+            picked.prompt = Some("N".into());
+            let mut app = app_with(vec![picked.clone()]);
+            app.enter_prompt(picked, name.to_string());
+            for _ in 0..*left {
+                app.edit(Edit::Left);
+            }
+
+            let mut terminal = Terminal::new(TestBackend::new(*width, 8)).unwrap();
+            terminal.draw(|f| render(f, &mut app)).unwrap();
+            let buffer = terminal.backend().buffer();
+            let row: Vec<&str> = (0..*width).map(|x| buffer[(x, 1)].symbol()).collect();
+
+            assert_eq!(
+                &row, expected,
+                "{what}: {name:?}, {left} left, width {width}"
+            );
         }
     }
 
@@ -1401,6 +1475,10 @@ mod wiring_tests {
         })
     }
 
+    fn ctrl(c: char) -> Event {
+        Event::Key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL))
+    }
+
     fn press(app: &mut App, typed: &str, keys: &[KeyCode]) -> Option<Step> {
         press_at(MIN_ROWS, app, typed, keys)
     }
@@ -1535,6 +1613,72 @@ mod wiring_tests {
     }
 
     #[test]
+    fn ctrl_u_clears_the_query_and_brings_every_row_back() {
+        let mut app = app_with(vec![
+            command("split.right", "Split pane: right", &["split"], None),
+            command("tab.create", "New tab", &["tab"], None),
+        ]);
+        assert!(press(&mut app, "split", &[]).is_none());
+        assert_eq!(app.shown(), 1);
+
+        assert!(apply(&mut app, ctrl('u'), MIN_ROWS).is_some());
+        assert_eq!(app.query(), "");
+        assert_eq!(app.shown(), 2);
+    }
+
+    /// The seeded name is edited in place: the cursor goes to its start and
+    /// what is typed there lands in front of it.
+    #[test]
+    fn a_name_is_edited_where_the_cursor_stands() {
+        let mut picked = command(
+            "tab.rename",
+            "Rename tab...",
+            &["tab", "rename", "t1", "{text}"],
+            None,
+        );
+        picked.prompt = Some("N".into());
+        let mut app = app_with(vec![picked.clone()]);
+        app.enter_prompt(picked, "editor".into());
+
+        assert!(apply(&mut app, ctrl('a'), MIN_ROWS).is_some());
+        match press(&mut app, "my ", &[KeyCode::Enter]) {
+            Some(Step::Run(Outcome::Command { args, .. })) => {
+                assert_eq!(args, ["tab", "rename", "t1", "my editor"]);
+            }
+            other => panic!("expected the edited name to run: {}", describe(&other)),
+        }
+    }
+
+    #[test]
+    fn ctrl_n_and_ctrl_p_move_the_selection_like_down_and_up() {
+        let mut app = app_with(vec![
+            command("split.right", "Split pane: right", &["split"], None),
+            command("split.down", "Split pane: down", &["split"], None),
+        ]);
+        apply(&mut app, ctrl('n'), MIN_ROWS);
+        assert_eq!(app.selection.state.selected(), Some(1));
+        apply(&mut app, ctrl('p'), MIN_ROWS);
+        assert_eq!(app.selection.state.selected(), Some(0));
+    }
+
+    /// Only an edit that changes the query refilters, which is what puts the
+    /// list back on its first row.
+    #[test]
+    fn moving_the_cursor_keeps_the_selected_row() {
+        let mut app = app_with(vec![
+            command("split.right", "Split pane: right", &["split"], None),
+            command("split.down", "Split pane: down", &["split"], None),
+        ]);
+        assert!(press(
+            &mut app,
+            "split",
+            &[KeyCode::Down, KeyCode::Left, KeyCode::Home]
+        )
+        .is_none());
+        assert_eq!(app.selection.state.selected(), Some(1));
+    }
+
+    #[test]
     fn a_too_short_palette_changes_nothing_and_runs_nothing() {
         // Three matches with the middle one selected, so Up and Down would
         // each move the selection rather than clamp.
@@ -1560,13 +1704,18 @@ mod wiring_tests {
             assert_eq!(app.selection.selected(), selected, "{code:?}");
             assert!(matches!(app.stage, Stage::Commands), "{code:?}");
         }
+        assert!(matches!(
+            apply(&mut app, ctrl('u'), short),
+            Some(Step::Continue)
+        ));
+        assert_eq!(app.query(), "split", "Ctrl-U");
 
         let mut terminal = Terminal::new(TestBackend::new(36, MIN_ROWS)).unwrap();
         terminal.draw(|f| render(f, &mut app)).unwrap();
         let input: String = (0..36)
             .map(|x| terminal.backend().buffer()[(x, 0)].symbol())
             .collect();
-        assert_eq!(input.trim_end(), "> split");
+        assert_eq!(input.trim_end(), "> split⎸");
     }
 
     /// Esc closes outright rather than stepping back a stage: the stage it

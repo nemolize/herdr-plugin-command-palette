@@ -4,6 +4,7 @@ use crate::catalog::Command;
 use crate::frecency::Frecency;
 use crate::glyph::SEPARATOR;
 use crate::herdr::PluginAction;
+use crate::line_edit::{Edit, LineEdit};
 use crate::listing::Target;
 use crate::selection::Selection;
 
@@ -81,7 +82,7 @@ pub enum Stage {
     Prompt {
         command: Command,
         args: Vec<String>,
-        text: String,
+        text: LineEdit,
     },
 }
 
@@ -152,7 +153,7 @@ impl App {
         self.stage = Stage::Prompt {
             command,
             args,
-            text: seed,
+            text: LineEdit::new(seed),
         };
         self.selection.clear_query();
         self.status = None;
@@ -180,8 +181,9 @@ impl App {
         true
     }
 
+    #[cfg(test)]
     pub fn query(&self) -> &str {
-        &self.selection.query
+        self.selection.query.text()
     }
 
     pub fn rows(&self) -> Vec<&str> {
@@ -271,20 +273,30 @@ impl App {
         }
     }
 
-    pub fn push(&mut self, c: char) {
-        self.selection.query.push(c);
-        self.refilter();
-    }
-
-    pub fn pop(&mut self) {
-        self.selection.query.pop();
-        self.refilter();
+    /// Applies a keystroke to whichever line is live: the typed name at the
+    /// prompt, the query everywhere else.
+    pub fn edit(&mut self, edit: Edit) {
+        if let Stage::Prompt { text, .. } = &mut self.stage {
+            text.apply(edit);
+            // The refusal described the old text; leaving it up would report
+            // `--clear` at an input that no longer says it.
+            if edit.changes_text() {
+                self.status = None;
+            }
+            return;
+        }
+        self.selection.query.apply(edit);
+        // Refiltering puts the list back on its first row, which a cursor
+        // movement has no reason to do.
+        if edit.changes_text() {
+            self.refilter();
+        }
     }
 
     #[cfg(test)]
     fn push_str(&mut self, s: &str) {
         for c in s.chars() {
-            self.push(c);
+            self.edit(Edit::Insert(c));
         }
     }
 
@@ -303,6 +315,7 @@ impl App {
         {
             // Checked trimmed, SENT untrimmed: herdr stores surrounding spaces
             // verbatim, so trimming would rewrite a seeded name on a bare Enter.
+            let text = text.text();
             if text.trim().is_empty() {
                 return Step::Continue;
             }
@@ -363,24 +376,6 @@ impl App {
                 id: c.id,
                 args: c.args,
             })
-        }
-    }
-
-    /// Edits the free-text stage's buffer. Separate from `push` / `pop`, which
-    /// drive the query and refilter a list this stage does not have.
-    pub fn push_text(&mut self, c: char) {
-        if let Stage::Prompt { text, .. } = &mut self.stage {
-            text.push(c);
-            // The refusal described the old text; leaving it up would report
-            // `--clear` at an input that no longer says it.
-            self.status = None;
-        }
-    }
-
-    pub fn pop_text(&mut self) {
-        if let Stage::Prompt { text, .. } = &mut self.stage {
-            text.pop();
-            self.status = None;
         }
     }
 
@@ -661,7 +656,7 @@ mod tests {
     fn typing_a_name_and_confirming_substitutes_it() {
         let mut app = at_prompt("");
         for c in "docs".chars() {
-            app.push_text(c);
+            app.edit(Edit::Insert(c));
         }
         match app.confirm() {
             Step::Run(Outcome::Command { id, args }) => {
@@ -678,7 +673,7 @@ mod tests {
     fn an_empty_name_is_not_submitted() {
         let mut app = at_prompt("");
         assert!(matches!(app.confirm(), Step::Continue));
-        app.push_text(' ');
+        app.edit(Edit::Insert(' '));
         assert!(
             matches!(app.confirm(), Step::Continue),
             "whitespace is empty"
@@ -691,7 +686,7 @@ mod tests {
     fn a_multi_word_name_stays_a_single_argument() {
         let mut app = at_prompt("");
         for c in "release notes".chars() {
-            app.push_text(c);
+            app.edit(Edit::Insert(c));
         }
         match app.confirm() {
             Step::Run(Outcome::Command { args, .. }) => {
@@ -704,7 +699,7 @@ mod tests {
     #[test]
     fn the_input_starts_from_the_current_name() {
         let mut app = at_prompt("herdr");
-        app.pop_text();
+        app.edit(Edit::DeleteBack);
         match app.confirm() {
             Step::Run(Outcome::Command { args, .. }) => {
                 assert_eq!(args.last().unwrap(), "herd", "seeded, then edited");
@@ -839,8 +834,11 @@ mod tests {
         app.confirm();
         assert!(app.status.is_some(), "refused first");
 
-        app.pop_text();
-        assert!(app.status.is_none(), "and retracted on the next keystroke");
+        app.edit(Edit::Left);
+        assert!(app.status.is_some(), "still the text it describes");
+
+        app.edit(Edit::DeleteBack);
+        assert!(app.status.is_none(), "and retracted once the text changes");
     }
 
     /// Typing at the prompt must not reach the query, which drives the filter of
@@ -848,7 +846,7 @@ mod tests {
     #[test]
     fn typing_at_the_prompt_does_not_filter_the_command_list() {
         let mut app = at_prompt("");
-        app.push_text('z');
+        app.edit(Edit::Insert('z'));
         assert!(app.query().is_empty());
         app.leave_stage();
         assert_eq!(app.rows(), vec!["Rename tab..."], "list intact");

@@ -376,6 +376,37 @@ def accepted_command_closes_the_palette(scratch: Path) -> bool:
         palette.close()
 
 
+def ctrl_u_from_the_terminal_clears_the_query(scratch: Path) -> bool:
+    """A chord arrives as a raw control byte, which the unit tests never see:
+    they hand the palette a key event the terminal parser already built."""
+    stub = write_stub(scratch / "herdr-ctrl-u", ACCEPTS)
+    log = scratch / "ctrl-u.log"
+    log.write_text("")
+    palette = Palette(stub, log, scratch / "ctrl-u.stderr")
+    name = "ctrl-u clears a query that matched nothing"
+    try:
+        if not started(palette, name):
+            return False
+        palette.send(b"zzzz")
+        if not palette.wait_for("no matches", OUTCOME_TIMEOUT):
+            return check(name, False, f"drew: {visible(palette.painted)[-300:]!r}")
+        palette.send(b"\x15\r")
+        code = palette.wait_for_exit(EXIT_TIMEOUT)
+        passed = check(
+            name,
+            code == 0,
+            "still up, so Enter met an empty list" if code is None else f"exited {code}",
+        )
+        passed &= check(
+            "the restored first entry reached the stub",
+            "pane split" in log.read_text(),
+            f"stub log: {log.read_text()!r}",
+        )
+        return passed
+    finally:
+        palette.close()
+
+
 def an_empty_listing_is_reported(scratch: Path) -> bool:
     """Picking a `resolve` entry with nothing to pick from. The palette has no
     targets to show, so without a message it just sits there — the same
@@ -705,6 +736,7 @@ def main() -> int:
 
     passed = rejected_command_is_reported(scratch)
     passed &= accepted_command_closes_the_palette(scratch)
+    passed &= ctrl_u_from_the_terminal_clears_the_query(scratch)
     passed &= an_empty_listing_is_reported(scratch)
     passed &= a_refused_listing_is_reported(scratch)
     passed &= a_worktree_pick_reaches_the_context_repository(scratch)

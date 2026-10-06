@@ -315,12 +315,15 @@ Two edges were settled by measuring 0.9.0 rather than reasoning about clap:
 
 ### The input line scrolls, and the cursor owns a cell
 
-A name can be longer than the popup, so the input shows its END: the tail is
-where the typing is happening, and clipping from the right would hide both the
-cursor and every character just typed.
+A name can be longer than the popup, so the text BEFORE the cursor claims the
+room first and is clipped from the left: that is where the typing is happening,
+and clipping it from the right would hide both the cursor and every character
+just typed. The text after the cursor fills whatever is left and is clipped from
+the right. With the cursor at the end, as it is unless moved, this shows the
+name's tail.
 
-The cursor is drawn into a **reserved cell of its own**, after the text rather
-than appended to it. That is the design, not an implementation detail. Four
+The cursor is drawn into a **reserved cell of its own**, between the two halves
+of the text rather than inside either. That is the design, not an implementation detail. Four
 review rounds found this line wrong, and every one of them was the same shape —
 the clip took the cursor away with the text, because the cursor was part of the
 string being measured. Reserving the cell first makes that outcome unreachable

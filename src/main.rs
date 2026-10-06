@@ -8,6 +8,7 @@ mod fuzzy;
 mod glyph;
 mod herdr;
 mod keys;
+mod line_edit;
 mod listing;
 mod selection;
 mod settings;

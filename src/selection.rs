@@ -3,6 +3,7 @@
 use ratatui::widgets::ListState;
 
 use crate::fuzzy;
+use crate::line_edit::LineEdit;
 
 /// A query over a set of rows, and the cursor into what survived it.
 ///
@@ -10,7 +11,7 @@ use crate::fuzzy;
 /// are different types (catalog entries, target rows) between stages.
 #[derive(Default)]
 pub struct Selection {
-    pub query: String,
+    pub query: LineEdit,
     pub state: ListState,
     filtered: Vec<usize>,
 }
@@ -28,7 +29,7 @@ impl Selection {
             .iter()
             .enumerate()
             .filter_map(|(i, row)| {
-                fuzzy::score(&self.query, row).map(|s| (s, (rank(i) * 1000.0) as i64, i))
+                fuzzy::score(self.query.text(), row).map(|s| (s, (rank(i) * 1000.0) as i64, i))
             })
             .collect();
         scored.sort_by(|a, b| b.0.cmp(&a.0).then(b.1.cmp(&a.1)).then(a.2.cmp(&b.2)));
@@ -71,10 +72,11 @@ impl Selection {
 #[cfg(test)]
 mod tests {
     use super::Selection;
+    use crate::line_edit::LineEdit;
 
     fn sel(rows: &[&str], query: &str) -> Selection {
         let mut s = Selection {
-            query: query.to_string(),
+            query: LineEdit::new(query.to_string()),
             ..Default::default()
         };
         s.refilter(rows, |_| 0.0);
@@ -93,7 +95,7 @@ mod tests {
     fn rank_orders_survivors_but_cannot_admit_a_non_match() {
         let rows = ["New tab", "Split pane: right"];
         let mut s = Selection {
-            query: "split".into(),
+            query: LineEdit::new("split".into()),
             ..Default::default()
         };
         s.refilter(&rows, |i| if i == 0 { 50.0 } else { 0.0 });
