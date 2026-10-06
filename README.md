@@ -70,7 +70,8 @@ commonly taken already (`mr04vv/herdr-pane-navigator` binds it). Any key works.
 
 ## Using it
 
-Type to filter. `Enter` runs the selected entry; `↑` / `↓` move the selection.
+Type to filter. `Enter` runs the selected entry; `↑` / `↓` (or `Ctrl-P` /
+`Ctrl-N`) move the selection.
 
 Entries that need a target you must choose — `Focus tab...`, `Move pane to tab...`,
 `Close workspace...`, `Open worktree...` — open a second list of the live tabs,
@@ -88,9 +89,24 @@ retype. `New worktree...` asks for a branch name the same way and starts empty.
 `Enter` runs it, `Esc` backs out. A name may contain spaces; it reaches
 herdr as one argument.
 
-A name longer than the popup scrolls: the input shows its end, so the cursor and
-whatever you just typed stay on screen. Wide characters and emoji are measured as
-the terminal draws them, and a clip never lands inside a glyph.
+A name longer than the popup scrolls: the input keeps the text before the cursor
+in view, so the cursor and whatever you just typed stay on screen. Wide characters
+and emoji are measured as the terminal draws them, and a clip never lands inside a
+glyph.
+
+The query and the name are edited with the usual readline keys:
+
+| Key | Does |
+|---|---|
+| `←` / `→`, `Ctrl-B` / `Ctrl-F` | Move one character |
+| `Home` / `End`, `Ctrl-A` / `Ctrl-E` | Move to the start / end |
+| `Alt-B` / `Alt-F` | Move one word |
+| `Backspace` / `Ctrl-H`, `Delete` / `Ctrl-D` | Delete the character before / after the cursor |
+| `Ctrl-W` / `Alt-Backspace`, `Alt-D` | Delete the word before / after the cursor |
+| `Ctrl-U` / `Ctrl-K` | Delete everything before / after the cursor |
+
+A word is a run of non-spaces, so `Ctrl-W` takes `pane:right` whole. The `Alt`
+keys need your terminal to send `Option` as `Meta` on macOS.
 
 **Dismissal is `Esc`, `Ctrl-C`, or picking an entry.** There is no
 click-outside-to-dismiss: no mouse events reach a plugin at all.

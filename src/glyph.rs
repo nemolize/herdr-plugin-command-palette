@@ -22,13 +22,23 @@ pub fn same_width_in_every_locale(text: &str) -> bool {
     text.width() == text.width_cjk()
 }
 
+/// The Control Pictures glyph standing in for control character `c`.
+pub fn control_picture(c: char) -> char {
+    match u32::from(c) {
+        n @ 0..=0x1F => char::from_u32(0x2400 + n).unwrap_or('\u{2426}'),
+        0x7F => '\u{2421}',
+        // C1 controls have no picture of their own.
+        _ => '\u{2426}',
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use unicode_width::UnicodeWidthStr;
 
     use super::{
-        same_width_in_every_locale, CURSOR, CURSOR_COLUMNS, HIGHLIGHT_COLUMNS, HIGHLIGHT_SYMBOL,
-        SEPARATOR,
+        control_picture, same_width_in_every_locale, CURSOR, CURSOR_COLUMNS, HIGHLIGHT_COLUMNS,
+        HIGHLIGHT_SYMBOL, SEPARATOR,
     };
 
     #[test]
@@ -40,6 +50,18 @@ mod tests {
         ] {
             assert_eq!(glyph.width(), usize::from(cells), "{glyph:?}");
             assert!(same_width_in_every_locale(glyph), "{glyph:?}");
+        }
+    }
+
+    #[test]
+    fn every_control_picture_takes_one_cell_in_every_locale() {
+        for c in (0..=0x9F)
+            .filter_map(char::from_u32)
+            .filter(|c| c.is_control())
+        {
+            let picture = control_picture(c).to_string();
+            assert_eq!(picture.width(), 1, "{c:?}");
+            assert!(same_width_in_every_locale(&picture), "{c:?}");
         }
     }
 
