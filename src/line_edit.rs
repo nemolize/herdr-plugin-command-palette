@@ -120,12 +120,12 @@ impl LineEdit {
         self.text.len() != before
     }
 
-    /// Removes the text between the cursor and `to`, leaving the cursor where
-    /// the removed text began.
+    /// Removes the text between the cursor and `to`. The text either side can
+    /// join into one cluster once the gap closes, so the cursor goes to the
+    /// start of the cluster holding where the removed text began.
     fn delete_to(&mut self, to: usize) {
         let (start, end) = (self.cursor.min(to), self.cursor.max(to));
         self.text.replace_range(start..end, "");
-        // The text either side can join into one cluster once the gap closes.
         self.cursor = self.boundary_at_or_before(start);
     }
 
@@ -145,6 +145,9 @@ impl LineEdit {
 
     /// Where the word before the cursor starts. A word is a run of
     /// non-whitespace, as `Ctrl-W` reads it, so `pane:right` is one word.
+    ///
+    /// Measured in chars, and a space can share a cluster with a mark either
+    /// side of it, so both word bounds widen outward to a cluster boundary.
     fn word_start(&self) -> usize {
         let before = self.text[..self.cursor].trim_end();
         self.boundary_at_or_before(before.len() - word_len(before.chars().rev()))
@@ -157,8 +160,6 @@ impl LineEdit {
         self.boundary_at_or_after(self.cursor + (after.len() - word.len()) + word_len(word.chars()))
     }
 
-    // Word bounds are measured in chars, and a space can share a cluster with a
-    // mark either side of it: widening a word outward keeps every word key moving.
     fn boundary_at_or_before(&self, at: usize) -> usize {
         self.boundaries()
             .take_while(|&i| i <= at)

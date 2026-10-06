@@ -13,7 +13,9 @@ use ratatui::widgets::{List, ListItem, Paragraph, Wrap};
 use unicode_segmentation::UnicodeSegmentation;
 
 use crate::app::{App, Stage, Step};
-use crate::glyph::{CURSOR, CURSOR_COLUMNS, HIGHLIGHT_COLUMNS, HIGHLIGHT_SYMBOL, SEPARATOR};
+use crate::glyph::{
+    control_picture, CURSOR, CURSOR_COLUMNS, HIGHLIGHT_COLUMNS, HIGHLIGHT_SYMBOL, SEPARATOR,
+};
 use crate::line_edit::{Edit, LineEdit};
 
 /// Restores the terminal on drop, so an error path cannot leave the pane in raw
@@ -414,15 +416,6 @@ fn drawable(text: &str) -> String {
         .collect()
 }
 
-fn control_picture(c: char) -> char {
-    match u32::from(c) {
-        n @ 0..=0x1F => char::from_u32(0x2400 + n).unwrap_or('\u{2426}'),
-        0x7F => '\u{2421}',
-        // C1 controls have no picture of their own.
-        _ => '\u{2426}',
-    }
-}
-
 /// Cells `text` occupies once drawn, per ratatui's own per-cell measurement.
 ///
 /// `Line::width` is NOT this number — it reports 1 for `ｶ\u{FF9E}`, which the
@@ -595,7 +588,7 @@ mod render_tests {
 
     /// A catalog is user-editable and a plugin's title is another author's, so
     /// a control char reaches this measurement — where `CellWidth` panics in a
-    /// debug build. `render_input` filters them for the same reason.
+    /// debug build. `render_input` draws them as pictures for the same reason.
     #[test]
     fn a_control_char_in_a_title_is_measured_rather_than_panicking() {
         let line = row_line(None, "New\ttab", "prefix+c", 36);
@@ -1005,20 +998,6 @@ mod render_tests {
             let row: Vec<&str> = (0..*width).map(|x| buffer[(x, 1)].symbol()).collect();
 
             assert_eq!(&row, expected, "{what}: {name:?} at width {width}");
-        }
-    }
-
-    #[test]
-    fn every_control_picture_takes_one_cell_in_every_locale() {
-        use crate::glyph::same_width_in_every_locale;
-        use unicode_width::UnicodeWidthStr;
-        for c in (0..=0x9F)
-            .filter_map(char::from_u32)
-            .filter(|c| c.is_control())
-        {
-            let picture = control_picture(c).to_string();
-            assert_eq!(picture.width(), 1, "{c:?}");
-            assert!(same_width_in_every_locale(&picture), "{c:?}");
         }
     }
 
