@@ -399,10 +399,28 @@ fn render_input(f: &mut Frame, line: &LineEdit, area: Rect) {
     );
 }
 
-/// `text` without control characters, which `CellWidth` panics on in a debug
-/// build — and a seeded name can carry one, since herdr stores whatever was set.
+/// `text` with each control character drawn as its Control Pictures glyph:
+/// `CellWidth` panics on the raw one in a debug build, and dropping it would
+/// leave a cursor stop that draws nothing. Herdr stores whatever name was set.
 fn drawable(text: &str) -> String {
-    text.chars().filter(|c| !c.is_control()).collect()
+    text.chars()
+        .map(|c| {
+            if c.is_control() {
+                control_picture(c)
+            } else {
+                c
+            }
+        })
+        .collect()
+}
+
+fn control_picture(c: char) -> char {
+    match u32::from(c) {
+        n @ 0..=0x1F => char::from_u32(0x2400 + n).unwrap_or('\u{2426}'),
+        0x7F => '\u{2421}',
+        // C1 controls have no picture of their own.
+        _ => '\u{2426}',
+    }
 }
 
 /// Cells `text` occupies once drawn, per ratatui's own per-cell measurement.
@@ -411,7 +429,7 @@ fn drawable(text: &str) -> String {
 /// buffer lays out in 2. Summing scalars is wrong too, in both directions.
 fn drawn_width(text: &str) -> u16 {
     // Dropped rather than measured because `CellWidth` panics on one in a debug
-    // build, and a catalog title is user-written (`render_input` does the same).
+    // build, and a catalog title is user-written.
     text.graphemes(true)
         .filter(|cluster| !cluster.chars().any(char::is_control))
         .map(|cluster| cluster.cell_width())
@@ -427,12 +445,12 @@ fn tail_within(text: &str, room: u16) -> &str {
     let mut used = 0;
     for (offset, cluster) in text.grapheme_indices(true).rev() {
         let w = cluster.cell_width();
-        if used + w > room {
-            break;
+        // A zero-width cluster needs a base to attach to, so it is kept only
+        // when a cluster to its left is, and never opens the clip on its own.
+        if w == 0 {
+            continue;
         }
-        // A zero-width cluster needs a base to attach to, so it may only ride
-        // along with one that fits, never open the clip on its own.
-        if start == text.len() && w == 0 {
+        if used + w > room {
             break;
         }
         used += w;
@@ -961,10 +979,16 @@ mod render_tests {
                 &[">", " ", "❤\u{FE0F}", " ", "⎸", " ", " ", " "],
             ),
             (
-                "a control character has no width and is not drawn",
+                "a control character is drawn as its picture",
                 "a\tb",
                 8,
-                &[">", " ", "a", "b", "⎸", " ", " ", " "],
+                &[">", " ", "a", "␉", "b", "⎸", " ", " "],
+            ),
+            (
+                "a zero-width character before the cursor keeps what precedes it",
+                "a\u{200B}",
+                8,
+                &[">", " ", "a", "⎸", " ", " ", " ", " "],
             ),
         ];
 
@@ -981,6 +1005,20 @@ mod render_tests {
             let row: Vec<&str> = (0..*width).map(|x| buffer[(x, 1)].symbol()).collect();
 
             assert_eq!(&row, expected, "{what}: {name:?} at width {width}");
+        }
+    }
+
+    #[test]
+    fn every_control_picture_takes_one_cell_in_every_locale() {
+        use crate::glyph::same_width_in_every_locale;
+        use unicode_width::UnicodeWidthStr;
+        for c in (0..=0x9F)
+            .filter_map(char::from_u32)
+            .filter(|c| c.is_control())
+        {
+            let picture = control_picture(c).to_string();
+            assert_eq!(picture.width(), 1, "{c:?}");
+            assert!(same_width_in_every_locale(&picture), "{c:?}");
         }
     }
 
@@ -1016,6 +1054,13 @@ mod render_tests {
                 1,
                 8,
                 &[">", " ", "あ", " ", "い", " ", "⎸", " "],
+            ),
+            (
+                "a control character is a visible cursor stop",
+                "a\tb",
+                1,
+                8,
+                &[">", " ", "a", "␉", "⎸", "b", " ", " "],
             ),
             (
                 "a combining mark with no base after it is not drawn",
@@ -1675,6 +1720,16 @@ mod wiring_tests {
             &[KeyCode::Down, KeyCode::Left, KeyCode::Home]
         )
         .is_none());
+        assert_eq!(app.selection.state.selected(), Some(1));
+    }
+
+    #[test]
+    fn a_delete_with_nothing_to_delete_keeps_the_selected_row() {
+        let mut app = app_with(vec![
+            command("split.right", "Split pane: right", &["split"], None),
+            command("split.down", "Split pane: down", &["split"], None),
+        ]);
+        assert!(press(&mut app, "split", &[KeyCode::Down, KeyCode::Delete]).is_none());
         assert_eq!(app.selection.state.selected(), Some(1));
     }
 

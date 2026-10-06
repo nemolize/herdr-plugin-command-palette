@@ -70,15 +70,6 @@ impl Edit {
             _ => return None,
         })
     }
-
-    /// Whether this edit can change the text, as opposed to only moving the
-    /// cursor through it.
-    pub fn changes_text(self) -> bool {
-        !matches!(
-            self,
-            Edit::Left | Edit::Right | Edit::Home | Edit::End | Edit::WordLeft | Edit::WordRight
-        )
-    }
 }
 
 impl LineEdit {
@@ -102,14 +93,16 @@ impl LineEdit {
         self.cursor = 0;
     }
 
-    pub fn apply(&mut self, edit: Edit) {
+    /// Whether the text changed — a deletion at the edge it deletes towards
+    /// changes nothing, like a cursor movement.
+    pub fn apply(&mut self, edit: Edit) -> bool {
+        let before = self.text.len();
         match edit {
             Edit::Insert(c) => {
                 self.text.insert(self.cursor, c);
-                self.cursor += c.len_utf8();
                 // A combining mark joins the cluster before it, so the cursor
                 // re-settles on a boundary rather than inside that cluster.
-                self.cursor = self.next_boundary(self.prev_boundary(self.cursor));
+                self.cursor = self.boundary_at_or_after(self.cursor + c.len_utf8());
             }
             Edit::DeleteBack => self.delete_to(self.prev_boundary(self.cursor)),
             Edit::DeleteForward => self.delete_to(self.next_boundary(self.cursor)),
@@ -124,6 +117,7 @@ impl LineEdit {
             Edit::KillToStart => self.delete_to(0),
             Edit::KillToEnd => self.delete_to(self.text.len()),
         }
+        self.text.len() != before
     }
 
     /// Removes the text between the cursor and `to`, leaving the cursor where
@@ -131,7 +125,8 @@ impl LineEdit {
     fn delete_to(&mut self, to: usize) {
         let (start, end) = (self.cursor.min(to), self.cursor.max(to));
         self.text.replace_range(start..end, "");
-        self.cursor = start;
+        // The text either side can join into one cluster once the gap closes.
+        self.cursor = self.boundary_at_or_before(start);
     }
 
     fn prev_boundary(&self, at: usize) -> usize {
@@ -152,14 +147,37 @@ impl LineEdit {
     /// non-whitespace, as `Ctrl-W` reads it, so `pane:right` is one word.
     fn word_start(&self) -> usize {
         let before = self.text[..self.cursor].trim_end();
-        before.len() - word_len(before.chars().rev())
+        self.boundary_at_or_before(before.len() - word_len(before.chars().rev()))
     }
 
     /// Where the word after the cursor ends.
     fn word_end(&self) -> usize {
         let after = &self.text[self.cursor..];
         let word = after.trim_start();
-        self.cursor + (after.len() - word.len()) + word_len(word.chars())
+        self.boundary_at_or_after(self.cursor + (after.len() - word.len()) + word_len(word.chars()))
+    }
+
+    // Word bounds are measured in chars, and a space can share a cluster with a
+    // mark either side of it: widening a word outward keeps every word key moving.
+    fn boundary_at_or_before(&self, at: usize) -> usize {
+        self.boundaries()
+            .take_while(|&i| i <= at)
+            .last()
+            .unwrap_or(0)
+    }
+
+    fn boundary_at_or_after(&self, at: usize) -> usize {
+        self.boundaries()
+            .find(|&i| i >= at)
+            .unwrap_or(self.text.len())
+    }
+
+    /// Every cluster boundary, the end of the text included.
+    fn boundaries(&self) -> impl Iterator<Item = usize> + '_ {
+        self.text
+            .grapheme_indices(true)
+            .map(|(i, _)| i)
+            .chain(std::iter::once(self.text.len()))
     }
 }
 
@@ -249,9 +267,45 @@ mod tests {
             ("\u{1F469}\u{200D}\u{1F4BB}a", 1, &[DeleteBack], "|a"),
             ("\u{1F1EF}\u{1F1F5}", 0, &[DeleteBack], "|"),
             ("ｶﾞ", 1, &[], "|ｶﾞ"),
+            ("ab \u{301}cd", 0, &[WordLeft], "ab| \u{301}cd"),
+            ("ab \u{301}cd", 0, &[WordLeft, WordLeft], "|ab \u{301}cd"),
+            ("ab \u{301}cd", 0, &[DeleteWordBack], "ab|"),
+            ("foo \u{301}", 0, &[WordLeft, WordLeft], "|foo \u{301}"),
+            ("foo \u{301}", 0, &[DeleteWordBack, DeleteWordBack], "|"),
+            ("a\t\u{301}", 2, &[DeleteForward, DeleteForward], "|"),
+            ("\u{1F1E6}x\u{1F1E7}", 1, &[DeleteBack, DeleteForward], "|"),
+            ("ab \u{301}cd", 5, &[WordRight], "ab| \u{301}cd"),
+            ("x\u{600} y", 3, &[WordRight], "x\u{600} |y"),
+            ("x\u{600} y", 3, &[DeleteWordForward], "|y"),
         ];
         for (start, left, edits, expected) in cases {
             assert_eq!(&after(start, *left, edits), expected, "{start:?}");
+        }
+    }
+
+    /// The caller refilters and retracts a refusal only on a change, so a
+    /// deletion with nothing to delete must not report one.
+    #[test]
+    fn only_an_edit_that_alters_the_text_reports_a_change() {
+        use Edit::*;
+        let cases: &[(&str, usize, Edit, bool)] = &[
+            ("ab", 0, DeleteForward, false),
+            ("ab", 0, KillToEnd, false),
+            ("ab", 2, DeleteBack, false),
+            ("ab", 2, DeleteWordBack, false),
+            ("ab", 2, KillToStart, false),
+            ("", 0, DeleteBack, false),
+            ("ab", 1, Left, false),
+            ("ab", 0, DeleteBack, true),
+            ("ab", 1, DeleteForward, true),
+            ("ab", 0, Insert('c'), true),
+        ];
+        for (start, left, edit, changed) in cases {
+            let mut e = LineEdit::new(start.to_string());
+            for _ in 0..*left {
+                e.apply(Edit::Left);
+            }
+            assert_eq!(e.apply(*edit), *changed, "{start:?}, {left} left, {edit:?}");
         }
     }
 

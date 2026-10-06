@@ -277,18 +277,16 @@ impl App {
     /// prompt, the query everywhere else.
     pub fn edit(&mut self, edit: Edit) {
         if let Stage::Prompt { text, .. } = &mut self.stage {
-            text.apply(edit);
             // The refusal described the old text; leaving it up would report
             // `--clear` at an input that no longer says it.
-            if edit.changes_text() {
+            if text.apply(edit) {
                 self.status = None;
             }
             return;
         }
-        self.selection.query.apply(edit);
-        // Refiltering puts the list back on its first row, which a cursor
-        // movement has no reason to do.
-        if edit.changes_text() {
+        // Refiltering puts the list back on its first row, which an edit that
+        // left the query as it was has no reason to do.
+        if self.selection.query.apply(edit) {
             self.refilter();
         }
     }
@@ -836,6 +834,9 @@ mod tests {
 
         app.edit(Edit::Left);
         assert!(app.status.is_some(), "still the text it describes");
+        app.edit(Edit::End);
+        app.edit(Edit::DeleteForward);
+        assert!(app.status.is_some(), "a delete with nothing to delete");
 
         app.edit(Edit::DeleteBack);
         assert!(app.status.is_none(), "and retracted once the text changes");
