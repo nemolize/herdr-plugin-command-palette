@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.7.0
+
+### Minor Changes
+
+- 7f388aa: Edit the query and typed names with readline keys — `Ctrl-U` clears, `Ctrl-W` deletes a word, `Ctrl-A` / `Ctrl-E` and the arrow keys move the cursor — and move the selection with `Ctrl-N` / `Ctrl-P`
+- c0bd7bc: Add creating, opening and removing Git worktrees to the command palette, picking from the worktrees of the repository behind the current workspace
+
+### Patch Changes
+
+- 59d151b: Cap the status line at four rows, ending a longer message with `...`, so a long herdr error can no longer push the candidates off the palette
+- 48fa1e0: A rejected `icon` override is named by its code points (`U+25A1`) in its `skipped` row instead of being drawn, so the row no longer shows the very glyph it rejects
+- 9097d90: The palette no longer draws East Asian Ambiguous characters, which a CJK-locale terminal draws two cells wide: shipped titles end in `...` instead of `…`, separators are `⋅` instead of `·`, the input cursor is `⎸` instead of `▏`, and status notes use `-` instead of `—`
+- cc4b46a: The selected row is marked with `▸` instead of `▶`, so a terminal that draws East Asian Ambiguous characters two cells wide no longer shifts that row one cell out of line
+- 43ae1e6: On herdr 0.9, pressing the palette key while a popup is already open again says so and points to `Esc`, instead of printing herdr's raw error
+- 810fc93: Show what herdr wrote to stderr, or the JSON it returned, when its answer carries neither a result nor an error, instead of only "herdr returned no result"
+- 195396c: All three startup notes now fit the popup at once, down to the 51 columns a narrow terminal clamps it to, when the settings error is short, such as a misspelt key: the unusable-settings note names `settings.toml` instead of its full path, and the outdated-herdr note reads `herdr <version> < catalog <version>`. A longer settings error still ends in `...`
+
 ## 0.6.0
 
 ### Minor Changes
