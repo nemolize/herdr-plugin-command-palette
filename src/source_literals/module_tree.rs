@@ -59,7 +59,7 @@ mod tests {
         let files = [
             (
                 "main.rs",
-                "mod bar;\nmod inline { mod deep; }\n#[cfg(test)]\nmod foo;\n",
+                "mod bar;\n#[cfg(test)]\nmod foo;\nmod inline { mod deep; }\n",
             ),
             ("bar.rs", "mod child;"),
             ("bar/child.rs", ""),
