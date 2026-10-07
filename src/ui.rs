@@ -15,6 +15,7 @@ use unicode_segmentation::UnicodeSegmentation;
 use crate::app::{App, Stage, Step};
 use crate::glyph::{
     control_picture, CURSOR, CURSOR_COLUMNS, HIGHLIGHT_COLUMNS, HIGHLIGHT_SYMBOL, SEPARATOR,
+    STAND_IN,
 };
 use crate::line_edit::{Edit, LineEdit};
 
@@ -366,46 +367,41 @@ fn render_input(f: &mut Frame, line: &LineEdit, area: Rect) {
         return;
     }
     let (before, after) = line.split();
-    let (before, after) = (drawable(before), drawable(after));
+    let (before, after) = (drawn_clusters(before), drawn_clusters(after));
     // The cursor outranks the prefix when the pane cannot hold both: it is what
     // says the field is live, and a lone `>` says nothing.
-    let (left, right, cursor_column) = match area.width.checked_sub(PROMPT_COLUMNS + CURSOR_COLUMNS)
-    {
-        None => (String::new(), "", 0),
+    let cursor_column = match area.width.checked_sub(PROMPT_COLUMNS + CURSOR_COLUMNS) {
+        None => 0,
         Some(room) => {
-            let left = tail_within(&before, room);
-            (
-                format!("> {left}"),
-                after.as_str(),
-                PROMPT_COLUMNS + drawn_width(left),
-            )
+            let kept = tail_within(&before, room);
+            f.render_widget(Paragraph::new("> "), area);
+            render_clusters(f, kept, area.x + PROMPT_COLUMNS, area);
+            PROMPT_COLUMNS + clusters_width(kept)
         }
     };
 
-    f.render_widget(Paragraph::new(left), area);
     let cursor = Rect {
         x: area.x + cursor_column,
         width: CURSOR_COLUMNS,
         ..area
     };
     f.render_widget(Paragraph::new(CURSOR), cursor);
-    // The right edge clips whole glyphs on its own, unlike the left.
     let rest = cursor_column + CURSOR_COLUMNS;
-    f.render_widget(
-        Paragraph::new(right),
-        Rect {
-            x: area.x + rest,
-            width: area.width.saturating_sub(rest),
-            ..area
-        },
-    );
+    let room = area.width.saturating_sub(rest);
+    render_clusters(f, head_within(&after, room), area.x + rest, area);
 }
 
-/// `text` with each control character drawn as its Control Pictures glyph:
-/// `CellWidth` panics on the raw one in a debug build, and dropping it would
-/// leave a cursor stop that draws nothing. Herdr stores whatever name was set.
-fn drawable(text: &str) -> String {
-    text.chars()
+/// The drawn form of each cluster of `text`, the clusters `LineEdit` puts its
+/// cursor stops between, so every stop falls between two drawn glyphs.
+fn drawn_clusters(text: &str) -> Vec<String> {
+    text.graphemes(true).map(drawn_cluster).collect()
+}
+
+/// `cluster` with controls as Control Pictures (`CellWidth` panics on a raw one
+/// in a debug build), and on `STAND_IN` if it would draw nothing at all.
+fn drawn_cluster(cluster: &str) -> String {
+    let drawn: String = cluster
+        .chars()
         .map(|c| {
             if c.is_control() {
                 control_picture(c)
@@ -413,7 +409,33 @@ fn drawable(text: &str) -> String {
                 c
             }
         })
-        .collect()
+        .collect();
+    if drawn_width(&drawn) > 0 {
+        return drawn;
+    }
+    // A format character such as U+200B is a cluster break of its own, so it
+    // would not ride on the stand-in the way a mark does; it gives way to it.
+    let based = format!("{STAND_IN}{drawn}");
+    if based.graphemes(true).count() == 1 {
+        based
+    } else {
+        STAND_IN.to_string()
+    }
+}
+
+/// Each cluster at the column `drawn_width` puts it in, not one `Line` of spans:
+/// that places spans by `Span::width`, a cell short after `ｶﾞ`.
+fn render_clusters(f: &mut Frame, clusters: &[String], x: u16, area: Rect) {
+    let mut x = x;
+    for cluster in clusters {
+        let width = drawn_width(cluster);
+        f.render_widget(Span::raw(cluster.as_str()), Rect { x, width, ..area });
+        x += width;
+    }
+}
+
+fn clusters_width(clusters: &[String]) -> u16 {
+    clusters.iter().map(|c| drawn_width(c)).sum()
 }
 
 /// Cells `text` occupies once drawn, per ratatui's own per-cell measurement.
@@ -429,27 +451,31 @@ fn drawn_width(text: &str) -> u16 {
         .sum()
 }
 
-/// The end of `text` that fits in `room` columns, cut on a grapheme boundary.
-///
-/// Cutting on clusters keeps the clip out of the middle of a glyph, which
-/// renders as a DIFFERENT glyph rather than a shorter name.
-fn tail_within(text: &str, room: u16) -> &str {
-    let mut start = text.len();
+/// The last of `clusters` that fit in `room` columns. Whole clusters only:
+/// cutting inside one draws a DIFFERENT glyph, or `␊` without its `␍`.
+fn tail_within(clusters: &[String], room: u16) -> &[String] {
     let mut used = 0;
-    for (offset, cluster) in text.grapheme_indices(true).rev() {
-        let w = cluster.cell_width();
-        // A zero-width cluster needs a base to attach to, so it is kept only
-        // when a cluster to its left is, and never opens the clip on its own.
-        if w == 0 {
-            continue;
-        }
-        if used + w > room {
-            break;
-        }
-        used += w;
-        start = offset;
-    }
-    &text[start..]
+    let kept = clusters
+        .iter()
+        .rev()
+        .take_while(|c| {
+            used += drawn_width(c);
+            used <= room
+        })
+        .count();
+    &clusters[clusters.len() - kept..]
+}
+
+fn head_within(clusters: &[String], room: u16) -> &[String] {
+    let mut used = 0;
+    let kept = clusters
+        .iter()
+        .take_while(|c| {
+            used += drawn_width(c);
+            used <= room
+        })
+        .count();
+    &clusters[..kept]
 }
 
 /// The counts row. Only reached when no status message has claimed the row.
@@ -930,6 +956,18 @@ mod render_tests {
                 &[">", " ", "ｶﾞ", " ", "⎸", " "],
             ),
             (
+                "text after a cluster ratatui counts wider than unicode-width does",
+                "ｶﾞa",
+                8,
+                &[">", " ", "ｶﾞ", " ", "a", "⎸", " ", " "],
+            ),
+            (
+                "a lone halfwidth sound mark is drawn",
+                "\u{FF9E}a",
+                8,
+                &[">", " ", "\u{FF9E}", "a", "⎸", " ", " ", " "],
+            ),
+            (
                 "the cursor glyph typed as a name is still just text",
                 "⎸⎸",
                 8,
@@ -978,10 +1016,34 @@ mod render_tests {
                 &[">", " ", "a", "␉", "b", "⎸", " ", " "],
             ),
             (
-                "a zero-width character before the cursor keeps what precedes it",
+                "a zero-width format character is drawn as a stand-in",
                 "a\u{200B}",
                 8,
-                &[">", " ", "a", "⎸", " ", " ", " ", " "],
+                &[">", " ", "a", "◌", "⎸", " ", " ", " "],
+            ),
+            (
+                "a mark after a control character is drawn apart from its picture",
+                "\t\u{301}",
+                8,
+                &[">", " ", "␉", "◌\u{301}", "⎸", " ", " ", " "],
+            ),
+            (
+                "a spacing mark after a control character keeps a cell of its own",
+                "\t\u{903}",
+                8,
+                &[">", " ", "␉", "\u{903}", "⎸", " ", " ", " "],
+            ),
+            (
+                "a prepended character before a control character keeps a cell of its own",
+                "\u{600}\t",
+                8,
+                &[">", " ", "\u{600}", "␉", "⎸", " ", " ", " "],
+            ),
+            (
+                "a CR LF pair is one cluster drawn in two cells",
+                "a\r\n",
+                8,
+                &[">", " ", "a", "␍", "␊", "⎸", " ", " "],
             ),
         ];
 
@@ -1035,6 +1097,13 @@ mod render_tests {
                 &[">", " ", "あ", " ", "い", " ", "⎸", " "],
             ),
             (
+                "text after a wide-counted cluster past the cursor",
+                "aｶﾞb",
+                2,
+                8,
+                &[">", " ", "a", "⎸", "ｶﾞ", " ", "b", " "],
+            ),
+            (
                 "a control character is a visible cursor stop",
                 "a\tb",
                 1,
@@ -1042,11 +1111,18 @@ mod render_tests {
                 &[">", " ", "a", "␉", "⎸", "b", " ", " "],
             ),
             (
-                "a combining mark with no base after it is not drawn",
+                "a combining mark with no base after it rides on a stand-in",
                 "\u{301}ab",
                 3,
                 8,
-                &[">", " ", "⎸", "a", "b", " ", " ", " "],
+                &[">", " ", "⎸", "◌\u{301}", "a", "b", " ", " "],
+            ),
+            (
+                "a mark split from a control character stays drawn",
+                "\t\u{301}",
+                1,
+                8,
+                &[">", " ", "␉", "⎸", "◌\u{301}", " ", " ", " "],
             ),
         ];
 
@@ -1070,6 +1146,64 @@ mod render_tests {
                 "{what}: {name:?}, {left} left, width {width}"
             );
         }
+    }
+
+    /// Issue #224: a format character is its own cluster, so a cursor stop each
+    /// side of it, and the two must not draw the same row.
+    #[test]
+    fn a_zero_width_format_character_is_a_visible_cursor_stop() {
+        for format in ['\u{200B}', '\u{FEFF}', '\u{200E}'] {
+            let name = format!("a{format}b");
+            assert_eq!(
+                input_row(&name, 1, 8),
+                [">", " ", "a", "◌", "⎸", "b", " ", " "],
+                "{name:?}"
+            );
+            assert_eq!(
+                input_row(&name, 2, 8),
+                [">", " ", "a", "⎸", "◌", "b", " ", " "],
+                "{name:?}"
+            );
+        }
+    }
+
+    /// `\r\n` is one cursor stop drawn in two cells; clipping it in half on
+    /// either side of the cursor would show one picture for the whole stop.
+    #[test]
+    fn a_cr_lf_pair_is_kept_or_clipped_whole() {
+        for (name, left) in [("ab\r\n", 0), ("\r\nab", 4), ("a\r\nb", 1), ("a\r\nb", 2)] {
+            for width in 1..=8 {
+                let row = input_row(name, left, width).concat();
+                assert_eq!(
+                    row.contains('␍'),
+                    row.contains("␍␊"),
+                    "{name:?}, {left} left, width {width}: {row:?}"
+                );
+                assert_eq!(
+                    row.contains('␊'),
+                    row.contains("␍␊"),
+                    "{name:?}, {left} left, width {width}: {row:?}"
+                );
+            }
+        }
+    }
+
+    fn input_row(name: &str, left: usize, width: u16) -> Vec<String> {
+        let mut picked = command("tab.rename", "Rename tab...", None);
+        picked.args = vec!["tab".into(), "rename".into(), "t1".into(), "{text}".into()];
+        picked.prompt = Some("N".into());
+        let mut app = app_with(vec![picked.clone()]);
+        app.enter_prompt(picked, name.to_string());
+        for _ in 0..left {
+            app.edit(Edit::Left);
+        }
+
+        let mut terminal = Terminal::new(TestBackend::new(width, 8)).unwrap();
+        terminal.draw(|f| render(f, &mut app)).unwrap();
+        let buffer = terminal.backend().buffer();
+        (0..width)
+            .map(|x| buffer[(x, 1)].symbol().to_string())
+            .collect()
     }
 
     /// The cursor is what says the field is live, so it outranks the prefix when

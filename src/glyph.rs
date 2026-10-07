@@ -16,6 +16,10 @@ pub const CURSOR: &str = "⎸";
 
 pub const CURSOR_COLUMNS: u16 = 1;
 
+/// Drawn for a cluster that draws nothing on its own, so its cursor stops stay
+/// apart: a mark rides on it, the dotted circle Unicode shows a lone mark on.
+pub const STAND_IN: char = '◌';
+
 /// Whether `text` holds no East Asian Ambiguous character: its width is the
 /// same whether Ambiguous characters count as one cell or two.
 pub fn same_width_in_every_locale(text: &str) -> bool {
@@ -38,7 +42,7 @@ mod tests {
 
     use super::{
         control_picture, same_width_in_every_locale, CURSOR, CURSOR_COLUMNS, HIGHLIGHT_COLUMNS,
-        HIGHLIGHT_SYMBOL, SEPARATOR,
+        HIGHLIGHT_SYMBOL, SEPARATOR, STAND_IN,
     };
 
     #[test]
@@ -47,6 +51,7 @@ mod tests {
             (HIGHLIGHT_SYMBOL, HIGHLIGHT_COLUMNS),
             (SEPARATOR, 3),
             (CURSOR, CURSOR_COLUMNS),
+            (&STAND_IN.to_string(), 1),
         ] {
             assert_eq!(glyph.width(), usize::from(cells), "{glyph:?}");
             assert!(same_width_in_every_locale(glyph), "{glyph:?}");
