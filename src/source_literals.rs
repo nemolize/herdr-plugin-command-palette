@@ -1,6 +1,7 @@
 //! The string and char literals a source file ships: its tokens outside test
 //! code and doc comments.
 
+mod module_tree;
 mod test_code;
 
 use proc_macro2::{Delimiter, TokenStream, TokenTree};
@@ -118,12 +119,14 @@ mod tests {
     #[test]
     fn no_shipped_literal_widens_in_a_cjk_locale() {
         let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
-        let sources = rust_sources(&dir);
-        assert!(
-            sources.contains(&dir.join("source_literals").join("test_code.rs")),
-            "a module in a subdirectory of {} was not scanned",
-            dir.display()
-        );
+        let sources = super::module_tree::shipped_files(&dir.join("main.rs"));
+        assert!(sources.contains(&dir.join("app.rs")), "{sources:?}");
+        for test_only in ["source_literals.rs", "source_literals/test_code.rs"] {
+            assert!(
+                !sources.contains(&dir.join(test_only)),
+                "{test_only} was scanned"
+            );
+        }
         for path in sources {
             let src = std::fs::read_to_string(&path).unwrap();
             let literals = shipped_literals(&src)
@@ -136,19 +139,6 @@ mod tests {
                 );
             }
         }
-    }
-
-    fn rust_sources(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
-        let mut found = Vec::new();
-        for entry in std::fs::read_dir(dir).unwrap() {
-            let path = entry.unwrap().path();
-            if path.is_dir() {
-                found.extend(rust_sources(&path));
-            } else if path.extension().is_some_and(|e| e == "rs") {
-                found.push(path);
-            }
-        }
-        found
     }
 
     #[test]
