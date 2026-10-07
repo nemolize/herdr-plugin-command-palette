@@ -4,7 +4,7 @@
   "private": true,
   "description": "Release tooling only: Changesets reads this version, and scripts/sync-version.mjs copies it into the Rust and herdr manifests. Nothing is published to npm.",
   "type": "module",
-  "packageManager": "pnpm@12.9.0",
+  "packageManager": "pnpm@12.9.1",
   "scripts": {
     "version-packages": "changeset version && node scripts/sync-version.mjs"
   },
