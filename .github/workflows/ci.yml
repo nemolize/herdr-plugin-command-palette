@@ -34,7 +34,7 @@ jobs:
       - id: zizmor-version
         name: Read the zizmor version pinned in mise.toml
         run: python3 -c 'import tomllib; print("version=" + tomllib.load(open("mise.toml", "rb"))["tools"]["zizmor"])' >> "$GITHUB_OUTPUT"
-      - uses: taiki-e/install-action@861a07ce7084f55488e375df125cdc99bba60eb7 # v2.87.23
+      - uses: taiki-e/install-action@e407f7bafb71fd004bc5c2da3032e5470cbb6ef0 # v2.87.24
         with:
           tool: just@1.58.0, zizmor@${{ steps.zizmor-version.outputs.version }}
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -61,7 +61,7 @@ jobs:
         with:
           rustflags: ""
           cache-key: test
-      - uses: taiki-e/install-action@861a07ce7084f55488e375df125cdc99bba60eb7 # v2.87.23
+      - uses: taiki-e/install-action@e407f7bafb71fd004bc5c2da3032e5470cbb6ef0 # v2.87.24
         with:
           tool: just@1.58.0
       - run: just test
@@ -92,7 +92,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: taiki-e/install-action@861a07ce7084f55488e375df125cdc99bba60eb7 # v2.87.23
+      - uses: taiki-e/install-action@e407f7bafb71fd004bc5c2da3032e5470cbb6ef0 # v2.87.24
         with:
           tool: just@1.58.0
       - run: just fetch-herdr
@@ -111,7 +111,7 @@ jobs:
         with:
           rustflags: ""
           cache-key: build
-      - uses: taiki-e/install-action@861a07ce7084f55488e375df125cdc99bba60eb7 # v2.87.23
+      - uses: taiki-e/install-action@e407f7bafb71fd004bc5c2da3032e5470cbb6ef0 # v2.87.24
         with:
           tool: just@1.58.0
       # cargo test compiles the test profile only. This is the sole check that
