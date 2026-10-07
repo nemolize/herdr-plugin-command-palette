@@ -336,29 +336,33 @@ fn row_line(icon: Option<&str>, title: &str, key: &str, width: u16) -> Line<'sta
         spans.push(Span::raw(icon.to_string()));
         spans.push(Span::raw(" ".repeat(ICON_GAP as usize)));
     }
-    spans.push(Span::raw(title.to_string()));
+    let without_key = |mut spans: Vec<Span<'static>>| {
+        spans.push(Span::raw(title.to_string()));
+        Line::from(spans)
+    };
     if key.is_empty() || width == 0 {
-        return Line::from(spans);
+        return without_key(spans);
     }
 
     // The highlight symbol indents every row, so the columns a row may use are
     // fewer than the area's own width and a key sized against it would wrap.
     let Some(room) = width.checked_sub(HIGHLIGHT_COLUMNS) else {
-        return Line::from(spans);
+        return without_key(spans);
     };
     let key_width = drawn_width(key);
     if room < lead + drawn_width(title) + KEY_GAP + key_width {
-        return Line::from(spans);
+        return without_key(spans);
     }
+    // ratatui draws a control character as nothing, yet `Span::width` counts it.
+    let shown: String = title.chars().filter(|c| !c.is_control()).collect();
     // `Line` starts a span at the previous `Span::width`, a cell short after `ｶﾞ`,
     // so a gap span of its own would overwrite the title's last glyph.
-    let placed = Line::from(spans.clone()).width();
-    let Some(gap) = usize::from(room - key_width).checked_sub(placed) else {
-        return Line::from(spans);
+    let next_span_column = Line::from(spans.clone()).width() + Span::raw(shown.as_str()).width();
+    let Some(gap) = usize::from(room - key_width).checked_sub(next_span_column) else {
+        return without_key(spans);
     };
 
-    spans.pop();
-    spans.push(Span::raw(format!("{title}{}", " ".repeat(gap))));
+    spans.push(Span::raw(format!("{shown}{}", " ".repeat(gap))));
     spans.push(Span::raw(key.to_string()).dim());
     Line::from(spans)
 }
@@ -653,34 +657,16 @@ mod render_tests {
         assert_eq!(row, "▸ ▭ New tab", "{lines:#?}");
     }
 
-    fn row_cells(app: &mut App, width: u16) -> Vec<String> {
-        let mut terminal = Terminal::new(TestBackend::new(width, 8)).unwrap();
-        terminal.draw(|f| render(f, app)).unwrap();
-        let buffer = terminal.backend().buffer();
-        (0..8)
-            .map(|y| {
-                (0..width)
-                    .map(|x| buffer[(x, y)].symbol().to_string())
-                    .collect::<Vec<_>>()
-            })
-            .find(|cells| cells.iter().any(|c| c == "a"))
-            .unwrap()
-    }
-
     /// Issue #230: `ｶﾞ` takes two cells but one `Span::width`, and the cell it
     /// was short by used to go to the gap, over the title's last glyph.
     #[test]
     fn a_title_with_a_sound_mark_keeps_every_glyph_beside_its_key() {
         let width = 30;
         let mut app = app_with_key("aｶﾞb", "prefix+c");
-        let cells = row_cells(&mut app, width);
-        assert_eq!(&cells[4..6], ["a", "ｶﾞ"], "{cells:?}");
-        assert_eq!(cells[7], "b", "{cells:?}");
-        assert_eq!(
-            cells[width as usize - 8..].concat(),
-            "prefix+c",
-            "{cells:?}"
-        );
+        let row = cells(&mut app, width, 8, 1);
+        assert_eq!(&row[4..6], ["a", "ｶﾞ"], "{row:?}");
+        assert_eq!(row[7], "b", "{row:?}");
+        assert_eq!(row[width as usize - 8..].concat(), "prefix+c", "{row:?}");
     }
 
     /// The key is dropped by drawn width, which counts `ｶﾞ` as the two cells
@@ -690,15 +676,32 @@ mod render_tests {
         let exact = 2 + 2 + 4 + 2 + 8;
 
         let mut app = app_with_key("aｶﾞb", "prefix+c");
-        let cells = row_cells(&mut app, exact);
-        assert_eq!(cells[7], "b", "{cells:?}");
-        assert_eq!(&cells[8..10], [" ", " "], "{cells:?}");
-        assert_eq!(cells[10..].concat(), "prefix+c", "{cells:?}");
+        let row = cells(&mut app, exact, 8, 1);
+        assert_eq!(row[7], "b", "{row:?}");
+        assert_eq!(&row[8..10], [" ", " "], "{row:?}");
+        assert_eq!(row[10..].concat(), "prefix+c", "{row:?}");
 
         let mut app = app_with_key("aｶﾞb", "prefix+c");
-        let cells = row_cells(&mut app, exact - 1);
-        assert_eq!(cells[7], "b", "{cells:?}");
-        assert!(!cells.concat().contains("prefix"), "{cells:?}");
+        let row = cells(&mut app, exact - 1, 8, 1);
+        assert_eq!(row[7], "b", "{row:?}");
+        assert!(!row.concat().contains("prefix"), "{row:?}");
+    }
+
+    /// A control character draws nothing but counts a cell to `Span::width`, so
+    /// left in the title it pushed a key that fits by drawn width off the row.
+    #[test]
+    fn a_key_beside_control_characters_is_dropped_by_drawn_width() {
+        // `▸ ` + `▭ ` + `ab` + the gap + `prefix+c`.
+        let exact = 2 + 2 + 2 + 2 + 8;
+
+        let mut app = app_with_key("a\t\t\tb", "prefix+c");
+        let row = cells(&mut app, exact, 8, 1);
+        assert_eq!(row[..6].concat(), "▸ ▭ ab", "{row:?}");
+        assert_eq!(row[8..].concat(), "prefix+c", "{row:?}");
+
+        let mut app = app_with_key("a\t\t\tb", "prefix+c");
+        let row = cells(&mut app, exact - 1, 8, 1);
+        assert!(!row.concat().contains("prefix"), "{row:?}");
     }
 
     /// A target has no shortcut of its own, so the stage that picks one must
