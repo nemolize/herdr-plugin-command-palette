@@ -370,17 +370,16 @@ fn render_input(f: &mut Frame, line: &LineEdit, area: Rect) {
     let (before, after) = (drawn_clusters(before), drawn_clusters(after));
     // The cursor outranks the prefix when the pane cannot hold both: it is what
     // says the field is live, and a lone `>` says nothing.
-    let (left, cursor_column) = match area.width.checked_sub(PROMPT_COLUMNS + CURSOR_COLUMNS) {
-        None => (Line::default(), 0),
+    let cursor_column = match area.width.checked_sub(PROMPT_COLUMNS + CURSOR_COLUMNS) {
+        None => 0,
         Some(room) => {
             let kept = tail_within(&before, room);
-            let mut left = clusters_line(kept);
-            left.spans.insert(0, Span::raw("> "));
-            (left, PROMPT_COLUMNS + clusters_width(kept))
+            f.render_widget(Paragraph::new("> "), area);
+            render_clusters(f, kept, area.x + PROMPT_COLUMNS, area);
+            PROMPT_COLUMNS + clusters_width(kept)
         }
     };
 
-    f.render_widget(left, area);
     let cursor = Rect {
         x: area.x + cursor_column,
         width: CURSOR_COLUMNS,
@@ -389,14 +388,7 @@ fn render_input(f: &mut Frame, line: &LineEdit, area: Rect) {
     f.render_widget(Paragraph::new(CURSOR), cursor);
     let rest = cursor_column + CURSOR_COLUMNS;
     let room = area.width.saturating_sub(rest);
-    f.render_widget(
-        clusters_line(head_within(&after, room)),
-        Rect {
-            x: area.x + rest,
-            width: room,
-            ..area
-        },
-    );
+    render_clusters(f, head_within(&after, room), area.x + rest, area);
 }
 
 /// The drawn form of each cluster of `text`, the clusters `LineEdit` puts its
@@ -431,10 +423,15 @@ fn drawn_cluster(cluster: &str) -> String {
     }
 }
 
-/// One span per cluster: ratatui segments each span on its own, so a drawn
-/// glyph cannot merge with its neighbour's the way `␉` and a spacing mark would.
-fn clusters_line(clusters: &[String]) -> Line<'_> {
-    clusters.iter().map(|c| Span::raw(c.as_str())).collect()
+/// Each cluster at the column `drawn_width` puts it in, not one `Line` of spans:
+/// that places spans by `Span::width`, a cell short after `ｶﾞ`.
+fn render_clusters(f: &mut Frame, clusters: &[String], x: u16, area: Rect) {
+    let mut x = x;
+    for cluster in clusters {
+        let width = drawn_width(cluster);
+        f.render_widget(Span::raw(cluster.as_str()), Rect { x, width, ..area });
+        x += width;
+    }
 }
 
 fn clusters_width(clusters: &[String]) -> u16 {
@@ -959,6 +956,18 @@ mod render_tests {
                 &[">", " ", "ｶﾞ", " ", "⎸", " "],
             ),
             (
+                "text after a cluster ratatui counts wider than unicode-width does",
+                "ｶﾞa",
+                8,
+                &[">", " ", "ｶﾞ", " ", "a", "⎸", " ", " "],
+            ),
+            (
+                "a lone halfwidth sound mark is drawn",
+                "\u{FF9E}a",
+                8,
+                &[">", " ", "\u{FF9E}", "a", "⎸", " ", " ", " "],
+            ),
+            (
                 "the cursor glyph typed as a name is still just text",
                 "⎸⎸",
                 8,
@@ -1086,6 +1095,13 @@ mod render_tests {
                 1,
                 8,
                 &[">", " ", "あ", " ", "い", " ", "⎸", " "],
+            ),
+            (
+                "text after a wide-counted cluster past the cursor",
+                "aｶﾞb",
+                2,
+                8,
+                &[">", " ", "a", "⎸", "ｶﾞ", " ", "b", " "],
             ),
             (
                 "a control character is a visible cursor stop",
