@@ -346,12 +346,19 @@ fn row_line(icon: Option<&str>, title: &str, key: &str, width: u16) -> Line<'sta
     let Some(room) = width.checked_sub(HIGHLIGHT_COLUMNS) else {
         return Line::from(spans);
     };
-    let needed = lead + drawn_width(title) + KEY_GAP + drawn_width(key);
-    let Some(gap) = room.checked_sub(needed).map(|slack| slack + KEY_GAP) else {
+    let key_width = drawn_width(key);
+    if room < lead + drawn_width(title) + KEY_GAP + key_width {
+        return Line::from(spans);
+    }
+    // `Line` starts a span at the previous `Span::width`, a cell short after `ｶﾞ`,
+    // so a gap span of its own would overwrite the title's last glyph.
+    let placed = Line::from(spans.clone()).width();
+    let Some(gap) = usize::from(room - key_width).checked_sub(placed) else {
         return Line::from(spans);
     };
 
-    spans.push(Span::raw(" ".repeat(gap as usize)));
+    spans.pop();
+    spans.push(Span::raw(format!("{title}{}", " ".repeat(gap))));
     spans.push(Span::raw(key.to_string()).dim());
     Line::from(spans)
 }
@@ -644,6 +651,54 @@ mod render_tests {
         let lines = draw(&mut app, exact - 1, 8);
         let row = lines.iter().find(|l| l.contains("New tab")).unwrap();
         assert_eq!(row, "▸ ▭ New tab", "{lines:#?}");
+    }
+
+    fn row_cells(app: &mut App, width: u16) -> Vec<String> {
+        let mut terminal = Terminal::new(TestBackend::new(width, 8)).unwrap();
+        terminal.draw(|f| render(f, app)).unwrap();
+        let buffer = terminal.backend().buffer();
+        (0..8)
+            .map(|y| {
+                (0..width)
+                    .map(|x| buffer[(x, y)].symbol().to_string())
+                    .collect::<Vec<_>>()
+            })
+            .find(|cells| cells.iter().any(|c| c == "a"))
+            .unwrap()
+    }
+
+    /// Issue #230: `ｶﾞ` takes two cells but one `Span::width`, and the cell it
+    /// was short by used to go to the gap, over the title's last glyph.
+    #[test]
+    fn a_title_with_a_sound_mark_keeps_every_glyph_beside_its_key() {
+        let width = 30;
+        let mut app = app_with_key("aｶﾞb", "prefix+c");
+        let cells = row_cells(&mut app, width);
+        assert_eq!(&cells[4..6], ["a", "ｶﾞ"], "{cells:?}");
+        assert_eq!(cells[7], "b", "{cells:?}");
+        assert_eq!(
+            cells[width as usize - 8..].concat(),
+            "prefix+c",
+            "{cells:?}"
+        );
+    }
+
+    /// The key is dropped by drawn width, which counts `ｶﾞ` as the two cells
+    /// it takes: `▸ ` + `▭ ` + `aｶﾞb` + the gap + `prefix+c`.
+    #[test]
+    fn a_key_beside_a_sound_mark_is_dropped_by_drawn_width() {
+        let exact = 2 + 2 + 4 + 2 + 8;
+
+        let mut app = app_with_key("aｶﾞb", "prefix+c");
+        let cells = row_cells(&mut app, exact);
+        assert_eq!(cells[7], "b", "{cells:?}");
+        assert_eq!(&cells[8..10], [" ", " "], "{cells:?}");
+        assert_eq!(cells[10..].concat(), "prefix+c", "{cells:?}");
+
+        let mut app = app_with_key("aｶﾞb", "prefix+c");
+        let cells = row_cells(&mut app, exact - 1);
+        assert_eq!(cells[7], "b", "{cells:?}");
+        assert!(!cells.concat().contains("prefix"), "{cells:?}");
     }
 
     /// A target has no shortcut of its own, so the stage that picks one must
