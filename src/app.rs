@@ -2,6 +2,7 @@
 
 use crate::catalog::Command;
 use crate::frecency::Frecency;
+use crate::generate_row::GenerateRow;
 use crate::glyph::SEPARATOR;
 use crate::herdr::PluginAction;
 use crate::line_edit::{Edit, LineEdit};
@@ -83,6 +84,8 @@ pub enum Stage {
         command: Command,
         args: Vec<String>,
         text: LineEdit,
+        /// Present only where a name can be generated (`offers_generation`).
+        generate: Option<GenerateRow>,
     },
 }
 
@@ -100,6 +103,9 @@ pub enum Step {
     /// direct call because the name lives behind a list API, and `App` holds no
     /// herdr handle — every herdr call is the event loop's.
     NeedsPrompt(Command),
+    /// Ask the model for a name, as request `id`, and hand the answer back
+    /// through `App::generated`.
+    Generate(u64),
     /// Run this now.
     Run(Outcome),
 }
@@ -124,6 +130,8 @@ pub struct App {
     pub icons: bool,
     candidates: Vec<Candidate>,
     frecency: Frecency,
+    /// Never reused, so an answer outliving its stage cannot match a later one.
+    last_generation: u64,
 }
 
 impl App {
@@ -135,6 +143,7 @@ impl App {
             icons: true,
             candidates,
             frecency,
+            last_generation: 0,
         };
         app.refilter();
         app
@@ -150,10 +159,12 @@ impl App {
     /// something is an edit of its current name rather than a retype.
     pub fn enter_prompt(&mut self, command: Command, seed: String) {
         let args = command.args.clone();
+        let generate = offers_generation(&args).then(GenerateRow::default);
         self.stage = Stage::Prompt {
             command,
             args,
             text: LineEdit::new(seed),
+            generate,
         };
         self.selection.clear_query();
         self.status = None;
@@ -259,8 +270,55 @@ impl App {
         self.selection.refilter(&borrowed, |i| rank[i]);
     }
 
+    /// At a prompt this moves focus between the input and the generate row,
+    /// which is the only other thing there; elsewhere it moves through the list.
     pub fn move_selection(&mut self, delta: i32) {
+        if let Stage::Prompt { generate, .. } = &mut self.stage {
+            if let Some(row) = generate.as_mut().filter(|r| !r.is_generating()) {
+                row.focused = delta > 0;
+            }
+            return;
+        }
         self.selection.move_by(delta);
+    }
+
+    pub fn generate_row(&self) -> Option<&GenerateRow> {
+        match &self.stage {
+            Stage::Prompt { generate, .. } => generate.as_ref(),
+            _ => None,
+        }
+    }
+
+    pub fn is_generating(&self) -> bool {
+        self.generate_row().is_some_and(GenerateRow::is_generating)
+    }
+
+    /// Stops a running generation, leaving the input as it was. False when none
+    /// was running, so Esc then means what it means everywhere else.
+    pub fn cancel_generation(&mut self) -> bool {
+        match &mut self.stage {
+            Stage::Prompt {
+                generate: Some(row),
+                ..
+            } => row.cancel(),
+            _ => false,
+        }
+    }
+
+    /// The answer to request `id`. A success replaces the typed name and
+    /// returns focus to the input; an answer nobody is waiting for is dropped.
+    pub fn generated(&mut self, id: u64, answer: Result<String, String>) {
+        if let Stage::Prompt {
+            text,
+            generate: Some(row),
+            ..
+        } = &mut self.stage
+        {
+            if let Some(name) = row.finish(id, answer) {
+                *text = LineEdit::new(name);
+                self.status = None;
+            }
+        }
     }
 
     pub fn selected_note(&self) -> Option<&str> {
@@ -276,7 +334,10 @@ impl App {
     /// Applies a keystroke to whichever line is live: the typed name at the
     /// prompt, the query everywhere else.
     pub fn edit(&mut self, edit: Edit) {
-        if let Stage::Prompt { text, .. } = &mut self.stage {
+        if let Stage::Prompt { text, generate, .. } = &mut self.stage {
+            if generate.as_ref().is_some_and(|r| r.focused) {
+                return;
+            }
             // The refusal described the old text; leaving it up would report
             // `--clear` at an input that no longer says it.
             if text.apply(edit) {
@@ -306,9 +367,24 @@ impl App {
 
     pub fn confirm(&mut self) -> Step {
         if let Stage::Prompt {
+            generate: Some(row),
+            ..
+        } = &mut self.stage
+        {
+            if row.focused {
+                let id = self.last_generation + 1;
+                if !row.start(id) {
+                    return Step::Continue;
+                }
+                self.last_generation = id;
+                return Step::Generate(id);
+            }
+        }
+        if let Stage::Prompt {
             command,
             args,
             text,
+            ..
         } = &self.stage
         {
             // Checked trimmed, SENT untrimmed: herdr stores surrounding spaces
@@ -380,6 +456,20 @@ impl App {
     pub fn frecency(&self) -> &Frecency {
         &self.frecency
     }
+}
+
+/// Only a workspace rename offers a generated name: the panes it holds are
+/// what the model reads, and a tab or pane has no such summary of its own yet.
+/// Read off the argv like `seed_for` in `main.rs`, so a user catalog's own
+/// entry for the same command qualifies too.
+fn offers_generation(args: &[String]) -> bool {
+    matches!(
+        (
+            args.first().map(String::as_str),
+            args.get(1).map(String::as_str)
+        ),
+        (Some("workspace"), Some("rename"))
+    )
 }
 
 /// Whether `text` would reach the command as one of its own flags.
@@ -859,5 +949,175 @@ mod tests {
         app.push_str("zzzz");
         assert!(app.rows().is_empty());
         assert!(matches!(app.confirm(), Step::Continue));
+    }
+
+    fn renaming_workspace(seed: &str) -> App {
+        let mut c = cmd(
+            "workspace.rename",
+            "Rename workspace...",
+            &["workspace", "rename", "w3Y", "{text}"],
+            None,
+        );
+        c.prompt = Some("New workspace name".into());
+        let mut app = app_with(vec![c.clone()]);
+        app.enter_prompt(c, seed.into());
+        app
+    }
+
+    fn row(app: &App) -> &GenerateRow {
+        app.generate_row().expect("a generate row")
+    }
+
+    fn typed(app: &App) -> &str {
+        match &app.stage {
+            Stage::Prompt { text, .. } => text.text(),
+            _ => panic!("not at the prompt"),
+        }
+    }
+
+    fn start_generating(app: &mut App) -> u64 {
+        app.move_selection(1);
+        match app.confirm() {
+            Step::Generate(id) => id,
+            _ => panic!("expected a generate request"),
+        }
+    }
+
+    #[test]
+    fn only_a_workspace_rename_offers_a_generated_name() {
+        assert!(renaming_workspace("w").generate_row().is_some());
+        assert!(at_prompt("t").generate_row().is_none(), "tab rename");
+        let mut c = cmd(
+            "pane.rename",
+            "Rename pane...",
+            &["pane", "rename", "w3Y:p1", "{text}"],
+            None,
+        );
+        c.prompt = Some("New pane name".into());
+        let mut app = app_with(vec![]);
+        app.enter_prompt(c, String::new());
+        assert!(app.generate_row().is_none(), "pane rename");
+    }
+
+    #[test]
+    fn down_and_up_move_focus_between_the_input_and_the_row() {
+        let mut app = renaming_workspace("herdr");
+        assert!(!row(&app).focused, "the input has focus first");
+        app.move_selection(1);
+        assert!(row(&app).focused);
+        app.move_selection(1);
+        assert!(row(&app).focused, "nothing below the row");
+        app.move_selection(-1);
+        assert!(!row(&app).focused);
+    }
+
+    #[test]
+    fn enter_on_the_row_asks_for_a_name_and_marks_it_generating() {
+        let mut app = renaming_workspace("herdr");
+        let id = start_generating(&mut app);
+        assert!(app.is_generating());
+        assert_eq!(row(&app).label(), "\u{2728} Generating...");
+        assert_eq!(typed(&app), "herdr", "the input is not touched");
+        assert!(
+            matches!(app.confirm(), Step::Continue),
+            "no second request while one runs"
+        );
+
+        app.generated(id, Err("empty answer".into()));
+        assert!(
+            matches!(app.confirm(), Step::Generate(next) if next > id),
+            "a retry is a new request"
+        );
+    }
+
+    #[test]
+    fn enter_in_the_input_still_renames() {
+        let mut app = renaming_workspace("herdr");
+        match app.confirm() {
+            Step::Run(Outcome::Command { args, .. }) => {
+                assert_eq!(args, ["workspace", "rename", "w3Y", "herdr"]);
+            }
+            _ => panic!("expected the rename"),
+        }
+    }
+
+    #[test]
+    fn a_generated_name_replaces_the_input_and_enter_renames_to_it() {
+        let mut app = renaming_workspace("herdr");
+        let id = start_generating(&mut app);
+        app.generated(id, Ok("palette LLM".into()));
+
+        assert_eq!(typed(&app), "palette LLM");
+        assert!(!row(&app).focused, "focus is back on the input");
+        app.edit(Edit::Insert('!'));
+        assert_eq!(typed(&app), "palette LLM!", "cursor at the end");
+        app.edit(Edit::DeleteBack);
+        match app.confirm() {
+            Step::Run(Outcome::Command { args, .. }) => {
+                assert_eq!(args, ["workspace", "rename", "w3Y", "palette LLM"]);
+            }
+            _ => panic!("expected the rename"),
+        }
+    }
+
+    #[test]
+    fn cancelling_keeps_the_input_and_drops_the_late_answer() {
+        let mut app = renaming_workspace("herdr");
+        let id = start_generating(&mut app);
+        assert!(app.cancel_generation());
+        assert!(!app.is_generating());
+        assert!(
+            matches!(app.stage, Stage::Prompt { .. }),
+            "still at the prompt"
+        );
+
+        app.generated(id, Ok("late".into()));
+        assert_eq!(typed(&app), "herdr");
+        assert!(!app.cancel_generation(), "Esc now goes back as usual");
+    }
+
+    #[test]
+    fn an_answer_arriving_after_the_stage_was_left_changes_nothing() {
+        let mut app = renaming_workspace("herdr");
+        let id = start_generating(&mut app);
+        app.cancel_generation();
+        app.leave_stage();
+        app.generated(id, Ok("late".into()));
+        assert!(matches!(app.stage, Stage::Commands));
+    }
+
+    #[test]
+    fn a_failure_leaves_the_input_and_shows_why_on_the_row() {
+        for why in [
+            "no Ollama at localhost:11434",
+            "HTTP 404: model 'x' not found",
+            "timed out after 60s",
+            "empty answer",
+        ] {
+            let mut app = renaming_workspace("herdr");
+            let id = start_generating(&mut app);
+            app.generated(id, Err(why.into()));
+            assert_eq!(typed(&app), "herdr", "{why}");
+            assert!(row(&app).label().ends_with(why), "{why}");
+            assert!(row(&app).focused, "{why}: still selectable to retry");
+        }
+    }
+
+    #[test]
+    fn keys_do_not_move_focus_or_edit_while_generating() {
+        let mut app = renaming_workspace("herdr");
+        start_generating(&mut app);
+        app.move_selection(-1);
+        assert!(row(&app).focused, "focus stays while it runs");
+        app.edit(Edit::Insert('x'));
+        assert_eq!(typed(&app), "herdr");
+    }
+
+    #[test]
+    fn typing_while_the_row_has_focus_does_not_reach_the_input() {
+        let mut app = renaming_workspace("herdr");
+        app.move_selection(1);
+        app.edit(Edit::Insert('x'));
+        assert_eq!(typed(&app), "herdr");
     }
 }

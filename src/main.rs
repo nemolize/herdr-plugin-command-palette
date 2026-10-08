@@ -1,15 +1,18 @@
 //! Pane entrypoint (docs/design.md §3). All rendering, input, and dispatch live
 //! here; the action hop only opens the pane.
 mod app;
+mod brief;
 mod catalog;
 mod context;
 mod frecency;
 mod fuzzy;
+mod generate_row;
 mod glyph;
 mod herdr;
 mod keys;
 mod line_edit;
 mod listing;
+mod ollama;
 mod selection;
 mod settings;
 #[cfg(test)]
@@ -18,6 +21,7 @@ mod ui;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
+use std::sync::mpsc::{channel, Sender};
 
 use app::{App, Candidate, Outcome, Step};
 use context::Context;
@@ -191,9 +195,16 @@ fn run() -> Result<(), String> {
 
     let mut screen = ui::Screen::enter()?;
 
+    // Generation runs off the event loop so Esc can still cancel it; answers
+    // come back here, tagged with the request they belong to.
+    let (answers_tx, answers) = channel::<(u64, Result<String, String>)>();
+
     // A step the loop produced itself, handled before the next keypress.
     let mut next: Option<Step> = None;
     loop {
+        while let Ok((id, answer)) = answers.try_recv() {
+            app.generated(id, answer);
+        }
         let step = match next.take() {
             Some(step) => step,
             None => {
@@ -228,6 +239,13 @@ fn run() -> Result<(), String> {
                 let seed = seed_for(&herdr, &command);
                 app.enter_prompt(command, seed);
             }
+            Step::Generate(id) => generate(
+                id,
+                &herdr,
+                &context,
+                &settings.auto_name,
+                answers_tx.clone(),
+            ),
             // The ranking is saved before the dispatch is attempted, so a
             // failure still leaves the ordering updated — the user did pick it.
             Step::Run(outcome) => {
@@ -248,6 +266,32 @@ fn run() -> Result<(), String> {
             }
         }
     }
+}
+
+/// Starts request `id` on its own thread. A cancelled request still runs to
+/// its end — there is no way to abort a blocking call — and its answer is
+/// dropped on arrival; the thread dies with the palette if it outlives it.
+fn generate(
+    id: u64,
+    herdr: &Herdr,
+    context: &Context,
+    settings: &settings::AutoName,
+    answers: Sender<(u64, Result<String, String>)>,
+) {
+    let Some(workspace) = context.workspace_id.clone() else {
+        let _ = answers.send((id, Err("no workspace to name".to_string())));
+        return;
+    };
+    let (herdr, pane, settings) = (
+        herdr.clone(),
+        context.focused_pane_id.clone(),
+        settings.clone(),
+    );
+    std::thread::spawn(move || {
+        let answer = brief::gather(&herdr, &workspace, pane.as_deref())
+            .and_then(|prompt| ollama::generate(&settings, &prompt));
+        let _ = answers.send((id, answer));
+    });
 }
 
 /// Everything the palette offers, from the two sources that feed it, plus the
@@ -381,6 +425,140 @@ fn skipped_note(count: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A herdr standing in for the real one: one workspace with two panes, and
+    /// a `pane read` that answers only when asked for exactly 120 lines.
+    fn stub_herdr(name: &str) -> Herdr {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("palette-gen-{}-{name}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let bin = dir.join("herdr");
+        std::fs::write(
+            &bin,
+            r#"#!/bin/sh
+case "$*" in
+  "pane list --workspace w1")
+    echo '{"result":{"panes":[{"terminal_title_stripped":"cargo test","foreground_cwd":"/nonexistent/a"},{"terminal_title_stripped":"vim notes","foreground_cwd":""}]}}' ;;
+  "pane read w1:p1 --lines 120 --format text")
+    echo 'last screen line' ;;
+  *) echo "unexpected: $*" >&2; exit 1 ;;
+esac
+"#,
+        )
+        .unwrap();
+        std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
+        Herdr::new(bin.to_string_lossy().into_owned())
+    }
+
+    fn fake_ollama(reply: &'static str) -> (String, std::sync::mpsc::Receiver<String>) {
+        use std::io::{BufRead, BufReader, Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let stream = stream.unwrap();
+                let mut reader = BufReader::new(stream.try_clone().unwrap());
+                let mut length = 0;
+                loop {
+                    let mut line = String::new();
+                    reader.read_line(&mut line).unwrap();
+                    if let Some(v) = line.to_ascii_lowercase().strip_prefix("content-length:") {
+                        length = v.trim().parse().unwrap();
+                    }
+                    if line == "\r\n" {
+                        break;
+                    }
+                }
+                let mut body = vec![0; length];
+                reader.read_exact(&mut body).unwrap();
+                let _ = tx.send(String::from_utf8(body).unwrap());
+                write!(
+                    &stream,
+                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n{reply}",
+                    reply.len()
+                )
+                .unwrap();
+            }
+        });
+        (url, rx)
+    }
+
+    fn auto_name_at(base_url: String) -> settings::AutoName {
+        settings::AutoName {
+            base_url,
+            timeout_secs: 5,
+            ..settings::AutoName::default()
+        }
+    }
+
+    #[test]
+    fn a_generate_request_sends_one_prompt_with_every_pane_and_the_focused_output() {
+        let (url, requests) = fake_ollama(r#"{"response":"\"tests\"\n"}"#);
+        let (tx, answers) = std::sync::mpsc::channel();
+        generate(9, &stub_herdr("ok"), &in_a_pane(), &auto_name_at(url), tx);
+
+        let timeout = std::time::Duration::from_secs(10);
+        assert_eq!(
+            answers.recv_timeout(timeout).unwrap(),
+            (9, Ok("tests".to_string()))
+        );
+        let body: serde_json::Value =
+            serde_json::from_str(&requests.recv_timeout(timeout).unwrap()).unwrap();
+        assert_eq!(
+            body["prompt"],
+            "Panes in this workspace:\n\
+             - title: cargo test; cwd: /nonexistent/a; git branch: none\n\
+             - title: vim notes; cwd: none; git branch: none\n\
+             \n\
+             Last 120 lines of the focused pane:\n\
+             last screen line\n"
+        );
+        assert_eq!(body["model"], "qwen3.5:9b");
+        assert!(
+            requests
+                .recv_timeout(std::time::Duration::from_millis(300))
+                .is_err(),
+            "exactly one request"
+        );
+    }
+
+    #[test]
+    fn a_herdr_failure_is_the_answer_and_nothing_is_sent() {
+        let (url, requests) = fake_ollama("{}");
+        let (tx, answers) = std::sync::mpsc::channel();
+        let context = Context {
+            focused_pane_id: Some("w1:p9".into()),
+            ..in_a_pane()
+        };
+        generate(1, &stub_herdr("fail"), &context, &auto_name_at(url), tx);
+
+        let (id, answer) = answers
+            .recv_timeout(std::time::Duration::from_secs(10))
+            .unwrap();
+        assert_eq!(id, 1);
+        assert!(answer.unwrap_err().starts_with("pane read:"));
+        assert!(requests
+            .recv_timeout(std::time::Duration::from_millis(300))
+            .is_err());
+    }
+
+    #[test]
+    fn without_a_workspace_there_is_nothing_to_name() {
+        let (tx, answers) = std::sync::mpsc::channel();
+        generate(
+            2,
+            &stub_herdr("none"),
+            &Context::default(),
+            &settings::AutoName::default(),
+            tx,
+        );
+        assert_eq!(
+            answers.recv().unwrap(),
+            (2, Err("no workspace to name".to_string()))
+        );
+    }
 
     /// Both refusals are decided before anything is spawned, so the bin path
     /// is never reached.

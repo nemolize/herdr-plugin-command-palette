@@ -22,6 +22,7 @@ struct ApiError {
     message: String,
 }
 
+#[derive(Clone)]
 pub struct Herdr {
     bin: String,
 }
@@ -159,6 +160,39 @@ impl Herdr {
             })
             .map(seed_from_row)
             .unwrap_or_default()
+    }
+
+    pub fn workspace_panes(&self, workspace: &str) -> Result<Vec<serde_json::Value>, String> {
+        let args = ["pane", "list", "--workspace", workspace].map(str::to_owned);
+        let result = self.call(&args)?;
+        result
+            .get("panes")
+            .and_then(|v| v.as_array())
+            .cloned()
+            .ok_or_else(|| "pane list returned no panes".to_string())
+    }
+
+    /// The last `lines` lines `pane` shows, as plain text — `--format text`
+    /// prints the lines themselves rather than a JSON envelope.
+    pub fn read_pane(&self, pane: &str, lines: u32) -> Result<String, String> {
+        let out = Proc::new(&self.bin)
+            .args([
+                "pane",
+                "read",
+                pane,
+                "--lines",
+                &lines.to_string(),
+                "--format",
+                "text",
+            ])
+            .output()
+            .map_err(|e| format!("could not run {}: {e}", self.bin))?;
+        if !out.status.success() {
+            return Err(read_response(&out.stdout, &out.stderr)
+                .err()
+                .unwrap_or_else(|| format!("pane read exited {}", out.status)));
+        }
+        Ok(String::from_utf8_lossy(&out.stdout).into_owned())
     }
 
     /// (workspace_id, label) pairs, for qualifying tab rows.

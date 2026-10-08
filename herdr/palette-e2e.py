@@ -713,7 +713,7 @@ def every_footer_note_is_kept(scratch: Path) -> bool:
     for note in (
         "herdr 0.1.0 < catalog 0.8.2 - some entries may fail",
         "catalog: 1 skipped - search `skipped`",
-        "settings.toml: unknown field `icon`, expected `icons` - using defaults",
+        "settings.toml: unknown field `icon`, expected `icons` or `auto_name` - using defaults",
     ):
         passed &= check(
             f"the footer shows `{note}` whole beside the others (#149)",
