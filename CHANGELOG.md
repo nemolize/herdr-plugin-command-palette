@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.8.0
+
+### Minor Changes
+
+- 609b743: Suggest a workspace name from a local Ollama: `Rename workspace...` gains an `✨ Auto generate` row that fills the input with a name drawn from the workspace's panes
+
+### Patch Changes
+
+- d2bad24: Keep the last glyph of an entry's title when it holds a halfwidth sound mark such as `ｶﾞ` and the entry's key is shown, and keep that key flush right
+- 016d1eb: Show every cursor stop in the input line: a zero-width character in a name is drawn as `◌`, a combining mark separated from its base by the cursor stays visible, and a `\r\n` pair is never clipped in half
+
 ## 0.7.0
 
 ### Minor Changes
