@@ -16,6 +16,8 @@ something a test can arrange.
 from __future__ import annotations
 
 import fcntl
+import http.server
+import json
 import os
 import pty
 import select
@@ -24,6 +26,7 @@ import struct
 import sys
 import tempfile
 import termios
+import threading
 import time
 import tomllib
 from pathlib import Path
@@ -144,7 +147,12 @@ def visible(painted: str) -> str:
 
 class Palette:
     def __init__(
-        self, stub: Path, log: Path, errlog: Path, config: Path | None = None
+        self,
+        stub: Path,
+        log: Path,
+        errlog: Path,
+        config: Path | None = None,
+        extra_env: dict[str, str | None] | None = None,
     ):
         env = dict(
             os.environ,
@@ -159,6 +167,12 @@ class Palette:
             HERDR_STUB_LOG=str(log),
             TERM="xterm-256color",
         )
+        # None removes a variable the caller's own environment would pass in.
+        for key, value in (extra_env or {}).items():
+            if value is None:
+                env.pop(key, None)
+            else:
+                env[key] = value
 
         self.pid, self.fd = pty.fork()
         if self.pid == 0:
@@ -723,6 +737,95 @@ def every_footer_note_is_kept(scratch: Path) -> bool:
     return passed
 
 
+# A workspace rename over one pane: the seed lookup, the panes the model reads,
+# and the rename itself, which the stub accepts.
+NAMES_A_WORKSPACE = STUB % """case "$1 $2" in
+  "workspace list") echo '{"result":{"workspaces":[{"workspace_id":"w1","label":"old name"}]}}' ;;
+  "pane list") echo '{"result":{"panes":[{"terminal_title_stripped":"cargo test","foreground_cwd":""}]}}' ;;
+  "pane read") echo 'test result: ok' ;;
+  *) echo '{"result":{"type":"ok"}}' ;;
+esac
+exit 0"""
+
+# No cell in common with the seed `old name`: ratatui redraws only the cells
+# that change, so a shared tail would never reach the pty.
+GENERATED = "fresh label"
+
+
+def fake_ollama() -> tuple[str, threading.Thread]:
+    """Answers one generate request after a pause, so the answer lands while
+    no key is being pressed — what the palette must pick up on its own."""
+    server = http.server.HTTPServer(("127.0.0.1", 0), _Generate)
+    thread = threading.Thread(target=server.handle_request, daemon=True)
+    thread.start()
+    return f"http://127.0.0.1:{server.server_port}", thread
+
+
+class _Generate(http.server.BaseHTTPRequestHandler):
+    def do_POST(self) -> None:
+        self.rfile.read(int(self.headers["Content-Length"]))
+        time.sleep(0.5)
+        body = json.dumps({"response": GENERATED}).encode()
+        self.send_response(200)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, *_args) -> None:
+        pass
+
+
+def a_generated_name_lands_without_a_keypress(scratch: Path) -> bool:
+    """The answer arrives on another thread, so only the event loop polling
+    while it waits can draw it; a test calling the pieces directly cannot see
+    that loop. The proxy variable must not reroute the local call."""
+    url, served = fake_ollama()
+    stub = write_stub(scratch / "herdr-generate", NAMES_A_WORKSPACE)
+    log = scratch / "generate.log"
+    log.write_text("")
+    config = scratch / "config-generate"
+    config.mkdir()
+    (config / "settings.toml").write_text(f'[auto_name]\nbase_url = "{url}"\n')
+    palette = Palette(
+        stub,
+        log,
+        scratch / "generate.stderr",
+        config,
+        extra_env={
+            "HTTP_PROXY": "http://127.0.0.1:9",
+            "http_proxy": "http://127.0.0.1:9",
+            "NO_PROXY": None,
+            "no_proxy": None,
+        },
+    )
+    name = "a generated name lands in the input without a keypress"
+    try:
+        if not started(palette, name):
+            return False
+        palette.send(b"rename workspace")
+        palette.send(b"\r")
+        if not palette.wait_until_squeezed("Autogenerate", READY_TIMEOUT):
+            return check(name, False, f"no generate row: {visible(palette.painted)[-300:]!r}")
+        palette.send(b"\x1b[B")
+        palette.send(b"\r")
+        passed = check(
+            name,
+            palette.wait_until_squeezed("".join(GENERATED.split()), OUTCOME_TIMEOUT),
+            f"drew: {visible(palette.painted)[-400:]!r}",
+        )
+        served.join(1.0)
+        palette.send(b"\r")
+        code = palette.wait_for_exit(EXIT_TIMEOUT)
+        passed &= check(
+            "enter then renames the workspace to it",
+            code == 0 and f"workspace rename w1 {GENERATED}" in log.read_text(),
+            f"exit {code}, stub log: {log.read_text()!r}",
+        )
+        return passed
+    finally:
+        palette.close()
+
+
 def main() -> int:
     if not BINARY.is_file():
         print(f"no binary at {BINARY} — run `cargo build` first", file=sys.stderr)
@@ -746,6 +849,7 @@ def main() -> int:
     passed &= esc_closes_the_palette(scratch)
     passed &= icons_follow_settings(scratch)
     passed &= every_footer_note_is_kept(scratch)
+    passed &= a_generated_name_lands_without_a_keypress(scratch)
 
     return 0 if passed else 1
 

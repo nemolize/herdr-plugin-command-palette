@@ -195,8 +195,7 @@ fn run() -> Result<(), String> {
 
     let mut screen = ui::Screen::enter()?;
 
-    // Generation runs off the event loop so Esc can still cancel it; answers
-    // come back here, tagged with the request they belong to.
+    // Generation runs off the event loop so Esc can still cancel it.
     let (answers_tx, answers) = channel::<(u64, Result<String, String>)>();
 
     // A step the loop produced itself, handled before the next keypress.
@@ -239,8 +238,9 @@ fn run() -> Result<(), String> {
                 let seed = seed_for(&herdr, &command);
                 app.enter_prompt(command, seed);
             }
-            Step::Generate(id) => generate(
+            Step::Generate { id, workspace } => generate(
                 id,
+                workspace,
                 &herdr,
                 &context,
                 &settings.auto_name,
@@ -268,25 +268,23 @@ fn run() -> Result<(), String> {
     }
 }
 
-/// Starts request `id` on its own thread. A cancelled request still runs to
-/// its end — there is no way to abort a blocking call — and its answer is
-/// dropped on arrival; the thread dies with the palette if it outlives it.
+/// A cancelled request still runs to its end, since a blocking call cannot be
+/// aborted; the thread dies with the palette if it outlives it.
 fn generate(
     id: u64,
+    workspace: String,
     herdr: &Herdr,
     context: &Context,
     settings: &settings::AutoName,
     answers: Sender<(u64, Result<String, String>)>,
 ) {
-    let Some(workspace) = context.workspace_id.clone() else {
-        let _ = answers.send((id, Err("no workspace to name".to_string())));
-        return;
-    };
-    let (herdr, pane, settings) = (
-        herdr.clone(),
-        context.focused_pane_id.clone(),
-        settings.clone(),
-    );
+    // The focused pane belongs to the workspace the palette opened in, which a
+    // catalog entry naming another workspace by id is not.
+    let pane = context
+        .focused_pane_id
+        .clone()
+        .filter(|_| context.workspace_id.as_deref() == Some(workspace.as_str()));
+    let (herdr, settings) = (herdr.clone(), settings.clone());
     std::thread::spawn(move || {
         let answer = brief::gather(&herdr, &workspace, pane.as_deref())
             .and_then(|prompt| ollama::generate(&settings, &prompt));
@@ -426,8 +424,8 @@ fn skipped_note(count: usize) -> String {
 mod tests {
     use super::*;
 
-    /// A herdr standing in for the real one: one workspace with two panes, and
-    /// a `pane read` that answers only when asked for exactly 120 lines.
+    /// Workspace w1 with two panes, w2 with one, and a `pane read` that answers
+    /// only when asked for exactly 120 lines.
     fn stub_herdr(name: &str) -> Herdr {
         use std::os::unix::fs::PermissionsExt;
         let dir = std::env::temp_dir().join(format!("palette-gen-{}-{name}", std::process::id()));
@@ -442,6 +440,8 @@ case "$*" in
     echo '{"result":{"panes":[{"terminal_title_stripped":"cargo test","foreground_cwd":"/nonexistent/a"},{"terminal_title_stripped":"vim notes","foreground_cwd":""}]}}' ;;
   "pane read w1:p1 --lines 120 --format text")
     echo 'last screen line' ;;
+  "pane list --workspace w2")
+    echo '{"result":{"panes":[{"terminal_title_stripped":"w2 pane","foreground_cwd":""}]}}' ;;
   *) echo "unexpected: $*" >&2; exit 1 ;;
 esac
 "#,
@@ -497,7 +497,14 @@ esac
     fn a_generate_request_sends_one_prompt_with_every_pane_and_the_focused_output() {
         let (url, requests) = fake_ollama(r#"{"response":"\"tests\"\n"}"#);
         let (tx, answers) = std::sync::mpsc::channel();
-        generate(9, &stub_herdr("ok"), &in_a_pane(), &auto_name_at(url), tx);
+        generate(
+            9,
+            "w1".into(),
+            &stub_herdr("ok"),
+            &in_a_pane(),
+            &auto_name_at(url),
+            tx,
+        );
 
         let timeout = std::time::Duration::from_secs(10);
         assert_eq!(
@@ -532,7 +539,14 @@ esac
             focused_pane_id: Some("w1:p9".into()),
             ..in_a_pane()
         };
-        generate(1, &stub_herdr("fail"), &context, &auto_name_at(url), tx);
+        generate(
+            1,
+            "w1".into(),
+            &stub_herdr("fail"),
+            &context,
+            &auto_name_at(url),
+            tx,
+        );
 
         let (id, answer) = answers
             .recv_timeout(std::time::Duration::from_secs(10))
@@ -544,19 +558,31 @@ esac
             .is_err());
     }
 
+    /// A catalog entry may rename a workspace by id from anywhere; the pane
+    /// the palette opened over is then not one of its panes.
     #[test]
-    fn without_a_workspace_there_is_nothing_to_name() {
+    fn another_workspace_is_described_without_the_focused_panes_output() {
+        let (url, requests) = fake_ollama(r#"{"response":"other"}"#);
         let (tx, answers) = std::sync::mpsc::channel();
         generate(
             2,
-            &stub_herdr("none"),
-            &Context::default(),
-            &settings::AutoName::default(),
+            "w2".into(),
+            &stub_herdr("other"),
+            &in_a_pane(),
+            &auto_name_at(url),
             tx,
         );
+
+        let timeout = std::time::Duration::from_secs(10);
         assert_eq!(
-            answers.recv().unwrap(),
-            (2, Err("no workspace to name".to_string()))
+            answers.recv_timeout(timeout).unwrap(),
+            (2, Ok("other".to_string()))
+        );
+        let body: serde_json::Value =
+            serde_json::from_str(&requests.recv_timeout(timeout).unwrap()).unwrap();
+        assert_eq!(
+            body["prompt"],
+            "Panes in this workspace:\n- title: w2 pane; cwd: none; git branch: none\n"
         );
     }
 

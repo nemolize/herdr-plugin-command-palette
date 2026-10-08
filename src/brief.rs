@@ -53,7 +53,7 @@ fn title_and_cwd(row: &Value) -> (String, String) {
 }
 
 /// None when `cwd` is not in a repository, is on a detached HEAD, or git is
-/// not installed — the model is told "none" in all three cases.
+/// not installed.
 fn branch_at(cwd: &str) -> Option<String> {
     if cwd.is_empty() {
         return None;

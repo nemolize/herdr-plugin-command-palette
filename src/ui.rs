@@ -379,21 +379,27 @@ fn row_line(icon: Option<&str>, title: &str, key: &str, width: u16) -> Line<'sta
     Line::from(spans)
 }
 
-/// One row under the typed name, marked like a selected list row when it has
-/// focus and indented the same either way so the label does not jump.
+/// Indented the same whether or not it has focus, so the label does not jump.
+/// A failure reason too long for the row is marked cut like a long status.
 fn render_generate_row(f: &mut Frame, row: &GenerateRow, area: Rect) {
     let marker = if row.focused {
         HIGHLIGHT_SYMBOL.to_string()
     } else {
         " ".repeat(usize::from(HIGHLIGHT_COLUMNS))
     };
-    let line = Line::from(format!("{marker}{}", row.label()));
+    let text = format!("{marker}{}", row.label());
+    let cut = drawn_width(&text) > area.width;
+    let line = Line::from(text);
     let line = if row.is_generating() {
         line.dim()
     } else {
         line
     };
+    let area = Rect { height: 1, ..area };
     f.render_widget(Paragraph::new(line), area);
+    if cut {
+        mark_cut(f.buffer_mut(), area);
+    }
 }
 
 /// Draws the query or the typed name with the cursor in it (docs/design.md §4).
@@ -1060,7 +1066,7 @@ mod render_tests {
     fn a_running_generation_says_so_and_how_to_cancel_it() {
         let mut app = renaming_workspace();
         app.move_selection(1);
-        assert!(matches!(app.confirm(), Step::Generate(_)));
+        assert!(matches!(app.confirm(), Step::Generate { .. }));
         let lines = draw(&mut app, 40, 8);
         assert_eq!(
             lines[2].trim_end(),
@@ -1068,6 +1074,28 @@ mod render_tests {
             "{lines:#?}"
         );
         assert!(lines[7].starts_with("esc to cancel"), "{lines:#?}");
+    }
+
+    #[test]
+    fn a_failure_reason_too_long_for_the_row_is_marked_cut() {
+        let mut app = renaming_workspace();
+        app.move_selection(1);
+        let Step::Generate { id, .. } = app.confirm() else {
+            panic!("expected a generate request");
+        };
+        app.generated(id, Err("HTTP 500: a reason far longer than the row".into()));
+        let lines = draw(&mut app, 40, 8);
+        assert!(lines[2].ends_with("..."), "{lines:#?}");
+        assert_eq!(lines[2].chars().count(), 40, "fills the row: {lines:#?}");
+
+        let mut app = renaming_workspace();
+        app.move_selection(1);
+        let Step::Generate { id, .. } = app.confirm() else {
+            panic!("expected a generate request");
+        };
+        app.generated(id, Err("empty answer".into()));
+        let lines = draw(&mut app, 40, 8);
+        assert!(lines[2].ends_with("empty answer"), "{lines:#?}");
     }
 
     #[test]
@@ -1834,7 +1862,7 @@ mod wiring_tests {
     fn down_then_enter_asks_for_a_name_and_esc_cancels_it_in_place() {
         let mut app = renaming_workspace();
         let step = press(&mut app, "", &[KeyCode::Down, KeyCode::Enter]);
-        let Some(Step::Generate(id)) = step else {
+        let Some(Step::Generate { id, .. }) = step else {
             panic!("{}", describe(&step));
         };
 
@@ -2137,7 +2165,7 @@ mod wiring_tests {
             Some(Step::NeedsRepo(c)) => format!("NeedsRepo({})", c.id),
             Some(Step::NeedsTargets(c)) => format!("NeedsTargets({})", c.id),
             Some(Step::NeedsPrompt(c)) => format!("NeedsPrompt({})", c.id),
-            Some(Step::Generate(id)) => format!("Generate({id})"),
+            Some(Step::Generate { id, workspace }) => format!("Generate({id}, {workspace})"),
             Some(Step::Run(Outcome::Command { id, args })) => {
                 format!("Run({id}: {})", args.join(" "))
             }

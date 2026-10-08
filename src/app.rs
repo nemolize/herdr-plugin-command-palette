@@ -84,7 +84,6 @@ pub enum Stage {
         command: Command,
         args: Vec<String>,
         text: LineEdit,
-        /// Present only where a name can be generated (`offers_generation`).
         generate: Option<GenerateRow>,
     },
 }
@@ -103,9 +102,12 @@ pub enum Step {
     /// direct call because the name lives behind a list API, and `App` holds no
     /// herdr handle — every herdr call is the event loop's.
     NeedsPrompt(Command),
-    /// Ask the model for a name, as request `id`, and hand the answer back
-    /// through `App::generated`.
-    Generate(u64),
+    /// Ask the model for a name for `workspace`, as request `id`, and hand the
+    /// answer back through `App::generated`.
+    Generate {
+        id: u64,
+        workspace: String,
+    },
     /// Run this now.
     Run(Outcome),
 }
@@ -159,7 +161,7 @@ impl App {
     /// something is an edit of its current name rather than a retype.
     pub fn enter_prompt(&mut self, command: Command, seed: String) {
         let args = command.args.clone();
-        let generate = offers_generation(&args).then(GenerateRow::default);
+        let generate = workspace_to_name(&args).map(|_| GenerateRow::default());
         self.stage = Stage::Prompt {
             command,
             args,
@@ -293,8 +295,8 @@ impl App {
         self.generate_row().is_some_and(GenerateRow::is_generating)
     }
 
-    /// Stops a running generation, leaving the input as it was. False when none
-    /// was running, so Esc then means what it means everywhere else.
+    /// Leaves the input as it was. False when nothing was running, so Esc then
+    /// means what it means everywhere else.
     pub fn cancel_generation(&mut self) -> bool {
         match &mut self.stage {
             Stage::Prompt {
@@ -305,8 +307,7 @@ impl App {
         }
     }
 
-    /// The answer to request `id`. A success replaces the typed name and
-    /// returns focus to the input; an answer nobody is waiting for is dropped.
+    /// A successful answer to request `id` replaces the typed name.
     pub fn generated(&mut self, id: u64, answer: Result<String, String>) {
         if let Stage::Prompt {
             text,
@@ -368,16 +369,23 @@ impl App {
     pub fn confirm(&mut self) -> Step {
         if let Stage::Prompt {
             generate: Some(row),
+            args,
             ..
         } = &mut self.stage
         {
             if row.focused {
                 let id = self.last_generation + 1;
+                let Some(workspace) = workspace_to_name(args) else {
+                    return Step::Continue;
+                };
                 if !row.start(id) {
                     return Step::Continue;
                 }
                 self.last_generation = id;
-                return Step::Generate(id);
+                return Step::Generate {
+                    id,
+                    workspace: workspace.to_string(),
+                };
             }
         }
         if let Stage::Prompt {
@@ -458,18 +466,16 @@ impl App {
     }
 }
 
-/// Only a workspace rename offers a generated name: the panes it holds are
-/// what the model reads, and a tab or pane has no such summary of its own yet.
-/// Read off the argv like `seed_for` in `main.rs`, so a user catalog's own
-/// entry for the same command qualifies too.
-fn offers_generation(args: &[String]) -> bool {
-    matches!(
-        (
-            args.first().map(String::as_str),
-            args.get(1).map(String::as_str)
-        ),
-        (Some("workspace"), Some("rename"))
-    )
+/// The workspace a rename entry acts on, which is the one whose panes the
+/// model reads; None for every other entry. Tab and pane renames are left out
+/// until their own summary is designed.
+fn workspace_to_name(args: &[String]) -> Option<&str> {
+    match args {
+        [subject, verb, id, ..] if subject == "workspace" && verb == "rename" => {
+            (!id.starts_with('{')).then_some(id.as_str())
+        }
+        _ => None,
+    }
 }
 
 /// Whether `text` would reach the command as one of its own flags.
@@ -978,7 +984,10 @@ mod tests {
     fn start_generating(app: &mut App) -> u64 {
         app.move_selection(1);
         match app.confirm() {
-            Step::Generate(id) => id,
+            Step::Generate { id, workspace } => {
+                assert_eq!(workspace, "w3Y");
+                id
+            }
             _ => panic!("expected a generate request"),
         }
     }
@@ -1025,7 +1034,7 @@ mod tests {
 
         app.generated(id, Err("empty answer".into()));
         assert!(
-            matches!(app.confirm(), Step::Generate(next) if next > id),
+            matches!(app.confirm(), Step::Generate { id: next, .. } if next > id),
             "a retry is a new request"
         );
     }

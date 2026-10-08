@@ -2,6 +2,7 @@
 //! shipped one wholesale and a switch there would cost a copy of all of it.
 use std::io::ErrorKind;
 use std::path::Path;
+use std::time::{Duration, Instant};
 
 use serde::Deserialize;
 
@@ -48,7 +49,7 @@ const TIMEOUT_SECS: u64 = 60;
 
 impl AutoName {
     /// Why a parsed value cannot be used. Only `http://` is accepted: the client
-    /// has no TLS, whose `ring` needs a C cross-compiler the musl builds lack.
+    /// has no TLS (`Cargo.toml`).
     fn problem(&self) -> Option<String> {
         if self.model.trim().is_empty() {
             Some("auto_name.model is empty".into())
@@ -56,6 +57,12 @@ impl AutoName {
             Some("auto_name.base_url must start with http://".into())
         } else if self.timeout_secs == 0 {
             Some("auto_name.timeout_secs must be above 0".into())
+        } else if Instant::now()
+            .checked_add(Duration::from_secs(self.timeout_secs))
+            .is_none()
+        {
+            // The HTTP client adds the timeout to the clock and panics on overflow.
+            Some("auto_name.timeout_secs is too large".into())
         } else {
             None
         }
@@ -221,6 +228,11 @@ mod tests {
                 "base_url",
             ),
             ("zero", "[auto_name]\ntimeout_secs = 0\n", "timeout_secs"),
+            (
+                "huge",
+                "[auto_name]\ntimeout_secs = 9223372036854775807\n",
+                "timeout_secs",
+            ),
             ("negative", "[auto_name]\ntimeout_secs = -1\n", "-1"),
             ("typo", "[auto_name]\nmodle = \"x\"\n", "modle"),
         ] {

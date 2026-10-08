@@ -1,5 +1,7 @@
 //! Asks a local Ollama for a workspace name: the request it is sent, the call,
 //! and how its answer becomes a name.
+use std::io::ErrorKind;
+use std::net::ToSocketAddrs;
 use std::time::Duration;
 
 use serde_json::{json, Value};
@@ -32,12 +34,15 @@ pub fn request_body(model: &str, prompt: &str) -> Value {
     })
 }
 
-/// The first non-empty line of `answer`, its surrounding whitespace and quotes
-/// stripped, cut to `NAME_CAP` — models sometimes ignore the cap they are given.
-/// None when nothing is left.
+/// The first non-empty line of `answer` without its control characters, its
+/// surrounding whitespace and quotes stripped, cut to `NAME_CAP` — models
+/// sometimes ignore the cap they are given. None when nothing is left.
 pub fn name_from(answer: &str) -> Option<String> {
-    let line = answer.lines().map(str::trim).find(|l| !l.is_empty())?;
-    let name = line.trim_matches(is_quote).trim();
+    let line = answer
+        .lines()
+        .map(|l| l.chars().filter(|c| !c.is_control()).collect::<String>())
+        .find(|l| !l.trim().is_empty())?;
+    let name = line.trim().trim_matches(is_quote).trim();
     let cut: String = name.graphemes(true).take(NAME_CAP).collect();
     let cut = cut.trim_end();
     (!cut.is_empty()).then(|| cut.to_string())
@@ -50,14 +55,19 @@ fn is_quote(c: char) -> bool {
     matches!(c, '"' | '\'' | '`') || matches!(u32::from(c), 0x2018..=0x201F | 0x300C..=0x300F)
 }
 
-/// One generate call. The error is drawn on one row beside `Retry`, so it is
-/// kept short.
+/// The error is drawn on one row beside `Retry`, so it is kept short.
 pub fn generate(settings: &AutoName, prompt: &str) -> Result<String, String> {
+    if !resolves(&settings.base_url) {
+        return Err(no_ollama_at(settings));
+    }
     let agent: ureq::Agent = ureq::Agent::config_builder()
         .timeout_global(Some(Duration::from_secs(settings.timeout_secs)))
         // A 4xx/5xx carries Ollama's own reason in its body, which beats a bare
         // status code — so the body is read rather than turned into an error.
         .http_status_as_error(false)
+        // ureq otherwise routes by HTTP_PROXY, which would send the panes'
+        // output through a proxy that has no business seeing a local call.
+        .proxy(None)
         .build()
         .into();
     let url = format!("{}/api/generate", settings.base_url.trim_end_matches('/'));
@@ -98,12 +108,43 @@ fn answer_from(status: u16, text: &str) -> Result<String, String> {
 fn failure(e: &ureq::Error, settings: &AutoName) -> String {
     match e {
         ureq::Error::Timeout(_) => format!("timed out after {}s", settings.timeout_secs),
-        ureq::Error::Io(_) | ureq::Error::ConnectionFailed | ureq::Error::HostNotFound => {
-            let host = settings.base_url.trim_start_matches("http://");
-            format!("no Ollama at {}", host.trim_end_matches('/'))
-        }
+        ureq::Error::ConnectionFailed | ureq::Error::HostNotFound => no_ollama_at(settings),
+        ureq::Error::Io(io) if NOT_LISTENING.contains(&io.kind()) => no_ollama_at(settings),
         other => other.to_string(),
     }
+}
+
+/// How a connect fails when nothing answers at the address; any other I/O error
+/// came from a server that was there.
+const NOT_LISTENING: [ErrorKind; 4] = [
+    ErrorKind::ConnectionRefused,
+    ErrorKind::HostUnreachable,
+    ErrorKind::NetworkUnreachable,
+    ErrorKind::AddrNotAvailable,
+];
+
+/// ureq reports a failed lookup as an uncategorised I/O error, which cannot be
+/// told from a dropped connection afterwards — so the host is resolved first.
+fn resolves(base_url: &str) -> bool {
+    let authority = base_url
+        .trim_start_matches("http://")
+        .split('/')
+        .next()
+        .unwrap_or_default();
+    let has_port = authority
+        .rsplit_once(':')
+        .is_some_and(|(_, p)| !p.contains(']'));
+    let address = if has_port {
+        authority.to_string()
+    } else {
+        format!("{authority}:80")
+    };
+    address.to_socket_addrs().is_ok()
+}
+
+fn no_ollama_at(settings: &AutoName) -> String {
+    let host = settings.base_url.trim_start_matches("http://");
+    format!("no Ollama at {}", host.trim_end_matches('/'))
 }
 
 #[cfg(test)]
@@ -171,6 +212,24 @@ mod tests {
     }
 
     #[test]
+    fn control_characters_never_reach_the_name() {
+        for (answer, name) in [
+            ("\x1b[31mred\x1b[0m", "[31mred[0m"),
+            ("tab\there", "tabhere"),
+            ("carriage\rreturn", "carriagereturn"),
+            ("c1\u{9b}x", "c1x"),
+            ("\u{7}\"bell\"\u{7}", "bell"),
+        ] {
+            assert_eq!(name_from(answer).as_deref(), Some(name), "{answer:?}");
+        }
+    }
+
+    #[test]
+    fn a_line_of_control_characters_alone_is_skipped() {
+        assert_eq!(name_from("\u{7}\n\x1b\nreal").as_deref(), Some("real"));
+    }
+
+    #[test]
     fn an_answer_with_nothing_left_is_no_name() {
         for answer in ["", "  \n\t\n", "\"\"", " '' "] {
             assert_eq!(name_from(answer), None, "{answer:?}");
@@ -218,6 +277,39 @@ mod tests {
     fn an_unreachable_server_is_named_with_its_url() {
         let err = generate(&settings_at("http://127.0.0.1:9", 5), "x").unwrap_err();
         assert_eq!(err, "no Ollama at 127.0.0.1:9");
+    }
+
+    /// `.invalid` never resolves (RFC 2606), so this is a lookup failure.
+    #[test]
+    fn a_host_that_does_not_resolve_is_named() {
+        let err = generate(&settings_at("http://no-such-host.invalid:11434", 5), "x").unwrap_err();
+        assert_eq!(err, "no Ollama at no-such-host.invalid:11434");
+    }
+
+    #[test]
+    fn a_base_url_resolves_with_or_without_its_port() {
+        for url in [
+            "http://127.0.0.1:11434",
+            "http://localhost",
+            "http://[::1]",
+            "http://[::1]:11434/",
+        ] {
+            assert!(resolves(url), "{url}");
+        }
+    }
+
+    /// A server that is there but drops the connection is not "no Ollama".
+    #[test]
+    fn a_connection_dropped_mid_request_is_not_reported_as_absent() {
+        use std::io::Read;
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let _ = stream.read(&mut [0; 1024]);
+        });
+        let err = generate(&settings_at(&format!("http://127.0.0.1:{port}"), 5), "x").unwrap_err();
+        assert!(!err.starts_with("no Ollama"), "{err}");
     }
 
     /// A listener that accepts and never answers stands in for a hung model.

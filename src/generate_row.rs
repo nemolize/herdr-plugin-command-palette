@@ -10,10 +10,7 @@ const RETRY: &str = "\u{2728} Retry";
 #[derive(Debug, PartialEq)]
 enum State {
     Idle,
-    /// `id` tells this request's answer apart from a cancelled one's.
-    Generating {
-        id: u64,
-    },
+    Generating { id: u64 },
     Failed(String),
 }
 
