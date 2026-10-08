@@ -13,6 +13,7 @@ use ratatui::widgets::{List, ListItem, Paragraph, Wrap};
 use unicode_segmentation::UnicodeSegmentation;
 
 use crate::app::{App, Stage, Step};
+use crate::generate_row::GenerateRow;
 use crate::glyph::{
     control_picture, CURSOR, CURSOR_COLUMNS, HIGHLIGHT_COLUMNS, HIGHLIGHT_SYMBOL, SEPARATOR,
     STAND_IN,
@@ -71,12 +72,19 @@ impl Drop for Screen {
 /// grew back into before the key was read.
 pub fn next_step(app: &mut App, drawn_rows: u16) -> Result<Step, String> {
     loop {
+        // While a name is being generated the loop must come back without a
+        // keypress, to pick up the answer the moment it lands.
+        if app.is_generating() && !event::poll(ANSWER_POLL).map_err(|e| e.to_string())? {
+            return Ok(Step::Continue);
+        }
         let event = event::read().map_err(|e| e.to_string())?;
         if let Some(step) = apply(app, event, drawn_rows) {
             return Ok(step);
         }
     }
 }
+
+const ANSWER_POLL: std::time::Duration = std::time::Duration::from_millis(100);
 
 /// One event against the state. `None` means the event carried nothing to act
 /// on and the loop should read again — separated from `next_step` so a key
@@ -111,7 +119,7 @@ fn apply(app: &mut App, event: Event, drawn_rows: u16) -> Option<Step> {
     let ctrl = key.modifiers == KeyModifiers::CONTROL;
     Some(match key.code {
         KeyCode::Esc => {
-            if app.leave_stage() {
+            if app.cancel_generation() || app.leave_stage() {
                 Step::Continue
             } else {
                 Step::Cancel
@@ -216,13 +224,17 @@ fn render(f: &mut Frame, app: &mut App) {
         f.render_widget(Paragraph::new(title).bold(), chunks[0]);
     }
 
-    if let Stage::Prompt { text, .. } = &app.stage {
-        render_input(f, text, chunks[1]);
+    if let Stage::Prompt { text, generate, .. } = &app.stage {
+        let row_focused = generate.as_ref().is_some_and(|r| r.focused);
+        render_input(f, text, !row_focused, chunks[1]);
+        if let Some(row) = generate {
+            render_generate_row(f, row, chunks[2]);
+        }
         render_status(f, app, status, status_cut, chunks[3]);
         return;
     }
 
-    render_input(f, &app.selection.query, chunks[1]);
+    render_input(f, &app.selection.query, true, chunks[1]);
 
     // Owned rather than borrowed: the list borrows `app` immutably while
     // render_stateful_widget needs `app.selection.state` mutably.
@@ -367,13 +379,39 @@ fn row_line(icon: Option<&str>, title: &str, key: &str, width: u16) -> Line<'sta
     Line::from(spans)
 }
 
+/// Indented the same whether or not it has focus, so the label does not jump.
+/// A failure reason too long for the row is marked cut like a long status.
+fn render_generate_row(f: &mut Frame, row: &GenerateRow, area: Rect) {
+    let marker = if row.focused {
+        HIGHLIGHT_SYMBOL.to_string()
+    } else {
+        " ".repeat(usize::from(HIGHLIGHT_COLUMNS))
+    };
+    let text = format!("{marker}{}", row.label());
+    let cut = drawn_width(&text) > area.width;
+    let line = Line::from(text);
+    let line = if row.is_generating() {
+        line.dim()
+    } else {
+        line
+    };
+    let area = Rect { height: 1, ..area };
+    f.render_widget(Paragraph::new(line), area);
+    if cut {
+        mark_cut(f.buffer_mut(), area);
+    }
+}
+
 /// Draws the query or the typed name with the cursor in it (docs/design.md §4).
 ///
 /// The cursor is reserved a cell BEFORE the text is measured, which is what
 /// makes clipping it away with the text unreachable rather than a calculation
 /// to keep honest. The text before the cursor claims the room first, so the
 /// cursor and what was just typed stay on screen.
-fn render_input(f: &mut Frame, line: &LineEdit, area: Rect) {
+///
+/// An unfocused line keeps the cursor's cell blank rather than dropping it, so
+/// the text does not shift when focus moves.
+fn render_input(f: &mut Frame, line: &LineEdit, focused: bool, area: Rect) {
     if area.width == 0 {
         return;
     }
@@ -396,7 +434,7 @@ fn render_input(f: &mut Frame, line: &LineEdit, area: Rect) {
         width: CURSOR_COLUMNS,
         ..area
     };
-    f.render_widget(Paragraph::new(CURSOR), cursor);
+    f.render_widget(Paragraph::new(if focused { CURSOR } else { " " }), cursor);
     let rest = cursor_column + CURSOR_COLUMNS;
     let room = area.width.saturating_sub(rest);
     render_clusters(f, head_within(&after, room), area.x + rest, area);
@@ -496,8 +534,10 @@ fn render_footer(f: &mut Frame, app: &App, area: Rect) {
         Stage::Targets { .. } | Stage::Prompt { .. } => "esc to go back",
     };
     // The typing stage lists nothing, so counts there would read 0/0.
-    let counts = match app.stage {
-        Stage::Prompt { .. } => format!("enter to run{SEPARATOR}{esc}"),
+    let counts = match app.generate_row() {
+        Some(row) if row.is_generating() => "esc to cancel".to_string(),
+        Some(row) if row.focused => format!("enter to generate{SEPARATOR}{esc}"),
+        _ if matches!(app.stage, Stage::Prompt { .. }) => format!("enter to run{SEPARATOR}{esc}"),
         _ => format!("{}/{}{SEPARATOR}{esc}", app.shown(), app.total()),
     };
     f.render_widget(Paragraph::new(footer(&counts, area.width)).dim(), area);
@@ -972,6 +1012,101 @@ mod render_tests {
                 .last()
                 .unwrap()
                 .starts_with("enter to run ⋅ esc to go back"),
+            "{lines:#?}"
+        );
+    }
+
+    fn renaming_workspace() -> App {
+        let mut picked = command("workspace.rename", "Rename workspace...", None);
+        picked.args = vec![
+            "workspace".into(),
+            "rename".into(),
+            "w3Y".into(),
+            "{text}".into(),
+        ];
+        picked.prompt = Some("New workspace name".into());
+        let mut app = app_with(vec![picked.clone()]);
+        app.enter_prompt(picked, "editor".into());
+        app
+    }
+
+    /// `draw` reads the second column of the two-column `\u{2728}` as a space,
+    /// hence the two spaces after it in these expectations.
+    #[test]
+    fn a_workspace_rename_shows_the_generate_row_under_the_input() {
+        let mut app = renaming_workspace();
+        let lines = draw(&mut app, 40, 8);
+        assert_eq!(lines[1].trim_end(), "> editor\u{23B8}", "{lines:#?}");
+        assert_eq!(
+            lines[2].trim_end(),
+            "  \u{2728}  Auto generate",
+            "{lines:#?}"
+        );
+        assert!(lines[7].starts_with("enter to run"), "{lines:#?}");
+    }
+
+    #[test]
+    fn the_focused_row_is_marked_and_the_input_loses_its_cursor() {
+        let mut app = renaming_workspace();
+        app.move_selection(1);
+        let lines = draw(&mut app, 40, 8);
+        assert_eq!(lines[1].trim_end(), "> editor", "{lines:#?}");
+        assert_eq!(
+            lines[2].trim_end(),
+            "\u{25B8} \u{2728}  Auto generate",
+            "{lines:#?}"
+        );
+        assert!(
+            lines[7].starts_with("enter to generate \u{22C5} esc to go back"),
+            "{lines:#?}"
+        );
+    }
+
+    #[test]
+    fn a_running_generation_says_so_and_how_to_cancel_it() {
+        let mut app = renaming_workspace();
+        app.move_selection(1);
+        assert!(matches!(app.confirm(), Step::Generate { .. }));
+        let lines = draw(&mut app, 40, 8);
+        assert_eq!(
+            lines[2].trim_end(),
+            "\u{25B8} \u{2728}  Generating...",
+            "{lines:#?}"
+        );
+        assert!(lines[7].starts_with("esc to cancel"), "{lines:#?}");
+    }
+
+    #[test]
+    fn a_failure_reason_too_long_for_the_row_is_marked_cut() {
+        let mut app = renaming_workspace();
+        app.move_selection(1);
+        let Step::Generate { id, .. } = app.confirm() else {
+            panic!("expected a generate request");
+        };
+        app.generated(id, Err("HTTP 500: a reason far longer than the row".into()));
+        let lines = draw(&mut app, 40, 8);
+        assert!(lines[2].ends_with("..."), "{lines:#?}");
+        assert_eq!(lines[2].chars().count(), 40, "fills the row: {lines:#?}");
+
+        let mut app = renaming_workspace();
+        app.move_selection(1);
+        let Step::Generate { id, .. } = app.confirm() else {
+            panic!("expected a generate request");
+        };
+        app.generated(id, Err("empty answer".into()));
+        let lines = draw(&mut app, 40, 8);
+        assert!(lines[2].ends_with("empty answer"), "{lines:#?}");
+    }
+
+    #[test]
+    fn a_tab_rename_draws_no_generate_row() {
+        let mut picked = command("tab.rename", "Rename tab...", None);
+        picked.args = vec!["tab".into(), "rename".into(), "t1".into(), "{text}".into()];
+        let mut app = app_with(vec![picked.clone()]);
+        app.enter_prompt(picked, "editor".into());
+        let lines = draw(&mut app, 40, 8);
+        assert!(
+            !lines.iter().any(|l| l.contains("Auto generate")),
             "{lines:#?}"
         );
     }
@@ -1710,6 +1845,54 @@ mod wiring_tests {
         None
     }
 
+    fn renaming_workspace() -> App {
+        let mut picked = command(
+            "workspace.rename",
+            "Rename workspace...",
+            &["workspace", "rename", "w3Y", "{text}"],
+            None,
+        );
+        picked.prompt = Some("New workspace name".into());
+        let mut app = app_with(vec![picked.clone()]);
+        app.enter_prompt(picked, "herdr".into());
+        app
+    }
+
+    #[test]
+    fn down_then_enter_asks_for_a_name_and_esc_cancels_it_in_place() {
+        let mut app = renaming_workspace();
+        let step = press(&mut app, "", &[KeyCode::Down, KeyCode::Enter]);
+        let Some(Step::Generate { id, .. }) = step else {
+            panic!("{}", describe(&step));
+        };
+
+        let step = apply(&mut app, key(KeyCode::Esc), MIN_ROWS);
+        assert!(matches!(step, Some(Step::Continue)), "{}", describe(&step));
+        assert!(!app.is_generating());
+        assert!(
+            matches!(app.stage, Stage::Prompt { .. }),
+            "the palette stays open at the prompt"
+        );
+        app.generated(id, Ok("late".into()));
+
+        let step = press(&mut app, "", &[KeyCode::Up, KeyCode::Enter]);
+        match step {
+            Some(Step::Run(Outcome::Command { args, .. })) => {
+                assert_eq!(args, ["workspace", "rename", "w3Y", "herdr"]);
+            }
+            _ => panic!("{}", describe(&step)),
+        }
+    }
+
+    #[test]
+    fn esc_with_nothing_generating_still_goes_back() {
+        let mut app = renaming_workspace();
+        press(&mut app, "", &[KeyCode::Down]);
+        let step = apply(&mut app, key(KeyCode::Esc), MIN_ROWS);
+        assert!(matches!(step, Some(Step::Continue)), "{}", describe(&step));
+        assert!(matches!(app.stage, Stage::Commands));
+    }
+
     #[test]
     fn typing_and_pressing_enter_produces_the_argv_herdr_is_run_with() {
         let mut app = app_with(vec![
@@ -1982,6 +2165,7 @@ mod wiring_tests {
             Some(Step::NeedsRepo(c)) => format!("NeedsRepo({})", c.id),
             Some(Step::NeedsTargets(c)) => format!("NeedsTargets({})", c.id),
             Some(Step::NeedsPrompt(c)) => format!("NeedsPrompt({})", c.id),
+            Some(Step::Generate { id, workspace }) => format!("Generate({id}, {workspace})"),
             Some(Step::Run(Outcome::Command { id, args })) => {
                 format!("Run({id}: {})", args.join(" "))
             }

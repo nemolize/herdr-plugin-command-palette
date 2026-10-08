@@ -171,6 +171,27 @@ The file is optional — without it every default applies. One that cannot be
 read or parsed, or that carries a key the palette does not know, is reported in
 the footer and the defaults apply.
 
+### Generating a workspace name
+
+`Rename workspace...` shows an `✨ Auto generate` row under its input. Press `↓`
+to reach it and `Enter` to ask a local [Ollama](https://ollama.com) for a name;
+the answer replaces the input, and nothing is renamed until you press `Enter`
+there. `Esc` cancels a running request. The model reads each pane's title,
+working directory and git branch, plus the last 120 lines of the pane the
+palette was opened from.
+
+The plugin only talks to an Ollama that is already running; it does not install
+or start one. The `[auto_name]` table in `settings.toml` points it elsewhere:
+
+```toml
+[auto_name]
+model = "qwen3.5:9b"                  # the default; pull it with `ollama pull`
+base_url = "http://localhost:11434"   # the default; plain http only
+timeout_secs = 60                     # the default
+```
+
+`base_url` must be `http://`: the binary carries no TLS stack.
+
 Popup size and placement live in the manifest (`herdr-plugin.toml`), not here —
 `herdr plugin pane open` has no `--width` / `--height` flags, so the action hop
 cannot pass a size. The shipped values are 60 columns by 45% of the rows, sized
