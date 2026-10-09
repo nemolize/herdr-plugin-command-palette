@@ -176,7 +176,8 @@ the footer and the defaults apply.
 `Rename workspace...` shows an `✨ Auto generate` row under its input. Press `↓`
 to reach it and `Enter` to ask a local [Ollama](https://ollama.com) for a name;
 the answer replaces the input, and nothing is renamed until you press `Enter`
-there. `Esc` cancels a running request. The model reads each pane's title,
+there. The row then shows how long the answer took, and says `unchanged` when
+the name it suggested is the one already in the input. `Esc` cancels a running request. The model reads each pane's title,
 working directory and git branch, plus the last 120 lines of the pane the
 palette was opened from.
 

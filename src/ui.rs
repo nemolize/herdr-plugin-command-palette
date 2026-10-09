@@ -1083,7 +1083,11 @@ mod render_tests {
         let Step::Generate { id, .. } = app.confirm() else {
             panic!("expected a generate request");
         };
-        app.generated(id, Err("HTTP 500: a reason far longer than the row".into()));
+        app.generated(
+            id,
+            Err("HTTP 500: a reason far longer than the row".into()),
+            std::time::Duration::ZERO,
+        );
         let lines = draw(&mut app, 40, 8);
         assert!(lines[2].ends_with("..."), "{lines:#?}");
         assert_eq!(lines[2].chars().count(), 40, "fills the row: {lines:#?}");
@@ -1093,7 +1097,7 @@ mod render_tests {
         let Step::Generate { id, .. } = app.confirm() else {
             panic!("expected a generate request");
         };
-        app.generated(id, Err("empty answer".into()));
+        app.generated(id, Err("empty answer".into()), std::time::Duration::ZERO);
         let lines = draw(&mut app, 40, 8);
         assert!(lines[2].ends_with("empty answer"), "{lines:#?}");
     }
@@ -1873,7 +1877,7 @@ mod wiring_tests {
             matches!(app.stage, Stage::Prompt { .. }),
             "the palette stays open at the prompt"
         );
-        app.generated(id, Ok("late".into()));
+        app.generated(id, Ok("late".into()), std::time::Duration::ZERO);
 
         let step = press(&mut app, "", &[KeyCode::Up, KeyCode::Enter]);
         match step {

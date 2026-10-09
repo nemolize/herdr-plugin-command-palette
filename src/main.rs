@@ -22,6 +22,7 @@ mod ui;
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::mpsc::{channel, Sender};
+use std::time::{Duration, Instant};
 
 use app::{App, Candidate, Outcome, Step};
 use context::Context;
@@ -196,13 +197,13 @@ fn run() -> Result<(), String> {
     let mut screen = ui::Screen::enter()?;
 
     // Generation runs off the event loop so Esc can still cancel it.
-    let (answers_tx, answers) = channel::<(u64, Result<String, String>)>();
+    let (answers_tx, answers) = channel::<Answer>();
 
     // A step the loop produced itself, handled before the next keypress.
     let mut next: Option<Step> = None;
     loop {
-        while let Ok((id, answer)) = answers.try_recv() {
-            app.generated(id, answer);
+        while let Ok((id, answer, elapsed)) = answers.try_recv() {
+            app.generated(id, answer, elapsed);
         }
         let step = match next.take() {
             Some(step) => step,
@@ -268,6 +269,9 @@ fn run() -> Result<(), String> {
     }
 }
 
+/// A request's id, its outcome, and how long it took from the press.
+type Answer = (u64, Result<String, String>, Duration);
+
 /// A cancelled request still runs to its end, since a blocking call cannot be
 /// aborted; the thread dies with the palette if it outlives it.
 fn generate(
@@ -276,7 +280,7 @@ fn generate(
     herdr: &Herdr,
     context: &Context,
     settings: &settings::AutoName,
-    answers: Sender<(u64, Result<String, String>)>,
+    answers: Sender<Answer>,
 ) {
     // The focused pane belongs to the workspace the palette opened in, which a
     // catalog entry naming another workspace by id is not.
@@ -285,10 +289,11 @@ fn generate(
         .clone()
         .filter(|_| context.workspace_id.as_deref() == Some(workspace.as_str()));
     let (herdr, settings) = (herdr.clone(), settings.clone());
+    let started = Instant::now();
     std::thread::spawn(move || {
         let answer = brief::gather(&herdr, &workspace, pane.as_deref())
             .and_then(|prompt| ollama::generate(&settings, &prompt));
-        let _ = answers.send((id, answer));
+        let _ = answers.send((id, answer, started.elapsed()));
     });
 }
 
@@ -451,7 +456,10 @@ esac
         Herdr::new(bin.to_string_lossy().into_owned())
     }
 
-    fn fake_ollama(reply: &'static str) -> (String, std::sync::mpsc::Receiver<String>) {
+    fn fake_ollama(
+        reply: &'static str,
+        delay: std::time::Duration,
+    ) -> (String, std::sync::mpsc::Receiver<String>) {
         use std::io::{BufRead, BufReader, Read, Write};
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let url = format!("http://{}", listener.local_addr().unwrap());
@@ -474,6 +482,7 @@ esac
                 let mut body = vec![0; length];
                 reader.read_exact(&mut body).unwrap();
                 let _ = tx.send(String::from_utf8(body).unwrap());
+                std::thread::sleep(delay);
                 write!(
                     &stream,
                     "HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n{reply}",
@@ -495,7 +504,10 @@ esac
 
     #[test]
     fn a_generate_request_sends_one_prompt_with_every_pane_and_the_focused_output() {
-        let (url, requests) = fake_ollama(r#"{"response":"\"tests\"\n"}"#);
+        let (url, requests) = fake_ollama(
+            r#"{"response":"\"tests\"\n"}"#,
+            std::time::Duration::from_millis(300),
+        );
         let (tx, answers) = std::sync::mpsc::channel();
         generate(
             9,
@@ -507,9 +519,11 @@ esac
         );
 
         let timeout = std::time::Duration::from_secs(10);
-        assert_eq!(
-            answers.recv_timeout(timeout).unwrap(),
-            (9, Ok("tests".to_string()))
+        let (id, answer, elapsed) = answers.recv_timeout(timeout).unwrap();
+        assert_eq!((id, answer), (9, Ok("tests".to_string())));
+        assert!(
+            elapsed >= std::time::Duration::from_millis(300),
+            "the server's pause is counted: {elapsed:?}"
         );
         let body: serde_json::Value =
             serde_json::from_str(&requests.recv_timeout(timeout).unwrap()).unwrap();
@@ -533,7 +547,7 @@ esac
 
     #[test]
     fn a_herdr_failure_is_the_answer_and_nothing_is_sent() {
-        let (url, requests) = fake_ollama("{}");
+        let (url, requests) = fake_ollama("{}", std::time::Duration::ZERO);
         let (tx, answers) = std::sync::mpsc::channel();
         let context = Context {
             focused_pane_id: Some("w1:p9".into()),
@@ -548,7 +562,7 @@ esac
             tx,
         );
 
-        let (id, answer) = answers
+        let (id, answer, _) = answers
             .recv_timeout(std::time::Duration::from_secs(10))
             .unwrap();
         assert_eq!(id, 1);
@@ -562,7 +576,7 @@ esac
     /// the palette opened over is then not one of its panes.
     #[test]
     fn another_workspace_is_described_without_the_focused_panes_output() {
-        let (url, requests) = fake_ollama(r#"{"response":"other"}"#);
+        let (url, requests) = fake_ollama(r#"{"response":"other"}"#, std::time::Duration::ZERO);
         let (tx, answers) = std::sync::mpsc::channel();
         generate(
             2,
@@ -574,10 +588,8 @@ esac
         );
 
         let timeout = std::time::Duration::from_secs(10);
-        assert_eq!(
-            answers.recv_timeout(timeout).unwrap(),
-            (2, Ok("other".to_string()))
-        );
+        let (id, answer, _) = answers.recv_timeout(timeout).unwrap();
+        assert_eq!((id, answer), (2, Ok("other".to_string())));
         let body: serde_json::Value =
             serde_json::from_str(&requests.recv_timeout(timeout).unwrap()).unwrap();
         assert_eq!(
