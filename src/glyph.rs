@@ -1,7 +1,5 @@
-//! Each glyph is East Asian Width `N`, like the icons (docs/design.md §4): an `A`
-//! one is a cell to ratatui but two in a CJK-locale terminal, shifting its row.
-
-use unicode_width::UnicodeWidthStr;
+//! Each glyph is East Asian Width `N`: an `A` one is a cell to ratatui but two
+//! in a CJK-locale terminal, shifting its row.
 
 /// Marks the selected row. Not `▶`, which is `A`.
 pub const HIGHLIGHT_SYMBOL: &str = "▸ ";
@@ -22,7 +20,9 @@ pub const STAND_IN: char = '◌';
 
 /// Whether `text` holds no East Asian Ambiguous character: its width is the
 /// same whether Ambiguous characters count as one cell or two.
+#[cfg(test)]
 pub fn same_width_in_every_locale(text: &str) -> bool {
+    use unicode_width::UnicodeWidthStr;
     text.width() == text.width_cjk()
 }
 

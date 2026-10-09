@@ -2,12 +2,10 @@
 //! Herdr's built-in operations (docs/design.md §4).
 use std::path::{Path, PathBuf};
 
-use ratatui::buffer::CellWidth;
+use serde::de::IgnoredAny;
 use serde::Deserialize;
 
-use crate::glyph::same_width_in_every_locale;
 use crate::listing::WorktreeKey;
-use unicode_segmentation::UnicodeSegmentation;
 
 #[derive(Debug, Deserialize)]
 pub struct Catalog {
@@ -40,20 +38,10 @@ pub struct Command {
     /// this — it is stated here, beside the entry a correction would edit.
     #[serde(default)]
     pub binding: Option<String>,
-    /// Replaces the glyph derived from the entry's subject (docs/design.md §4).
-    #[serde(default)]
-    pub icon: Option<String>,
+    /// The removed `icon` key, read only so the palette can say it is ignored.
+    #[serde(default, rename = "icon")]
+    pub retired_icon: Option<IgnoredAny>,
 }
-
-/// East Asian Width `N` only — an `A` glyph is drawn double in a CJK locale —
-/// and none with an emoji presentation, so the column holds one cell anywhere.
-const SUBJECT_ICONS: &[(&str, &str)] = &[
-    ("pane", "◫"),
-    ("tab", "▭"),
-    ("workspace", "⬚"),
-    ("server", "↻"),
-    ("worktree", "⎇"),
-];
 
 impl Command {
     pub fn needs_target(&self) -> bool {
@@ -62,19 +50,6 @@ impl Command {
 
     pub fn needs_text(&self) -> bool {
         self.prompt.is_some()
-    }
-
-    /// The entry's own `icon`, else its subject's, else empty — an empty icon
-    /// still takes its cell, so the titles stay aligned.
-    pub fn icon(&self) -> &str {
-        if let Some(icon) = &self.icon {
-            return icon;
-        }
-        let subject = self.args.first().map(String::as_str);
-        SUBJECT_ICONS
-            .iter()
-            .find(|(s, _)| Some(*s) == subject)
-            .map_or("", |(_, glyph)| glyph)
     }
 
     pub fn available_in(&self, context: &str) -> bool {
@@ -113,11 +88,6 @@ pub fn rejection(c: &Command) -> Option<String> {
     let texts = c.args.iter().filter(|a| *a == "{text}").count();
     let ids = c.args.iter().filter(|a| *a == "{}").count();
 
-    if let Some(icon) = &c.icon {
-        if let Some(why) = icon_rejection(icon) {
-            return Some(why);
-        }
-    }
     if c.resolve.is_some() && c.prompt.is_some() {
         return Some("`resolve` and `prompt` on one entry".into());
     }
@@ -139,38 +109,6 @@ pub fn rejection(c: &Command) -> Option<String> {
         (None, n) if n > 0 => Some("`{}` without a `resolve` to fill it".into()),
         _ => None,
     }
-}
-
-/// The icon column is one cell wide on every row, so an override drawn wider or
-/// narrower would push its own title out of line with every other.
-fn icon_rejection(icon: &str) -> Option<String> {
-    // Named by code point: printing the icon would draw the very glyph rejected.
-    let named = code_points(icon);
-    // Before `cell_width`, which panics on a control character in a debug build.
-    if icon.chars().any(char::is_control) {
-        return Some(format!("`icon` {named} contains a control character"));
-    }
-    let clusters = icon.graphemes(true).count();
-    if clusters != 1 {
-        return Some(format!("`icon` {named} is {clusters} glyphs, expected 1"));
-    }
-    match icon.cell_width() {
-        1 if !same_width_in_every_locale(icon) => Some(format!(
-            "`icon` {named} is East Asian Ambiguous width, drawn 2 cells wide in a CJK locale"
-        )),
-        1 => None,
-        cells => Some(format!("`icon` {named} is {cells} cells wide, expected 1")),
-    }
-}
-
-fn code_points(text: &str) -> String {
-    if text.is_empty() {
-        return "\"\"".into();
-    }
-    text.chars()
-        .map(|c| format!("U+{:04X}", u32::from(c)))
-        .collect::<Vec<_>>()
-        .join(" ")
 }
 
 /// Compares dotted numeric versions, ignoring any trailing suffix. Returns None
@@ -197,7 +135,8 @@ pub fn is_older(actual: &str, required: &str) -> Option<bool> {
 
 #[cfg(test)]
 mod tests {
-    use super::{is_older, same_width_in_every_locale, Catalog, Command, WorktreeKey};
+    use super::{is_older, Catalog, Command, WorktreeKey};
+    use crate::glyph::same_width_in_every_locale;
 
     fn shipped() -> Catalog {
         // The file the plugin actually ships, not a fixture — a fixture would
@@ -308,7 +247,7 @@ mod tests {
             resolve: resolve.map(str::to_owned),
             prompt: prompt.map(str::to_owned),
             binding: None,
-            icon: None,
+            retired_icon: None,
         };
 
         let both = entry(
@@ -493,7 +432,7 @@ mod tests {
         }
     }
 
-    fn entry_with_icon(args: &[&str], icon: Option<&str>) -> Command {
+    fn entry(args: &[&str]) -> Command {
         Command {
             id: "x".into(),
             title: "X".into(),
@@ -502,29 +441,13 @@ mod tests {
             resolve: None,
             prompt: None,
             binding: None,
-            icon: icon.map(str::to_owned),
-        }
-    }
-
-    #[test]
-    fn every_shipped_entry_derives_its_subjects_icon() {
-        for e in &shipped().commands {
-            let expected = match e.args[0].as_str() {
-                "pane" => "◫",
-                "tab" => "▭",
-                "workspace" => "⬚",
-                "server" => "↻",
-                "worktree" => "⎇",
-                other => panic!("{}: no expected icon for `{other}`", e.id),
-            };
-            assert_eq!(e.icon, None, "{}: shipped entries derive", e.id);
-            assert_eq!(e.icon(), expected, "{}", e.id);
+            retired_icon: None,
         }
     }
 
     #[test]
     fn a_worktree_entry_with_no_column_for_its_placeholder_is_rejected() {
-        let mut e = entry_with_icon(&["worktree", "open", "--branch", "{}"], None);
+        let mut e = entry(&["worktree", "open", "--branch", "{}"]);
         e.resolve = Some("worktree list".into());
         let why = super::rejection(&e).expect("no column names a branch");
         assert!(why.contains("--path"), "{why}");
@@ -534,42 +457,22 @@ mod tests {
     }
 
     #[test]
-    fn an_icon_key_replaces_the_derived_glyph() {
-        assert_eq!(entry_with_icon(&["pane", "close"], Some("✕")).icon(), "✕");
-    }
-
-    #[test]
-    fn a_subject_with_no_glyph_derives_an_empty_icon() {
-        assert_eq!(entry_with_icon(&["agent", "list"], None).icon(), "");
-    }
-
-    /// An icon the one-cell column cannot hold would push its own title out of
-    /// line, so it surfaces as a `skipped` row naming why instead.
-    #[test]
-    fn an_icon_that_is_not_one_cell_is_rejected() {
-        let cases = [
-            ("", "`icon` \"\" is 0 glyphs"),
-            ("◫◫", "`icon` U+25EB U+25EB is 2 glyphs"),
-            ("\t", "`icon` U+0009 contains a control character"),
-            ("あ", "`icon` U+3042 is 2 cells"),
-            ("👩\u{200D}💻", "`icon` U+1F469 U+200D U+1F4BB is 2 cells"),
-            ("\u{200B}", "`icon` U+200B is 0 cells"),
-            ("□", "`icon` U+25A1 is East Asian Ambiguous"),
-            ("○", "`icon` U+25CB is East Asian Ambiguous"),
-        ];
-        for (bad, reason) in cases {
-            let why = super::rejection(&entry_with_icon(&["pane", "close"], Some(bad)))
-                .unwrap_or_else(|| panic!("{bad:?} was accepted"));
-            assert!(why.starts_with(reason), "{bad:?}: {why}");
-            assert!(bad.is_empty() || !why.contains(bad), "{bad:?} drawn: {why}");
-        }
-        // A lone halfwidth sound mark is `H`: one cell to ratatui and to any terminal.
-        for good in ["✕", "e\u{301}", "!", "\u{FF9E}"] {
-            assert_eq!(
-                super::rejection(&entry_with_icon(&["pane", "close"], Some(good))),
-                None,
-                "{good:?}"
+    fn an_entry_setting_the_removed_icon_key_is_still_offered() {
+        for value in ["\"◫\"", "\"◫◫\"", "\"\"", "1"] {
+            let text = format!(
+                "[[command]]\nid = \"x\"\ntitle = \"X\"\nargs = [\"pane\", \"close\"]\nicon = {value}\n"
             );
+            let catalog: Catalog = toml::from_str(&text).expect(&text);
+            let e = &catalog.commands[0];
+            assert!(e.retired_icon.is_some(), "{value}");
+            assert_eq!(super::rejection(e), None, "{value}");
+        }
+    }
+
+    #[test]
+    fn no_shipped_entry_sets_the_removed_icon_key() {
+        for e in &shipped().commands {
+            assert!(e.retired_icon.is_none(), "{}", e.id);
         }
     }
 

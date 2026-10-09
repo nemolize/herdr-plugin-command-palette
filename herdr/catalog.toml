@@ -52,12 +52,6 @@ checked_against = "0.9.3"
 # The key itself is read from the running herdr — `herdr --default-config` for
 # the defaults, the user's config.toml for overrides — so a rebound key shows as
 # rebound and no default is copied here to drift.
-#
-# `icon` replaces the glyph leading the entry's row, which otherwise comes from
-# the first element of `args` (pane, tab, workspace, server, worktree). It must
-# be one glyph one cell wide in every locale (no East Asian Ambiguous character,
-# which a CJK locale draws double); anything else drops the entry as `skipped`.
-# None of the entries below set it, so every row of a subject reads alike.
 
 
 # ─── Panes: splitting ────────────────────────────────────────────────────────

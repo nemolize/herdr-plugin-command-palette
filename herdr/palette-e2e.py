@@ -655,13 +655,37 @@ def opened_with_settings(
         palette.close()
 
 
-def icons_follow_settings(scratch: Path) -> bool:
-    """`settings.toml` is read by `main`, which no unit test reaches: these
-    prove the switch arrives, and that a missing file is not an error."""
+# Every glyph a row once led with (#53), and the override the catalog below sets.
+FORMER_ICONS = "◫▭⬚↻⎇⧉✕"
+
+# One shipped-shaped entry, and one setting the removed `icon` key, which must
+# still be offered.
+WITH_ICON = """checked_against = "0.8.2"
+
+[[command]]
+id = "pane.split.right"
+title = "Split pane: right"
+args = ["pane", "split", "--pane", "{pane}", "--direction", "right"]
+contexts = ["pane"]
+
+[[command]]
+id = "pane.zoom.icon"
+title = "Zoom with icon"
+args = ["pane", "zoom", "--pane", "{pane}", "--toggle"]
+contexts = ["pane"]
+icon = "✕"
+"""
+
+
+def removed_icon_keys_are_ignored(scratch: Path) -> bool:
+    """`settings.toml` and the catalog are read by `main`, which no unit test
+    reaches: these prove no row leads with an icon, with or without either
+    file, and that a file still setting a removed key is named, not refused."""
     absent = opened_with_settings(scratch, "settings-absent", None)
     passed = check(
-        "with no settings.toml the rows carry icons",
-        "◫" in absent,
+        "with no settings.toml no row leads with an icon",
+        "Splitpane" in "".join(absent.split())
+        and not any(g in absent for g in FORMER_ICONS),
         f"drew: {absent[-400:]!r}",
     )
     passed &= check(
@@ -670,30 +694,42 @@ def icons_follow_settings(scratch: Path) -> bool:
         f"drew: {absent[-400:]!r}",
     )
 
-    off = opened_with_settings(scratch, "settings-off", "icons = false\n")
+    retired = opened_with_settings(
+        scratch,
+        "settings-retired",
+        "icons = true\n",
+        ready="settings.toml: `icons` unsupported",
+        catalog=WITH_ICON,
+    )
+    squeezed = "".join(retired.split())
     passed &= check(
-        "icons = false draws no icons",
-        bool(off) and "◫" not in off and "Splitpane" in "".join(off.split()),
-        f"drew: {off[-400:]!r}",
+        "a catalog entry setting `icon` is offered and the key named",
+        "Zoomwithicon" in squeezed and "catalog:`icon`unsupported" in squeezed,
+        f"drew: {retired[-400:]!r}",
+    )
+    passed &= check(
+        "rows draw no icon though both files set one",
+        "Splitpane" in squeezed and not any(g in retired for g in FORMER_ICONS),
+        f"drew: {retired[-400:]!r}",
     )
 
     broken = opened_with_settings(
         scratch,
         "settings-broken",
-        "icon = false\n",
+        "auto_nam = 1\n",
         ready="using defaults",
     )
     squeezed = "".join(broken.split())
     passed &= check(
         "an unusable settings.toml is reported and the defaults kept",
-        "settings.toml" in squeezed and "usingdefaults" in squeezed and "◫" in broken,
+        "settings.toml" in squeezed and "usingdefaults" in squeezed,
         f"drew: {broken[-400:]!r}",
     )
     return passed
 
 
-# One well-formed entry so the palette opens, and one whose icon is two glyphs,
-# so the catalog has something to skip.
+# One well-formed entry so the palette opens, one with a `{text}` nothing fills,
+# so the catalog has something to skip, and one setting the removed `icon` key.
 ONE_SKIPPED = """checked_against = "0.8.2"
 
 [[command]]
@@ -703,21 +739,27 @@ args = ["pane", "split", "--pane", "{pane}", "--direction", "right"]
 contexts = ["pane"]
 
 [[command]]
-id = "pane.bad.icon"
-title = "Bad icon"
+id = "pane.bad.text"
+title = "Bad text"
+args = ["pane", "zoom", "--pane", "{pane}", "{text}"]
+contexts = ["pane"]
+
+[[command]]
+id = "pane.zoom.icon"
+title = "Zoom with icon"
 args = ["pane", "zoom", "--pane", "{pane}", "--toggle"]
 contexts = ["pane"]
-icon = "◫◫"
+icon = "✕"
 """
 
 
 def every_footer_note_is_kept(scratch: Path) -> bool:
-    """Each of `main`'s three startup notes is added on its own path, so all
-    three are raised at once: any one assigned over the others drops a note."""
+    """Each of `main`'s four startup notes is added on its own path, so all
+    four are raised at once: any one assigned over the others drops a note."""
     drew = opened_with_settings(
         scratch,
         "all-notes",
-        "icon = false\n",
+        "auto_nam = 1\n",
         ready="using defaults",
         stub_body=ACCEPTS.replace(f"herdr {STUB_VERSION}", "herdr 0.1.0"),
         catalog=ONE_SKIPPED,
@@ -727,7 +769,8 @@ def every_footer_note_is_kept(scratch: Path) -> bool:
     for note in (
         "herdr 0.1.0 < catalog 0.8.2 - some entries may fail",
         "catalog: 1 skipped - search `skipped`",
-        "settings.toml: unknown field `icon`, expected `icons` or `auto_name` - using defaults",
+        "catalog: `icon` unsupported",
+        "settings.toml: unknown field `auto_nam`, expected `auto_name` - using defaults",
     ):
         passed &= check(
             f"the footer shows `{note}` whole beside the others (#149)",
@@ -847,7 +890,7 @@ def main() -> int:
     passed &= a_typed_repo_placeholder_is_kept_as_typed(scratch)
     passed &= removing_offers_only_worktrees_herdr_created(scratch)
     passed &= esc_closes_the_palette(scratch)
-    passed &= icons_follow_settings(scratch)
+    passed &= removed_icon_keys_are_ignored(scratch)
     passed &= every_footer_note_is_kept(scratch)
     passed &= a_generated_name_lands_without_a_keypress(scratch)
 

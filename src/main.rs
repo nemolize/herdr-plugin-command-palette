@@ -121,6 +121,7 @@ fn run() -> Result<(), String> {
     let context = Context::from_env();
 
     let checked_against = catalog.checked_against.clone();
+    let sets_retired_icon = catalog.commands.iter().any(|c| c.retired_icon.is_some());
 
     // Defaulted rather than propagated because a palette of built-ins is still
     // a working palette (§4).
@@ -174,7 +175,6 @@ fn run() -> Result<(), String> {
     let (settings, settings_problem) = settings::load(config_dir.as_deref());
 
     let mut app = App::new(candidates, frecency);
-    app.icons = settings.icons;
 
     // The catalog drifts when Herdr changes its CLI and nothing detects that
     // automatically (§4). A running Herdr older than the version the catalog was
@@ -188,6 +188,10 @@ fn run() -> Result<(), String> {
 
     if !rejected.is_empty() {
         app.add_status(skipped_note(rejected.len()));
+    }
+
+    if sets_retired_icon {
+        app.add_status(retired_icon_note());
     }
 
     if let Some(problem) = settings_problem {
@@ -425,6 +429,10 @@ fn outdated_note(actual: &str, required: &str) -> String {
 
 fn skipped_note(count: usize) -> String {
     format!("catalog: {count} skipped - search `skipped`")
+}
+
+fn retired_icon_note() -> String {
+    "catalog: `icon` unsupported".into()
 }
 
 #[cfg(test)]
@@ -741,7 +749,7 @@ esac
             resolve: None,
             prompt: None,
             binding: None,
-            icon: None,
+            retired_icon: None,
         }
     }
 

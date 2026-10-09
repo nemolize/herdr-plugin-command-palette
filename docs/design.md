@@ -397,44 +397,20 @@ directions rather than making the two families look alike.
 Plugin actions from `herdr plugin action list` merge into the same list, so one
 search covers both built-ins and other plugins.
 
-### Each row leads with an icon (#53)
+### `settings.toml` sits beside the user's catalog
 
-A glyph ahead of the title lets the eye sort the list by kind before reading a
-word. It is **derived from the entry's subject** — the first element of `args` —
-so every pane entry reads alike for free; an `icon` key on the entry replaces it.
-Other plugins' actions all show `⧉`, since the catalog that names a subject does
-not carry their rows, and a `skipped` note shows `!`.
-
-| subject | glyph |
-|---|---|
-| `pane` | `◫` |
-| `tab` | `▭` |
-| `workspace` | `⬚` |
-| `server` | `↻` |
-
-**The set is plain Unicode, chosen by width rather than by look.** Termux is the
-platform that forgives least: a Nerd Font codepoint without a patched font is
-tofu, and an emoji is two cells wide and drawn differently per platform. Each
-glyph above is East Asian Width `N` — never `A`, which a CJK-locale terminal
-draws double while ratatui counts one — and has no emoji presentation. The
-issue's own example `□` is `A`, which is why it is not used. An `icon` override
-is held to the same width rule, checked against both widths, and skipped with
-its reason when it fails.
-
-The icon column is **never dropped**, unlike the key (§10) and the footer's
-version: it is what the row is scanned by, so at the ~36-column floor (§5) the
-title clips instead, on a cluster boundary by the same `CellWidth` rules as the
-input line above. An entry with no glyph keeps a blank cell so its title stays in
-line. The Targets stage lists one kind of thing and carries no icon, and the
-filter matches the title alone.
-
-`icons = false` in `settings.toml`, beside the user's catalog, turns the column
-off. It is a file of its own because a user catalog replaces the shipped one
+It is a file of its own because a user catalog replaces the shipped one
 wholesale, so a switch kept in it would cost a copy of the whole catalog. A
 missing file is the ordinary case and says nothing; one that is there but cannot
 be used — unreadable, malformed, or carrying a key nothing reads — keeps the
 defaults and says why in the footer, since a misspelt switch ignored silently
 looks exactly like a switch that does not work.
+
+Rows once led with an icon (#53), removed in #247. `icons` in `settings.toml`
+is the exception to the rule above: it is ignored and named in the footer as
+unsupported, and the file's other keys still apply, so an upgrade does not drop
+a user's settings. A catalog entry ignores unknown keys, so `icon` there costs
+nothing to keep; the footer names it only so the user knows it does nothing.
 
 The same file's optional `[auto_name]` table sets the model, the Ollama base URL
 and the timeout for the generated names above, under the same rule.
@@ -496,13 +472,10 @@ palette says so instead, and ignores every key but the two that close it, since
 nothing may change or run while the user cannot see it. Growing back past the
 floor redraws the palette with the query and selection it had.
 
-A status message replacing the footer wraps to at most four rows, and to
+A status message replacing the footer wraps to at most five rows, and to
 fewer when more would take those two candidates; a longer one ends in `...`
 (#144). Herdr's errors are quoted whole, so without the cap one long error
-leaves the list no room. Four rather than three is what fits all three startup
-notes at the 51 columns the measured device gives (#154); they still end in
-`...` below about 42 columns, and when the settings error is longer than a
-misspelt key.
+leaves the list no room.
 
 The first draft's floor was 8, never measured — #2 recorded it as a starting
 point. It was also too close to where the palette runs: 45% of the 27–29
