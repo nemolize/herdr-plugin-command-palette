@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.9.0
+
+### Minor Changes
+
+- ca41454: Offer the `✨ Auto generate` row in `Rename tab...` and `Rename pane...` too, naming the tab from its own panes and the pane from itself
+
+### Patch Changes
+
+- 6d14b59: Show how long a generated workspace name took on the `✨ Auto generate` row, and say `unchanged` when the suggestion matches the name already in the input
+
 ## 0.8.0
 
 ### Minor Changes
