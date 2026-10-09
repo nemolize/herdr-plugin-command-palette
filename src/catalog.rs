@@ -38,8 +38,7 @@ pub struct Command {
     /// this — it is stated here, beside the entry a correction would edit.
     #[serde(default)]
     pub binding: Option<String>,
-    /// The removed `icon` key, read only so the palette can say it is ignored:
-    /// a user catalog written before the removal keeps every entry.
+    /// The removed `icon` key, read only so the palette can say it is ignored.
     #[serde(default, rename = "icon")]
     pub retired_icon: Option<IgnoredAny>,
 }

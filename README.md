@@ -161,9 +161,10 @@ catalog, so changing one does not mean copying the whole catalog — today the
 
 The file is optional — without it every default applies. One that cannot be
 read or parsed, or that carries a key the palette does not know, is reported in
-the footer and the defaults apply. The exception is `icons`, and `icon` on a
-catalog entry, from releases whose rows had icons: each is ignored with a footer
-note, and everything else in the file still applies.
+the footer and the defaults apply. The exception is `icons`, from releases
+whose rows had icons: it is ignored with a footer note, and everything else in
+the file still applies. A leftover `icon` on a catalog entry is named in the
+footer the same way, and the entry is still offered.
 
 ### Generating a workspace, tab or pane name
 

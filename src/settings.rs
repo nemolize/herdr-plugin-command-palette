@@ -6,6 +6,8 @@ use std::time::{Duration, Instant};
 
 use serde::Deserialize;
 
+use crate::glyph::SEPARATOR;
+
 pub const FILE_NAME: &str = "settings.toml";
 
 #[derive(Debug, PartialEq, Deserialize)]
@@ -80,17 +82,22 @@ pub fn load(config_dir: Option<&Path>) -> (Settings, Option<String>) {
         Ok(table) => table,
         Err(e) => return (Settings::default(), Some(unusable(e.message()))),
     };
-    let retired = table.remove(RETIRED_KEY).is_some();
-    match toml::Value::Table(table).try_into::<Settings>() {
+    let retired = table.remove(RETIRED_KEY).is_some().then(retired_note);
+    let (settings, problem) = match toml::Value::Table(table).try_into::<Settings>() {
         Ok(settings) => match settings.auto_name.problem() {
             Some(why) => (Settings::default(), Some(unusable(&why))),
-            None => (settings, retired.then(retired_note)),
+            None => (settings, None),
         },
         Err(e) => (Settings::default(), Some(unusable(e.message()))),
-    }
+    };
+    let note = match (retired, problem) {
+        (Some(retired), Some(problem)) => Some(format!("{problem}{SEPARATOR}{retired}")),
+        (retired, problem) => retired.or(problem),
+    };
+    (settings, note)
 }
 
-pub fn retired_note() -> String {
+fn retired_note() -> String {
     format!("{FILE_NAME}: `{RETIRED_KEY}` unsupported")
 }
 
@@ -249,6 +256,8 @@ mod tests {
             let why = why.unwrap_or_else(|| panic!("{name} is reported"));
             assert!(why.contains(named), "{name}: {why}");
             assert!(why.contains(FILE_NAME), "{name}: {why}");
+            // The problem leads, so a footer cut takes the note, not the problem.
+            assert!(why.ends_with("`icons` unsupported"), "{name}: {why}");
         }
     }
 

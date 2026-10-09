@@ -406,10 +406,11 @@ be used — unreadable, malformed, or carrying a key nothing reads — keeps the
 defaults and says why in the footer, since a misspelt switch ignored silently
 looks exactly like a switch that does not work.
 
-Rows once led with an icon (#53), removed in #247. Its two keys — `icon` on a
-catalog entry and `icons` in `settings.toml` — are the exception to the rule
-above: each is ignored and named in the footer as unsupported, and the entry and
-the file's other keys still apply, so an upgrade does not drop a user's settings.
+Rows once led with an icon (#53), removed in #247. `icons` in `settings.toml`
+is the exception to the rule above: it is ignored and named in the footer as
+unsupported, and the file's other keys still apply, so an upgrade does not drop
+a user's settings. A catalog entry ignores unknown keys, so `icon` there costs
+nothing to keep; the footer names it only so the user knows it does nothing.
 
 The same file's optional `[auto_name]` table sets the model, the Ollama base URL
 and the timeout for the generated names above, under the same rule.
@@ -471,13 +472,10 @@ palette says so instead, and ignores every key but the two that close it, since
 nothing may change or run while the user cannot see it. Growing back past the
 floor redraws the palette with the query and selection it had.
 
-A status message replacing the footer wraps to at most four rows, and to
+A status message replacing the footer wraps to at most five rows, and to
 fewer when more would take those two candidates; a longer one ends in `...`
 (#144). Herdr's errors are quoted whole, so without the cap one long error
-leaves the list no room. Four rather than three is what fits all three startup
-notes at the 51 columns the measured device gives (#154); they still end in
-`...` below about 42 columns, and when the settings error is longer than a
-misspelt key.
+leaves the list no room.
 
 The first draft's floor was 8, never measured — #2 recorded it as a starting
 point. It was also too close to where the palette runs: 45% of the 27–29

@@ -273,7 +273,7 @@ fn render(f: &mut Frame, app: &mut App) {
     render_status(f, app, status, status_cut, chunks[3]);
 }
 
-const MAX_STATUS_ROWS: u16 = 4;
+const MAX_STATUS_ROWS: u16 = 5;
 
 const LIST_MIN_ROWS: u16 = 1;
 
@@ -1483,21 +1483,22 @@ mod render_tests {
     }
 
     #[test]
-    fn a_long_status_takes_four_rows_and_says_it_was_cut() {
+    fn a_long_status_takes_five_rows_and_says_it_was_cut() {
         let mut app = app_with(vec![command("split.right", "Split pane: right", None)]);
         app.status = Some(long_error());
         let lines = draw(&mut app, 36, 20);
         assert_eq!(
-            lines[16..],
+            lines[15..],
             [
                 "herdr: error line 0",
                 "herdr: error line 1",
                 "herdr: error line 2",
-                "herdr: error line 3...",
+                "herdr: error line 3",
+                "herdr: error line 4...",
             ],
             "{lines:#?}"
         );
-        assert!(!lines[15].contains("herdr"), "{lines:#?}");
+        assert!(!lines[14].contains("herdr"), "{lines:#?}");
     }
 
     /// Issues #149 and #154. The manifest's 60-column popup is 58 inside
@@ -1506,13 +1507,17 @@ mod render_tests {
     fn every_startup_note_fits_whole_inside_the_popup() {
         let dir = std::env::temp_dir().join(format!("palette-ui-notes-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join(crate::settings::FILE_NAME), "auto_nam = 1\n").unwrap();
+        std::fs::write(
+            dir.join(crate::settings::FILE_NAME),
+            "icons = false\n[auto_name]\nbase_url = \"https://x\"\n",
+        )
+        .unwrap();
         let (_, unusable) = crate::settings::load(Some(&dir));
         let notes = [
             crate::outdated_note("0.1.0", "0.8.2"),
             crate::skipped_note(1),
             crate::retired_icon_note(),
-            unusable.expect("a misspelt key is reported"),
+            unusable.expect("an unusable value is reported"),
         ];
         for width in [58, 51] {
             let mut app = app_with(vec![command("split.right", "Split pane: right", None)]);
@@ -1520,7 +1525,8 @@ mod render_tests {
                 app.add_status(note.clone());
             }
             let lines = draw(&mut app, width, 20);
-            let shown: String = lines[16..].concat().split_whitespace().collect();
+            let footer = usize::from(20 - MAX_STATUS_ROWS);
+            let shown: String = lines[footer..].concat().split_whitespace().collect();
             for note in &notes {
                 let note: String = note.split_whitespace().collect();
                 assert!(shown.contains(&note), "{note} is not whole in {lines:#?}");
@@ -1546,9 +1552,9 @@ mod render_tests {
     #[test]
     fn a_cut_marker_after_a_short_row_ending_in_a_two_cell_glyph_is_whole() {
         let mut app = app_with(vec![command("split.right", "Split pane: right", None)]);
-        app.status = Some("one\ntwo\nthree\nfour ｶ\u{FF9E}\nfive".to_string());
+        app.status = Some("one\ntwo\nthree\nfour\nfive ｶ\u{FF9E}\nsix".to_string());
         let lines = draw(&mut app, 36, 20);
-        assert_eq!(lines[19], "four ｶ\u{FF9E} ...", "{lines:#?}");
+        assert_eq!(lines[19], "five ｶ\u{FF9E} ...", "{lines:#?}");
     }
 
     #[test]
@@ -1556,7 +1562,7 @@ mod render_tests {
         let mut app = app_with(vec![command("split.right", "Split pane: right", None)]);
         app.status = Some(format!("first{}last", "\n".repeat(25)));
         let lines = draw(&mut app, 36, 20);
-        assert_eq!(lines[16..], ["first", "", "", "..."], "{lines:#?}");
+        assert_eq!(lines[15..], ["first", "", "", "", "..."], "{lines:#?}");
     }
 
     #[test]
