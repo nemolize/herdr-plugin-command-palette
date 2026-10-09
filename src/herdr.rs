@@ -181,11 +181,15 @@ impl Herdr {
             .get("panes")
             .and_then(|v| v.as_array())
             .ok_or_else(|| "pane list returned no panes".to_string())?;
-        Ok(rows
+        let panes: Vec<_> = rows
             .iter()
             .filter(|row| row.get("tab_id").and_then(|v| v.as_str()) == Some(tab))
             .cloned()
-            .collect())
+            .collect();
+        if panes.is_empty() {
+            return Err(format!("tab {tab} not found"));
+        }
+        Ok(panes)
     }
 
     pub fn pane(&self, pane: &str) -> Result<serde_json::Value, String> {

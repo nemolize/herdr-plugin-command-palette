@@ -74,12 +74,12 @@ pub fn gather(
     subject: &Subject,
     focused_pane: Option<&str>,
 ) -> Result<String, String> {
-    let rows = match subject {
-        Subject::Workspace(id) => herdr.workspace_panes(id),
-        Subject::Tab(id) => herdr.tab_panes(id),
-        Subject::Pane(id) => herdr.pane(id).map(|row| vec![row]),
-    }
-    .map_err(|e| format!("pane list: {e}"))?;
+    let (rows, call) = match subject {
+        Subject::Workspace(id) => (herdr.workspace_panes(id), "pane list"),
+        Subject::Tab(id) => (herdr.tab_panes(id), "pane list"),
+        Subject::Pane(id) => (herdr.pane(id).map(|row| vec![row]), "pane get"),
+    };
+    let rows = rows.map_err(|e| format!("{call}: {e}"))?;
     let panes: Vec<PaneBrief> = rows
         .iter()
         .map(|row| {

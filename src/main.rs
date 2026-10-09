@@ -661,6 +661,39 @@ esac
         );
     }
 
+    fn failure_for(name: &str, subject: brief::Subject) -> String {
+        let (url, requests) = fake_ollama("{}", std::time::Duration::ZERO);
+        let (tx, answers) = std::sync::mpsc::channel();
+        generate(
+            1,
+            subject,
+            &stub_herdr(name),
+            &in_a_pane(),
+            &auto_name_at(url),
+            tx,
+        );
+
+        let (_, answer, _) = answers
+            .recv_timeout(std::time::Duration::from_secs(10))
+            .unwrap();
+        assert!(requests
+            .recv_timeout(std::time::Duration::from_millis(300))
+            .is_err());
+        answer.unwrap_err()
+    }
+
+    #[test]
+    fn a_tab_with_no_panes_is_not_found_rather_than_named_from_nothing() {
+        let err = failure_for("no-tab", brief::Subject::Tab("w1:t9".into()));
+        assert_eq!(err, "pane list: tab w1:t9 not found");
+    }
+
+    #[test]
+    fn a_pane_herdr_cannot_get_names_the_call_that_failed() {
+        let err = failure_for("no-pane", brief::Subject::Pane("w1:p9".into()));
+        assert!(err.starts_with("pane get: "), "{err}");
+    }
+
     #[test]
     fn a_pane_is_described_by_itself_and_its_own_output() {
         let body = sent_for("pane", brief::Subject::Pane("w1:p3".into()), &in_a_pane());
