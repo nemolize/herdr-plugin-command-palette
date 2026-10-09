@@ -2,6 +2,8 @@
 
 use crate::brief::Subject;
 use crate::catalog::Command;
+use std::time::Duration;
+
 use crate::frecency::Frecency;
 use crate::generate_row::GenerateRow;
 use crate::glyph::SEPARATOR;
@@ -308,15 +310,16 @@ impl App {
         }
     }
 
-    /// A successful answer to request `id` replaces the typed name.
-    pub fn generated(&mut self, id: u64, answer: Result<String, String>) {
+    /// A successful answer to request `id`, which took `elapsed`, replaces the
+    /// typed name.
+    pub fn generated(&mut self, id: u64, answer: Result<String, String>, elapsed: Duration) {
         if let Stage::Prompt {
             text,
             generate: Some(row),
             ..
         } = &mut self.stage
         {
-            if let Some(name) = row.finish(id, answer) {
+            if let Some(name) = row.finish(id, answer, elapsed, text.text()) {
                 *text = LineEdit::new(name);
                 self.status = None;
             }
@@ -341,9 +344,12 @@ impl App {
                 return;
             }
             // The refusal described the old text; leaving it up would report
-            // `--clear` at an input that no longer says it.
+            // `--clear` at an input that no longer says it. So did the answer.
             if text.apply(edit) {
                 self.status = None;
+                if let Some(row) = generate {
+                    row.clear_answer();
+                }
             }
             return;
         }
@@ -1054,7 +1060,7 @@ mod tests {
                 "{argv:?}: no second request while one runs"
             );
 
-            app.generated(id, Err("empty answer".into()));
+            app.generated(id, Err("empty answer".into()), Duration::ZERO);
             assert!(
                 matches!(app.confirm(), Step::Generate { id: next, .. } if next > id),
                 "{argv:?}: a retry is a new request"
@@ -1078,7 +1084,7 @@ mod tests {
     fn a_generated_name_replaces_the_input_and_enter_renames_to_it() {
         for (mut app, argv) in every_rename("herdr") {
             let id = start_generating(&mut app);
-            app.generated(id, Ok("palette LLM".into()));
+            app.generated(id, Ok("palette LLM".into()), Duration::ZERO);
 
             assert_eq!(typed(&app), "palette LLM", "{argv:?}");
             assert!(!row(&app).focused, "{argv:?}: focus is back on the input");
@@ -1095,6 +1101,41 @@ mod tests {
     }
 
     #[test]
+    fn the_row_says_how_long_an_answer_took_and_whether_it_changed_the_name() {
+        for (subject, target) in RENAMES {
+            let mut app = renaming(subject, target, "herdr");
+            let id = start_generating(&mut app);
+            app.generated(id, Ok("palette".into()), Duration::from_millis(2_340));
+            assert_eq!(row(&app).label(), "\u{2728} Auto generate \u{22C5} 2.3s");
+
+            let mut app = renaming(subject, target, "herdr");
+            let id = start_generating(&mut app);
+            app.generated(id, Ok("herdr".into()), Duration::from_millis(1_800));
+            assert_eq!(
+                row(&app).label(),
+                "\u{2728} Auto generate \u{22C5} unchanged (1.8s)"
+            );
+            assert_eq!(typed(&app), "herdr");
+        }
+    }
+
+    #[test]
+    fn editing_the_name_clears_what_the_row_said_about_the_answer() {
+        for (subject, target) in RENAMES {
+            let mut app = renaming(subject, target, "herdr");
+            let id = start_generating(&mut app);
+            app.generated(id, Ok("herdr".into()), Duration::from_millis(1_800));
+            app.edit(Edit::Left);
+            assert!(
+                row(&app).label().contains("unchanged"),
+                "a cursor move leaves the text, and the answer, as they were"
+            );
+            app.edit(Edit::Insert('!'));
+            assert_eq!(row(&app).label(), "\u{2728} Auto generate");
+        }
+    }
+
+    #[test]
     fn cancelling_keeps_the_input_and_drops_the_late_answer() {
         for (mut app, argv) in every_rename("herdr") {
             let id = start_generating(&mut app);
@@ -1105,7 +1146,7 @@ mod tests {
                 "{argv:?}: still at the prompt"
             );
 
-            app.generated(id, Ok("late".into()));
+            app.generated(id, Ok("late".into()), Duration::ZERO);
             assert_eq!(typed(&app), "herdr", "{argv:?}");
             assert!(
                 !app.cancel_generation(),
@@ -1120,7 +1161,7 @@ mod tests {
             let id = start_generating(&mut app);
             app.cancel_generation();
             app.leave_stage();
-            app.generated(id, Ok("late".into()));
+            app.generated(id, Ok("late".into()), Duration::ZERO);
             assert!(matches!(app.stage, Stage::Commands), "{argv:?}");
         }
     }
@@ -1136,7 +1177,7 @@ mod tests {
         ] {
             for (mut app, argv) in every_rename("herdr") {
                 let id = start_generating(&mut app);
-                app.generated(id, Err(why.into()));
+                app.generated(id, Err(why.into()), Duration::ZERO);
                 assert_eq!(typed(&app), "herdr", "{argv:?} {why}");
                 assert!(row(&app).label().ends_with(why), "{argv:?} {why}");
                 assert!(
