@@ -24,7 +24,7 @@ impl Default for Settings {
     }
 }
 
-/// The local LLM behind `Rename workspace...`'s `Auto generate` row.
+/// The local LLM behind the rename prompts' `Auto generate` row.
 #[derive(Clone, Debug, PartialEq, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct AutoName {

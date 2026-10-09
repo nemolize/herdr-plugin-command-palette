@@ -313,17 +313,18 @@ Two edges were settled by measuring 0.9.0 rather than reasoning about clap:
   stored verbatim by all three commands — the guard names the one real case
   rather than rejecting a leading `-` on principle.
 
-### A workspace name can be generated (#240)
+### A workspace, tab or pane name can be generated (#240, #243)
 
-A workspace rename shows an `Auto generate` row under its input; `↓` and `↑`
+A workspace, tab or pane rename shows an `Auto generate` row under its input; `↓` and `↑`
 move focus between the two, and `Enter` on the row asks a local Ollama for a
-name. The model reads the workspace's panes (title, working directory, git
-branch) and the last 120 lines of the pane the palette was opened over, kept
-small because latency is almost all prompt prefill. The answer replaces the
+name. The model reads the panes of what is being renamed (title, working
+directory, git branch) and the last 120 lines of the pane the palette was opened
+over when it is one of them — for a pane rename, that pane alone and its own
+output — kept small because latency is almost all prompt prefill. `pane list`
+has no tab filter, so a tab's panes are every pane's row filtered by `tab_id`. The answer replaces the
 input and nothing is renamed until `Enter` there, so a bad suggestion costs an
 edit, never a rename. Generation runs on its own thread so `Esc` can cancel it;
 a cancelled request still runs to its end and its late answer is discarded.
-Tab and pane renames do not offer it yet.
 
 The client is plain `http://` with no proxy: a TLS stack would pull in `ring`,
 whose build needs a C cross-compiler the musl release builds lack, and a proxy
@@ -436,7 +437,7 @@ defaults and says why in the footer, since a misspelt switch ignored silently
 looks exactly like a switch that does not work.
 
 The same file's optional `[auto_name]` table sets the model, the Ollama base URL
-and the timeout for the generated workspace name above, under the same rule.
+and the timeout for the generated names above, under the same rule.
 
 ## 5. Popup dimensions — size against the keyboard-up state
 

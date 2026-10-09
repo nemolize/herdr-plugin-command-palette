@@ -172,6 +172,30 @@ impl Herdr {
             .ok_or_else(|| "pane list returned no panes".to_string())
     }
 
+    /// `pane list` has no tab filter, so every pane is listed and the rows of
+    /// other tabs are dropped here.
+    pub fn tab_panes(&self, tab: &str) -> Result<Vec<serde_json::Value>, String> {
+        let args = ["pane", "list"].map(str::to_owned);
+        let result = self.call(&args)?;
+        let rows = result
+            .get("panes")
+            .and_then(|v| v.as_array())
+            .ok_or_else(|| "pane list returned no panes".to_string())?;
+        Ok(rows
+            .iter()
+            .filter(|row| row.get("tab_id").and_then(|v| v.as_str()) == Some(tab))
+            .cloned()
+            .collect())
+    }
+
+    pub fn pane(&self, pane: &str) -> Result<serde_json::Value, String> {
+        let args = ["pane", "get", pane].map(str::to_owned);
+        self.call(&args)?
+            .get("pane")
+            .cloned()
+            .ok_or_else(|| "pane get returned no pane".to_string())
+    }
+
     /// The last `lines` lines `pane` shows, as plain text — `--format text`
     /// prints the lines themselves rather than a JSON envelope.
     pub fn read_pane(&self, pane: &str, lines: u32) -> Result<String, String> {

@@ -1,5 +1,6 @@
 //! Candidate list and selection state, independent of how it is drawn.
 
+use crate::brief::Subject;
 use crate::catalog::Command;
 use crate::frecency::Frecency;
 use crate::generate_row::GenerateRow;
@@ -102,11 +103,11 @@ pub enum Step {
     /// direct call because the name lives behind a list API, and `App` holds no
     /// herdr handle — every herdr call is the event loop's.
     NeedsPrompt(Command),
-    /// Ask the model for a name for `workspace`, as request `id`, and hand the
+    /// Ask the model for a name for `subject`, as request `id`, and hand the
     /// answer back through `App::generated`.
     Generate {
         id: u64,
-        workspace: String,
+        subject: Subject,
     },
     /// Run this now.
     Run(Outcome),
@@ -161,7 +162,7 @@ impl App {
     /// something is an edit of its current name rather than a retype.
     pub fn enter_prompt(&mut self, command: Command, seed: String) {
         let args = command.args.clone();
-        let generate = workspace_to_name(&args).map(|_| GenerateRow::default());
+        let generate = Subject::of_rename(&args).map(|_| GenerateRow::default());
         self.stage = Stage::Prompt {
             command,
             args,
@@ -375,17 +376,14 @@ impl App {
         {
             if row.focused {
                 let id = self.last_generation + 1;
-                let Some(workspace) = workspace_to_name(args) else {
+                let Some(subject) = Subject::of_rename(args) else {
                     return Step::Continue;
                 };
                 if !row.start(id) {
                     return Step::Continue;
                 }
                 self.last_generation = id;
-                return Step::Generate {
-                    id,
-                    workspace: workspace.to_string(),
-                };
+                return Step::Generate { id, subject };
             }
         }
         if let Stage::Prompt {
@@ -463,18 +461,6 @@ impl App {
 
     pub fn frecency(&self) -> &Frecency {
         &self.frecency
-    }
-}
-
-/// The workspace a rename entry acts on, which is the one whose panes the
-/// model reads; None for every other entry. Tab and pane renames are left out
-/// until their own summary is designed.
-fn workspace_to_name(args: &[String]) -> Option<&str> {
-    match args {
-        [subject, verb, id, ..] if subject == "workspace" && verb == "rename" => {
-            (!id.starts_with('{')).then_some(id.as_str())
-        }
-        _ => None,
     }
 }
 
@@ -957,17 +943,38 @@ mod tests {
         assert!(matches!(app.confirm(), Step::Continue));
     }
 
-    fn renaming_workspace(seed: &str) -> App {
+    const RENAMES: [(&str, &str); 3] =
+        [("workspace", "w3Y"), ("tab", "w3Y:t1"), ("pane", "w3Y:p1")];
+
+    fn renaming(subject: &str, id: &str, seed: &str) -> App {
         let mut c = cmd(
-            "workspace.rename",
-            "Rename workspace...",
-            &["workspace", "rename", "w3Y", "{text}"],
+            &format!("{subject}.rename"),
+            &format!("Rename {subject}..."),
+            &[subject, "rename", id, "{text}"],
             None,
         );
-        c.prompt = Some("New workspace name".into());
+        c.prompt = Some(format!("New {subject} name"));
         let mut app = app_with(vec![c.clone()]);
         app.enter_prompt(c, seed.into());
         app
+    }
+
+    /// One app per rename in `RENAMES`, each at its prompt with `seed` typed,
+    /// paired with the argv its rename runs before the name.
+    fn every_rename(seed: &str) -> Vec<(App, Vec<String>)> {
+        RENAMES
+            .iter()
+            .map(|(subject, id)| {
+                let argv = vec![subject.to_string(), "rename".into(), id.to_string()];
+                (renaming(subject, id, seed), argv)
+            })
+            .collect()
+    }
+
+    fn renamed_to(argv: &[String], name: &str) -> Vec<String> {
+        let mut args = argv.to_vec();
+        args.push(name.into());
+        args
     }
 
     fn row(app: &App) -> &GenerateRow {
@@ -984,115 +991,138 @@ mod tests {
     fn start_generating(app: &mut App) -> u64 {
         app.move_selection(1);
         match app.confirm() {
-            Step::Generate { id, workspace } => {
-                assert_eq!(workspace, "w3Y");
-                id
-            }
+            Step::Generate { id, .. } => id,
             _ => panic!("expected a generate request"),
         }
     }
 
     #[test]
-    fn only_a_workspace_rename_offers_a_generated_name() {
-        assert!(renaming_workspace("w").generate_row().is_some());
-        assert!(at_prompt("t").generate_row().is_none(), "tab rename");
+    fn every_rename_asks_for_a_name_for_what_it_renames() {
+        let expected = [
+            Subject::Workspace("w3Y".into()),
+            Subject::Tab("w3Y:t1".into()),
+            Subject::Pane("w3Y:p1".into()),
+        ];
+        for ((mut app, argv), want) in every_rename("x").into_iter().zip(expected) {
+            app.move_selection(1);
+            match app.confirm() {
+                Step::Generate { subject, .. } => assert_eq!(subject, want, "{argv:?}"),
+                _ => panic!("{argv:?}: expected a generate request"),
+            }
+        }
+    }
+
+    #[test]
+    fn only_a_rename_offers_a_generated_name() {
+        for (app, argv) in every_rename("x") {
+            assert!(app.generate_row().is_some(), "{argv:?}");
+        }
         let mut c = cmd(
-            "pane.rename",
-            "Rename pane...",
-            &["pane", "rename", "w3Y:p1", "{text}"],
+            "tab.label",
+            "Label tab...",
+            &["tab", "label", "t1", "{text}"],
             None,
         );
-        c.prompt = Some("New pane name".into());
+        c.prompt = Some("Label".into());
         let mut app = app_with(vec![]);
         app.enter_prompt(c, String::new());
-        assert!(app.generate_row().is_none(), "pane rename");
+        assert!(app.generate_row().is_none(), "not a rename");
     }
 
     #[test]
     fn down_and_up_move_focus_between_the_input_and_the_row() {
-        let mut app = renaming_workspace("herdr");
-        assert!(!row(&app).focused, "the input has focus first");
-        app.move_selection(1);
-        assert!(row(&app).focused);
-        app.move_selection(1);
-        assert!(row(&app).focused, "nothing below the row");
-        app.move_selection(-1);
-        assert!(!row(&app).focused);
+        for (mut app, argv) in every_rename("herdr") {
+            assert!(!row(&app).focused, "{argv:?}: the input has focus first");
+            app.move_selection(1);
+            assert!(row(&app).focused, "{argv:?}");
+            app.move_selection(1);
+            assert!(row(&app).focused, "{argv:?}: nothing below the row");
+            app.move_selection(-1);
+            assert!(!row(&app).focused, "{argv:?}");
+        }
     }
 
     #[test]
     fn enter_on_the_row_asks_for_a_name_and_marks_it_generating() {
-        let mut app = renaming_workspace("herdr");
-        let id = start_generating(&mut app);
-        assert!(app.is_generating());
-        assert_eq!(row(&app).label(), "\u{2728} Generating...");
-        assert_eq!(typed(&app), "herdr", "the input is not touched");
-        assert!(
-            matches!(app.confirm(), Step::Continue),
-            "no second request while one runs"
-        );
+        for (mut app, argv) in every_rename("herdr") {
+            let id = start_generating(&mut app);
+            assert!(app.is_generating(), "{argv:?}");
+            assert_eq!(row(&app).label(), "\u{2728} Generating...", "{argv:?}");
+            assert_eq!(typed(&app), "herdr", "{argv:?}: the input is not touched");
+            assert!(
+                matches!(app.confirm(), Step::Continue),
+                "{argv:?}: no second request while one runs"
+            );
 
-        app.generated(id, Err("empty answer".into()));
-        assert!(
-            matches!(app.confirm(), Step::Generate { id: next, .. } if next > id),
-            "a retry is a new request"
-        );
+            app.generated(id, Err("empty answer".into()));
+            assert!(
+                matches!(app.confirm(), Step::Generate { id: next, .. } if next > id),
+                "{argv:?}: a retry is a new request"
+            );
+        }
     }
 
     #[test]
     fn enter_in_the_input_still_renames() {
-        let mut app = renaming_workspace("herdr");
-        match app.confirm() {
-            Step::Run(Outcome::Command { args, .. }) => {
-                assert_eq!(args, ["workspace", "rename", "w3Y", "herdr"]);
+        for (mut app, argv) in every_rename("herdr") {
+            match app.confirm() {
+                Step::Run(Outcome::Command { args, .. }) => {
+                    assert_eq!(args, renamed_to(&argv, "herdr"));
+                }
+                _ => panic!("{argv:?}: expected the rename"),
             }
-            _ => panic!("expected the rename"),
         }
     }
 
     #[test]
     fn a_generated_name_replaces_the_input_and_enter_renames_to_it() {
-        let mut app = renaming_workspace("herdr");
-        let id = start_generating(&mut app);
-        app.generated(id, Ok("palette LLM".into()));
+        for (mut app, argv) in every_rename("herdr") {
+            let id = start_generating(&mut app);
+            app.generated(id, Ok("palette LLM".into()));
 
-        assert_eq!(typed(&app), "palette LLM");
-        assert!(!row(&app).focused, "focus is back on the input");
-        app.edit(Edit::Insert('!'));
-        assert_eq!(typed(&app), "palette LLM!", "cursor at the end");
-        app.edit(Edit::DeleteBack);
-        match app.confirm() {
-            Step::Run(Outcome::Command { args, .. }) => {
-                assert_eq!(args, ["workspace", "rename", "w3Y", "palette LLM"]);
+            assert_eq!(typed(&app), "palette LLM", "{argv:?}");
+            assert!(!row(&app).focused, "{argv:?}: focus is back on the input");
+            app.edit(Edit::Insert('!'));
+            assert_eq!(typed(&app), "palette LLM!", "{argv:?}: cursor at the end");
+            app.edit(Edit::DeleteBack);
+            match app.confirm() {
+                Step::Run(Outcome::Command { args, .. }) => {
+                    assert_eq!(args, renamed_to(&argv, "palette LLM"));
+                }
+                _ => panic!("{argv:?}: expected the rename"),
             }
-            _ => panic!("expected the rename"),
         }
     }
 
     #[test]
     fn cancelling_keeps_the_input_and_drops_the_late_answer() {
-        let mut app = renaming_workspace("herdr");
-        let id = start_generating(&mut app);
-        assert!(app.cancel_generation());
-        assert!(!app.is_generating());
-        assert!(
-            matches!(app.stage, Stage::Prompt { .. }),
-            "still at the prompt"
-        );
+        for (mut app, argv) in every_rename("herdr") {
+            let id = start_generating(&mut app);
+            assert!(app.cancel_generation(), "{argv:?}");
+            assert!(!app.is_generating(), "{argv:?}");
+            assert!(
+                matches!(app.stage, Stage::Prompt { .. }),
+                "{argv:?}: still at the prompt"
+            );
 
-        app.generated(id, Ok("late".into()));
-        assert_eq!(typed(&app), "herdr");
-        assert!(!app.cancel_generation(), "Esc now goes back as usual");
+            app.generated(id, Ok("late".into()));
+            assert_eq!(typed(&app), "herdr", "{argv:?}");
+            assert!(
+                !app.cancel_generation(),
+                "{argv:?}: Esc now goes back as usual"
+            );
+        }
     }
 
     #[test]
     fn an_answer_arriving_after_the_stage_was_left_changes_nothing() {
-        let mut app = renaming_workspace("herdr");
-        let id = start_generating(&mut app);
-        app.cancel_generation();
-        app.leave_stage();
-        app.generated(id, Ok("late".into()));
-        assert!(matches!(app.stage, Stage::Commands));
+        for (mut app, argv) in every_rename("herdr") {
+            let id = start_generating(&mut app);
+            app.cancel_generation();
+            app.leave_stage();
+            app.generated(id, Ok("late".into()));
+            assert!(matches!(app.stage, Stage::Commands), "{argv:?}");
+        }
     }
 
     #[test]
@@ -1100,33 +1130,40 @@ mod tests {
         for why in [
             "no Ollama at localhost:11434",
             "HTTP 404: model 'x' not found",
+            "HTTP 500",
             "timed out after 60s",
             "empty answer",
         ] {
-            let mut app = renaming_workspace("herdr");
-            let id = start_generating(&mut app);
-            app.generated(id, Err(why.into()));
-            assert_eq!(typed(&app), "herdr", "{why}");
-            assert!(row(&app).label().ends_with(why), "{why}");
-            assert!(row(&app).focused, "{why}: still selectable to retry");
+            for (mut app, argv) in every_rename("herdr") {
+                let id = start_generating(&mut app);
+                app.generated(id, Err(why.into()));
+                assert_eq!(typed(&app), "herdr", "{argv:?} {why}");
+                assert!(row(&app).label().ends_with(why), "{argv:?} {why}");
+                assert!(
+                    row(&app).focused,
+                    "{argv:?} {why}: still selectable to retry"
+                );
+            }
         }
     }
 
     #[test]
     fn keys_do_not_move_focus_or_edit_while_generating() {
-        let mut app = renaming_workspace("herdr");
-        start_generating(&mut app);
-        app.move_selection(-1);
-        assert!(row(&app).focused, "focus stays while it runs");
-        app.edit(Edit::Insert('x'));
-        assert_eq!(typed(&app), "herdr");
+        for (mut app, argv) in every_rename("herdr") {
+            start_generating(&mut app);
+            app.move_selection(-1);
+            assert!(row(&app).focused, "{argv:?}: focus stays while it runs");
+            app.edit(Edit::Insert('x'));
+            assert_eq!(typed(&app), "herdr", "{argv:?}");
+        }
     }
 
     #[test]
     fn typing_while_the_row_has_focus_does_not_reach_the_input() {
-        let mut app = renaming_workspace("herdr");
-        app.move_selection(1);
-        app.edit(Edit::Insert('x'));
-        assert_eq!(typed(&app), "herdr");
+        for (mut app, argv) in every_rename("herdr") {
+            app.move_selection(1);
+            app.edit(Edit::Insert('x'));
+            assert_eq!(typed(&app), "herdr", "{argv:?}");
+        }
     }
 }

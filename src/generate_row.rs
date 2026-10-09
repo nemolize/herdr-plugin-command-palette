@@ -1,4 +1,4 @@
-//! The `Auto generate` row under a workspace rename's input: whether it holds
+//! The `Auto generate` row under a rename's input: whether it holds
 //! focus, and whether a name is being generated or the last attempt failed.
 use crate::glyph::SEPARATOR;
 

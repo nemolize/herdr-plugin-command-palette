@@ -1,4 +1,4 @@
-//! Asks a local Ollama for a workspace name: the request it is sent, the call,
+//! Asks a local Ollama for a name: the request it is sent, the call,
 //! and how its answer becomes a name.
 use std::io::ErrorKind;
 use std::net::ToSocketAddrs;
@@ -13,19 +13,13 @@ use crate::settings::AutoName;
 /// character end, so a CJK name keeps as many characters as a Latin one.
 pub const NAME_CAP: usize = 20;
 
-const SYSTEM_PROMPT: &str = "You name terminal workspaces. Read the panes below and reply with \
-one label of at most 20 characters for what this workspace is about. Prefer the concrete \
-subject (a project, feature, or task) over generic words such as terminal, dev, or work. \
-Write the label in the language the human uses in the input. Reply with the label only: one \
-line, no quotes, no explanation.";
-
 /// `think: false` because Qwen3.5 thinks by default and is far slower with it
 /// on. No `format`: the Homebrew build answers HTTP 501 to structured output
 /// with MLX models, so the answer is plain text and `name_from` cleans it.
-pub fn request_body(model: &str, prompt: &str) -> Value {
+pub fn request_body(model: &str, system: &str, prompt: &str) -> Value {
     json!({
         "model": model,
-        "system": SYSTEM_PROMPT,
+        "system": system,
         "prompt": prompt,
         "stream": false,
         "think": false,
@@ -56,7 +50,7 @@ fn is_quote(c: char) -> bool {
 }
 
 /// The error is drawn on one row beside `Retry`, so it is kept short.
-pub fn generate(settings: &AutoName, prompt: &str) -> Result<String, String> {
+pub fn generate(settings: &AutoName, system: &str, prompt: &str) -> Result<String, String> {
     if !resolves(&settings.base_url) {
         return Err(no_ollama_at(settings));
     }
@@ -71,7 +65,7 @@ pub fn generate(settings: &AutoName, prompt: &str) -> Result<String, String> {
         .build()
         .into();
     let url = format!("{}/api/generate", settings.base_url.trim_end_matches('/'));
-    let body = request_body(&settings.model, prompt).to_string();
+    let body = request_body(&settings.model, system, prompt).to_string();
     let mut response = agent
         .post(&url)
         .header("Content-Type", "application/json")
@@ -153,12 +147,12 @@ mod tests {
 
     #[test]
     fn the_request_asks_for_one_unthought_non_streamed_answer() {
-        let body = request_body("qwen3.5:9b", "panes");
+        let body = request_body("qwen3.5:9b", "name it", "panes");
         assert_eq!(
             body,
             json!({
                 "model": "qwen3.5:9b",
-                "system": SYSTEM_PROMPT,
+                "system": "name it",
                 "prompt": "panes",
                 "stream": false,
                 "think": false,
@@ -275,14 +269,19 @@ mod tests {
     /// runs on, so the connection is refused at once.
     #[test]
     fn an_unreachable_server_is_named_with_its_url() {
-        let err = generate(&settings_at("http://127.0.0.1:9", 5), "x").unwrap_err();
+        let err = generate(&settings_at("http://127.0.0.1:9", 5), "x", "x").unwrap_err();
         assert_eq!(err, "no Ollama at 127.0.0.1:9");
     }
 
     /// `.invalid` never resolves (RFC 2606), so this is a lookup failure.
     #[test]
     fn a_host_that_does_not_resolve_is_named() {
-        let err = generate(&settings_at("http://no-such-host.invalid:11434", 5), "x").unwrap_err();
+        let err = generate(
+            &settings_at("http://no-such-host.invalid:11434", 5),
+            "x",
+            "x",
+        )
+        .unwrap_err();
         assert_eq!(err, "no Ollama at no-such-host.invalid:11434");
     }
 
@@ -308,7 +307,12 @@ mod tests {
             let (mut stream, _) = listener.accept().unwrap();
             let _ = stream.read(&mut [0; 1024]);
         });
-        let err = generate(&settings_at(&format!("http://127.0.0.1:{port}"), 5), "x").unwrap_err();
+        let err = generate(
+            &settings_at(&format!("http://127.0.0.1:{port}"), 5),
+            "x",
+            "x",
+        )
+        .unwrap_err();
         assert!(!err.starts_with("no Ollama"), "{err}");
     }
 
@@ -322,7 +326,12 @@ mod tests {
             std::thread::sleep(Duration::from_secs(5));
             drop(held);
         });
-        let err = generate(&settings_at(&format!("http://127.0.0.1:{port}"), 1), "x").unwrap_err();
+        let err = generate(
+            &settings_at(&format!("http://127.0.0.1:{port}"), 1),
+            "x",
+            "x",
+        )
+        .unwrap_err();
         assert_eq!(err, "timed out after 1s");
     }
 
@@ -364,12 +373,12 @@ mod tests {
             ..settings_at(&format!("http://127.0.0.1:{port}/"), 5)
         };
         assert_eq!(
-            generate(&settings, "the panes"),
+            generate(&settings, "name it", "the panes"),
             Ok("palette work".to_string())
         );
         let (head, body) = server.join().unwrap();
         assert!(head[0].starts_with("POST /api/generate "), "{:?}", head[0]);
         let sent: Value = serde_json::from_str(&body).unwrap();
-        assert_eq!(sent, request_body("m", "the panes"));
+        assert_eq!(sent, request_body("m", "name it", "the panes"));
     }
 }

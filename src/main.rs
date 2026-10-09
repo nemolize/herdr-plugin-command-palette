@@ -238,9 +238,9 @@ fn run() -> Result<(), String> {
                 let seed = seed_for(&herdr, &command);
                 app.enter_prompt(command, seed);
             }
-            Step::Generate { id, workspace } => generate(
+            Step::Generate { id, subject } => generate(
                 id,
-                workspace,
+                subject,
                 &herdr,
                 &context,
                 &settings.auto_name,
@@ -272,22 +272,24 @@ fn run() -> Result<(), String> {
 /// aborted; the thread dies with the palette if it outlives it.
 fn generate(
     id: u64,
-    workspace: String,
+    subject: brief::Subject,
     herdr: &Herdr,
     context: &Context,
     settings: &settings::AutoName,
     answers: Sender<(u64, Result<String, String>)>,
 ) {
-    // The focused pane belongs to the workspace the palette opened in, which a
-    // catalog entry naming another workspace by id is not.
-    let pane = context
-        .focused_pane_id
-        .clone()
-        .filter(|_| context.workspace_id.as_deref() == Some(workspace.as_str()));
+    // The palette's pane belongs to the workspace and tab it opened in, which a
+    // catalog entry naming another one by id is not.
+    let belongs = match &subject {
+        brief::Subject::Workspace(w) => context.workspace_id.as_ref() == Some(w),
+        brief::Subject::Tab(t) => context.tab_id.as_ref() == Some(t),
+        brief::Subject::Pane(_) => false,
+    };
+    let pane = context.focused_pane_id.clone().filter(|_| belongs);
     let (herdr, settings) = (herdr.clone(), settings.clone());
     std::thread::spawn(move || {
-        let answer = brief::gather(&herdr, &workspace, pane.as_deref())
-            .and_then(|prompt| ollama::generate(&settings, &prompt));
+        let answer = brief::gather(&herdr, &subject, pane.as_deref())
+            .and_then(|prompt| ollama::generate(&settings, &subject.system_prompt(), &prompt));
         let _ = answers.send((id, answer));
     });
 }
@@ -424,8 +426,8 @@ fn skipped_note(count: usize) -> String {
 mod tests {
     use super::*;
 
-    /// Workspace w1 with two panes, w2 with one, and a `pane read` that answers
-    /// only when asked for exactly 120 lines.
+    /// Workspace w1 with two panes in tab t1 and one in t2, w2 with one, and a
+    /// `pane read` that answers only when asked for exactly 120 lines.
     fn stub_herdr(name: &str) -> Herdr {
         use std::os::unix::fs::PermissionsExt;
         let dir = std::env::temp_dir().join(format!("palette-gen-{}-{name}", std::process::id()));
@@ -442,6 +444,12 @@ case "$*" in
     echo 'last screen line' ;;
   "pane list --workspace w2")
     echo '{"result":{"panes":[{"terminal_title_stripped":"w2 pane","foreground_cwd":""}]}}' ;;
+  "pane list")
+    echo '{"result":{"panes":[{"tab_id":"w1:t1","terminal_title_stripped":"cargo test","foreground_cwd":"/nonexistent/a"},{"tab_id":"w1:t2","terminal_title_stripped":"logs","foreground_cwd":"/nonexistent/b"},{"tab_id":"w1:t1","terminal_title_stripped":"vim notes","foreground_cwd":""},{"tab_id":"w2:t1","terminal_title_stripped":"w2 pane","foreground_cwd":""}]}}' ;;
+  "pane get w1:p3")
+    echo '{"result":{"pane":{"tab_id":"w1:t2","terminal_title_stripped":"logs","foreground_cwd":"/nonexistent/b"},"type":"pane_info"}}' ;;
+  "pane read w1:p3 --lines 120 --format text")
+    echo 'tail -f server.log' ;;
   *) echo "unexpected: $*" >&2; exit 1 ;;
 esac
 "#,
@@ -499,7 +507,7 @@ esac
         let (tx, answers) = std::sync::mpsc::channel();
         generate(
             9,
-            "w1".into(),
+            workspace("w1"),
             &stub_herdr("ok"),
             &in_a_pane(),
             &auto_name_at(url),
@@ -541,7 +549,7 @@ esac
         };
         generate(
             1,
-            "w1".into(),
+            workspace("w1"),
             &stub_herdr("fail"),
             &context,
             &auto_name_at(url),
@@ -566,7 +574,7 @@ esac
         let (tx, answers) = std::sync::mpsc::channel();
         generate(
             2,
-            "w2".into(),
+            workspace("w2"),
             &stub_herdr("other"),
             &in_a_pane(),
             &auto_name_at(url),
@@ -584,6 +592,80 @@ esac
             body["prompt"],
             "Panes in this workspace:\n- title: w2 pane; cwd: none; git branch: none\n"
         );
+    }
+
+    fn workspace(id: &str) -> brief::Subject {
+        brief::Subject::Workspace(id.into())
+    }
+
+    fn sent_for(name: &str, subject: brief::Subject, context: &Context) -> serde_json::Value {
+        let (url, requests) = fake_ollama(r#"{"response":"named"}"#);
+        let (tx, answers) = std::sync::mpsc::channel();
+        generate(
+            5,
+            subject,
+            &stub_herdr(name),
+            context,
+            &auto_name_at(url),
+            tx,
+        );
+
+        let timeout = std::time::Duration::from_secs(10);
+        assert_eq!(
+            answers.recv_timeout(timeout).unwrap(),
+            (5, Ok("named".to_string()))
+        );
+        serde_json::from_str(&requests.recv_timeout(timeout).unwrap()).unwrap()
+    }
+
+    #[test]
+    fn a_tab_is_described_by_its_own_panes_and_the_focused_output() {
+        let body = sent_for("tab", brief::Subject::Tab("w1:t1".into()), &in_a_pane());
+        assert_eq!(
+            body["prompt"],
+            "Panes in this tab:\n\
+             - title: cargo test; cwd: /nonexistent/a; git branch: none\n\
+             - title: vim notes; cwd: none; git branch: none\n\
+             \n\
+             Last 120 lines of the focused pane:\n\
+             last screen line\n"
+        );
+        assert!(body["system"]
+            .as_str()
+            .unwrap()
+            .starts_with("You name terminal tabs."));
+    }
+
+    /// A catalog entry may rename a tab by id from anywhere; the pane the
+    /// palette opened over is then not one of its panes.
+    #[test]
+    fn another_tab_is_described_without_the_focused_panes_output() {
+        let body = sent_for(
+            "other-tab",
+            brief::Subject::Tab("w1:t2".into()),
+            &in_a_pane(),
+        );
+        assert_eq!(
+            body["prompt"],
+            "Panes in this tab:\n- title: logs; cwd: /nonexistent/b; git branch: none\n"
+        );
+    }
+
+    #[test]
+    fn a_pane_is_described_by_itself_and_its_own_output() {
+        let body = sent_for("pane", brief::Subject::Pane("w1:p3".into()), &in_a_pane());
+        assert_eq!(
+            body["prompt"],
+            "This pane:\n\
+             - title: logs; cwd: /nonexistent/b; git branch: none\n\
+             \n\
+             Last 120 lines of this pane:\n\
+             tail -f server.log\n"
+        );
+        assert!(body["system"]
+            .as_str()
+            .unwrap()
+            .starts_with("You name terminal panes."));
     }
 
     /// Both refusals are decided before anything is spawned, so the bin path

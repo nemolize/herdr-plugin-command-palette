@@ -1099,9 +1099,30 @@ mod render_tests {
     }
 
     #[test]
-    fn a_tab_rename_draws_no_generate_row() {
-        let mut picked = command("tab.rename", "Rename tab...", None);
-        picked.args = vec!["tab".into(), "rename".into(), "t1".into(), "{text}".into()];
+    fn tab_and_pane_renames_draw_the_generate_row_too() {
+        for subject in ["tab", "pane"] {
+            let mut picked = command(&format!("{subject}.rename"), "Rename...", None);
+            picked.args = vec![
+                subject.into(),
+                "rename".into(),
+                "x1".into(),
+                "{text}".into(),
+            ];
+            let mut app = app_with(vec![picked.clone()]);
+            app.enter_prompt(picked, "editor".into());
+            let lines = draw(&mut app, 40, 8);
+            assert_eq!(
+                lines[2].trim_end(),
+                "  \u{2728}  Auto generate",
+                "{subject}: {lines:#?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_prompt_that_is_not_a_rename_draws_no_generate_row() {
+        let mut picked = command("tab.label", "Label tab...", None);
+        picked.args = vec!["tab".into(), "label".into(), "t1".into(), "{text}".into()];
         let mut app = app_with(vec![picked.clone()]);
         app.enter_prompt(picked, "editor".into());
         let lines = draw(&mut app, 40, 8);
@@ -2165,7 +2186,7 @@ mod wiring_tests {
             Some(Step::NeedsRepo(c)) => format!("NeedsRepo({})", c.id),
             Some(Step::NeedsTargets(c)) => format!("NeedsTargets({})", c.id),
             Some(Step::NeedsPrompt(c)) => format!("NeedsPrompt({})", c.id),
-            Some(Step::Generate { id, workspace }) => format!("Generate({id}, {workspace})"),
+            Some(Step::Generate { id, subject }) => format!("Generate({id}, {subject:?})"),
             Some(Step::Run(Outcome::Command { id, args })) => {
                 format!("Run({id}: {})", args.join(" "))
             }
