@@ -1,4 +1,4 @@
-//! The `Auto generate` row under a workspace rename's input: whether it holds
+//! The `Auto generate` row under a rename's input: whether it holds
 //! focus, and whether a name is being generated or how the last attempt went.
 use std::time::Duration;
 

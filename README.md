@@ -171,15 +171,18 @@ The file is optional — without it every default applies. One that cannot be
 read or parsed, or that carries a key the palette does not know, is reported in
 the footer and the defaults apply.
 
-### Generating a workspace name
+### Generating a workspace, tab or pane name
 
-`Rename workspace...` shows an `✨ Auto generate` row under its input. Press `↓`
-to reach it and `Enter` to ask a local [Ollama](https://ollama.com) for a name;
-the answer replaces the input, and nothing is renamed until you press `Enter`
-there. The row then shows how long the answer took, and says `unchanged` when
-the name it suggested is the one already in the input. `Esc` cancels a running request. The model reads each pane's title,
-working directory and git branch, plus the last 120 lines of the pane the
-palette was opened from.
+`Rename workspace...`, `Rename tab...` and `Rename pane...` show an
+`✨ Auto generate` row under their input. Press `↓` to reach it and `Enter` to
+ask a local [Ollama](https://ollama.com) for a name; the answer replaces the
+input, and nothing is renamed until you press `Enter` there. `Esc` cancels a
+running request. After an answer the row shows how long
+it took, and says `unchanged` when the suggested name is the one already in the
+input. The model reads the title, working directory and git branch of
+each pane in what is being renamed — the workspace, the tab, or the one pane —
+plus the last 120 lines of the pane the palette was opened from when it is part
+of it (for a pane rename, that pane's own last 120 lines).
 
 The plugin only talks to an Ollama that is already running; it does not install
 or start one. The `[auto_name]` table in `settings.toml` points it elsewhere:
