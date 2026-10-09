@@ -10,19 +10,14 @@ pub const FILE_NAME: &str = "settings.toml";
 
 #[derive(Debug, PartialEq, Deserialize)]
 #[serde(default, deny_unknown_fields)]
+#[derive(Default)]
 pub struct Settings {
-    pub icons: bool,
     pub auto_name: AutoName,
 }
 
-impl Default for Settings {
-    fn default() -> Self {
-        Self {
-            icons: true,
-            auto_name: AutoName::default(),
-        }
-    }
-}
+/// Removed, yet accepted with a note rather than refused like any unknown key,
+/// so an upgrade does not drop the rest of a file that still sets it.
+const RETIRED_KEY: &str = "icons";
 
 /// The local LLM behind the rename prompts' `Auto generate` row.
 #[derive(Clone, Debug, PartialEq, Deserialize)]
@@ -81,13 +76,22 @@ pub fn load(config_dir: Option<&Path>) -> (Settings, Option<String>) {
         Err(e) if e.kind() == ErrorKind::NotFound => return (Settings::default(), None),
         Err(e) => return (Settings::default(), Some(unusable(&e.to_string()))),
     };
-    match toml::from_str::<Settings>(&text) {
+    let mut table = match toml::from_str::<toml::Table>(&text) {
+        Ok(table) => table,
+        Err(e) => return (Settings::default(), Some(unusable(e.message()))),
+    };
+    let retired = table.remove(RETIRED_KEY).is_some();
+    match toml::Value::Table(table).try_into::<Settings>() {
         Ok(settings) => match settings.auto_name.problem() {
             Some(why) => (Settings::default(), Some(unusable(&why))),
-            None => (settings, None),
+            None => (settings, retired.then(retired_note)),
         },
         Err(e) => (Settings::default(), Some(unusable(e.message()))),
     }
+}
+
+pub fn retired_note() -> String {
+    format!("{FILE_NAME}: `{RETIRED_KEY}` unsupported")
 }
 
 /// Names the file alone: the full path would take most of the status area
@@ -130,36 +134,36 @@ mod tests {
     }
 
     #[test]
-    fn icons_can_be_turned_off_and_on() {
-        let off = dir_with("off", Some("icons = false\n"));
-        assert_eq!(
-            load(Some(&off)),
-            (
-                Settings {
-                    icons: false,
-                    ..Settings::default()
-                },
-                None
-            )
-        );
-        let on = dir_with("on", Some("icons = true\n"));
-        assert_eq!(load(Some(&on)), (Settings::default(), None));
+    fn the_removed_icons_key_is_ignored_and_named() {
+        for (name, value) in [("bool", "false"), ("other-type", "\"no\"")] {
+            let dir = dir_with(
+                &format!("retired-{name}"),
+                Some(&format!(
+                    "icons = {value}\n[auto_name]\nmodel = \"llama3\"\n"
+                )),
+            );
+            let (settings, note) = load(Some(&dir));
+            assert_eq!(settings.auto_name.model, "llama3", "{name}");
+            let note = note.unwrap_or_else(|| panic!("{name}: no note"));
+            assert!(note.contains("`icons`"), "{note}");
+            assert!(note.contains("unsupported"), "{note}");
+        }
     }
 
     #[test]
     fn a_misspelt_key_keeps_the_defaults_and_says_so() {
-        let dir = dir_with("typo", Some("icon = false\n"));
+        let dir = dir_with("typo", Some("auto_nam = 1\n"));
         let (settings, why) = load(Some(&dir));
         assert_eq!(settings, Settings::default());
         let why = why.expect("a misspelt key is reported");
-        assert!(why.contains("icon"), "{why}");
+        assert!(why.contains("auto_nam"), "{why}");
         assert!(why.contains(FILE_NAME), "{why}");
         assert!(!why.contains(dir.to_str().unwrap()), "{why}");
     }
 
     #[test]
     fn a_malformed_file_keeps_the_defaults_and_says_so() {
-        for (name, text) in [("syntax", "icons = "), ("type", "icons = \"no\"\n")] {
+        for (name, text) in [("syntax", "auto_name = "), ("type", "auto_name = \"no\"\n")] {
             let dir = dir_with(name, Some(text));
             let (settings, why) = load(Some(&dir));
             assert_eq!(settings, Settings::default(), "{name}");
@@ -169,7 +173,7 @@ mod tests {
 
     #[test]
     fn auto_name_defaults_when_absent() {
-        let dir = dir_with("auto-absent", Some("icons = true\n"));
+        let dir = dir_with("auto-absent", Some("# nothing set\n"));
         let (settings, why) = load(Some(&dir));
         assert_eq!(why, None);
         assert_eq!(

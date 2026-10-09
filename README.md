@@ -152,24 +152,18 @@ what correcting a catalog means. Start from
 - `contexts` limits where the entry is offered.
 - `binding` names the `[keys]` action in **your** `config.toml` that does the
   same thing, so the palette can show the key beside the entry (see below).
-- `icon` replaces the glyph leading the entry's row. Without it the glyph comes
-  from the first word of `args`: `◫` pane, `▭` tab, `⬚` workspace, `↻` server,
-  `⎇` worktree. Other plugins' actions show `⧉`. It must be a single glyph one cell wide in
-  every locale, so East Asian Ambiguous characters such as `□` are refused;
-  anything else skips the entry with that reason.
 
 ### Settings
 
-`settings.toml` in the same directory holds switches that are not about the
-catalog, so turning one off does not mean copying the whole catalog:
-
-```toml
-icons = false   # rows without the leading icon; the default is true
-```
+`settings.toml` in the same directory holds settings that are not about the
+catalog, so changing one does not mean copying the whole catalog — today the
+`[auto_name]` table described below.
 
 The file is optional — without it every default applies. One that cannot be
 read or parsed, or that carries a key the palette does not know, is reported in
-the footer and the defaults apply.
+the footer and the defaults apply. The exception is `icons`, and `icon` on a
+catalog entry, from releases whose rows had icons: each is ignored with a footer
+note, and everything else in the file still applies.
 
 ### Generating a workspace, tab or pane name
 
