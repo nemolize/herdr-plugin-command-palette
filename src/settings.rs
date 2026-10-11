@@ -33,7 +33,9 @@ pub struct AutoName {
 impl Default for AutoName {
     fn default() -> Self {
         Self {
-            model: "qwen3.5:9b".into(),
+            // Not qwen3.5:9b: its names are sharper but take about twice as
+            // long, and a name only has to tell workspaces, tabs and panes apart.
+            model: "qwen3.5:4b".into(),
             base_url: "http://localhost:11434".into(),
             // Chosen empirically to cover a cold model load plus generation;
             // there is no fixed source for it.
@@ -186,7 +188,7 @@ mod tests {
         assert_eq!(
             settings.auto_name,
             AutoName {
-                model: "qwen3.5:9b".into(),
+                model: "qwen3.5:4b".into(),
                 base_url: "http://localhost:11434".into(),
                 timeout_secs: super::TIMEOUT_SECS,
             }
