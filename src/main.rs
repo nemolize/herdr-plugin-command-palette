@@ -552,7 +552,7 @@ esac
              Last 120 lines of the focused pane:\n\
              last screen line\n"
         );
-        assert_eq!(body["model"], "qwen3.5:9b");
+        assert_eq!(body["model"], "qwen3.5:4b");
         assert!(
             requests
                 .recv_timeout(std::time::Duration::from_millis(300))

@@ -323,7 +323,10 @@ over when it is one of them — for a pane rename, that pane alone and its own
 output — kept small because latency is almost all prompt prefill. `pane list`
 has no tab filter, so a tab's panes are every pane's row filtered by `tab_id`. The answer replaces the
 input and nothing is renamed until `Enter` there, so a bad suggestion costs an
-edit, never a rename. Generation runs on its own thread so `Esc` can cancel it;
+edit, never a rename. The default model is `qwen3.5:4b`, not `qwen3.5:9b`: a name
+only has to tell workspaces, tabs and panes apart, and the 9b model took about
+twice as long per name for labels that were sharper but rarely needed to be.
+Generation runs on its own thread so `Esc` can cancel it;
 a cancelled request still runs to its end and its late answer is discarded.
 
 The client is plain `http://` with no proxy: a TLS stack would pull in `ring`,

@@ -184,7 +184,7 @@ or start one. The `[auto_name]` table in `settings.toml` points it elsewhere:
 
 ```toml
 [auto_name]
-model = "qwen3.5:9b"                  # the default; pull it with `ollama pull`
+model = "qwen3.5:4b"                  # the default; pull it with `ollama pull`
 base_url = "http://localhost:11434"   # the default; plain http only
 timeout_secs = 60                     # the default
 ```
