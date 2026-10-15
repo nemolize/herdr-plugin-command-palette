@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.11.0
+
+### Minor Changes
+
+- 3839b17: Add `Update herdr (live handoff)`, which runs `herdr update --handoff` so herdr updates without stopping the panes running in it
+
+### Patch Changes
+
+- 81daeab: Make `qwen3.5:4b` the default model for `✨ Auto generate`, about twice as fast as `qwen3.5:9b`; pull it with `ollama pull qwen3.5:4b`, or keep the old model by setting `model = "qwen3.5:9b"` under `[auto_name]` in `settings.toml`
+
 ## 0.10.0
 
 ### Minor Changes
