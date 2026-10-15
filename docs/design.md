@@ -344,12 +344,12 @@ name's tail.
 
 The cursor is **drawn over the text, not between it**: the cluster it stands on
 is shown reversed, and at the end of the line it is a reversed blank cell. No
-cell is added or removed when it moves, so a name that fits keeps every
-character in its column whatever the cursor position. An earlier design drew a
-glyph of its own between the two halves of the text, which shifted everything
-right of it by a column per keystroke and broke on a terminal or font that
-measured that glyph differently. An unfocused line is laid out the same, with
-nothing reversed.
+cell sits between the characters, so moving the cursor never pushes them apart;
+they move only when the name and the end-of-line cursor cell together outgrow
+the room and the line scrolls. An earlier design drew a glyph of its own between
+the two halves of the text, which shifted everything right of it by a column per
+keystroke and broke on a terminal or font that measured that glyph differently.
+An unfocused line is laid out the same, with nothing reversed.
 
 The cursor's cells are still reserved BEFORE the text before it is measured.
 Four review rounds found this line wrong, and every one of them was the same

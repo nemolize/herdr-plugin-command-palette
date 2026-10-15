@@ -400,6 +400,7 @@ fn render_input(f: &mut Frame, line: &LineEdit, focused: bool, area: Rect) {
     let room = area.width - prompt;
     let wanted = under.map_or(1, |cluster| drawn_width(cluster));
     let cursor_width = wanted.min(room);
+    let squeezed = wanted > cursor_width;
     let kept = if prompt == 0 {
         &before[before.len()..]
     } else {
@@ -413,7 +414,7 @@ fn render_input(f: &mut Frame, line: &LineEdit, focused: bool, area: Rect) {
         width: cursor_width,
         ..area
     };
-    let shown = under.filter(|_| wanted <= cursor_width).map_or(" ", |c| c);
+    let shown = under.filter(|_| !squeezed).map_or(" ", |c| c);
     let style = if focused {
         Style::new().reversed()
     } else {
@@ -422,13 +423,12 @@ fn render_input(f: &mut Frame, line: &LineEdit, focused: bool, area: Rect) {
     f.render_widget(Span::styled(shown, style), cursor);
 
     let rest = cursor_column + cursor_width;
-    let room = area.width - rest;
-    let after = if under.is_some_and(|_| wanted > cursor_width) {
-        &after[after.len()..]
-    } else {
-        head_within(after, room)
-    };
-    render_clusters(f, after, area.x + rest, area);
+    render_clusters(
+        f,
+        head_within(after, area.width - rest),
+        area.x + rest,
+        area,
+    );
 }
 
 /// The drawn form of each cluster of `text`, the clusters `LineEdit` puts its
@@ -863,6 +863,11 @@ mod render_tests {
         let mut app = app_with(vec![command("split.right", "Split pane: right", None)]);
         let lines = draw(&mut app, 36, 8);
         assert_eq!(lines[0], ">", "{lines:#?}");
+
+        let mut terminal = Terminal::new(TestBackend::new(36, 8)).unwrap();
+        terminal.draw(|f| render(f, &mut app)).unwrap();
+        let cursor = &terminal.backend().buffer()[(2, 0)];
+        assert!(cursor.modifier.contains(Modifier::REVERSED));
     }
 
     /// Width is the axis docs/design.md §5 gives a readability floor to, and
@@ -1001,6 +1006,7 @@ mod render_tests {
         app.move_selection(1);
         let lines = draw(&mut app, 40, 8);
         assert_eq!(lines[1].trim_end(), "> editor", "{lines:#?}");
+        assert!(input_cells(&mut app, 40).1.is_empty());
         assert_eq!(
             lines[2].trim_end(),
             "\u{25B8} \u{2728}  Auto generate",
@@ -1099,6 +1105,13 @@ mod render_tests {
                 8,
                 &[">", " ", "a", "b", " ", " ", " ", " "],
                 4,
+            ),
+            (
+                "a name as wide as the room scrolls once the end cursor needs its cell",
+                "abcde",
+                7,
+                &[">", " ", "b", "c", "d", "e", " "],
+                6,
             ),
             (
                 "clipped to the tail, cursor after it",
@@ -1229,13 +1242,7 @@ mod render_tests {
         ];
 
         for (what, name, width, expected, cursor) in cases {
-            let mut picked = command("tab.rename", "Rename tab...", None);
-            picked.args = vec!["tab".into(), "rename".into(), "t1".into(), "{text}".into()];
-            picked.prompt = Some("N".into());
-            let mut app = app_with(vec![picked.clone()]);
-            app.enter_prompt(picked, name.to_string());
-
-            let (row, reversed) = input_cells(&mut app, *width);
+            let (row, reversed) = input_row(name, 0, *width);
 
             assert_eq!(&row, expected, "{what}: {name:?} at width {width}");
             assert_eq!(reversed, [*cursor], "{what}: {name:?} at width {width}");
@@ -1255,6 +1262,14 @@ mod render_tests {
                 8,
                 &[">", " ", "a", "b", "c", "d", " ", " "],
                 &[4],
+            ),
+            (
+                "a name as wide as the room is unscrolled while the cursor stands on its last cluster",
+                "abcde",
+                1,
+                7,
+                &[">", " ", "a", "b", "c", "d", "e"],
+                &[6],
             ),
             (
                 "at the start of a name too long to show",
@@ -1323,12 +1338,7 @@ mod render_tests {
         ];
 
         for (what, name, left, width, expected, cursor) in cases {
-            let mut app = renaming_tab(name);
-            for _ in 0..*left {
-                app.edit(Edit::Left);
-            }
-
-            let (row, reversed) = input_cells(&mut app, *width);
+            let (row, reversed) = input_row(name, *left, *width);
 
             assert_eq!(
                 &row, expected,
@@ -1341,27 +1351,21 @@ mod render_tests {
         }
     }
 
-    /// Issue #268: the cursor is drawn over the text, so no cluster moves while
-    /// it does. Wide, combining and halfwidth-voiced text included.
+    /// Issue #268.
     #[test]
     fn moving_the_cursor_leaves_every_cluster_in_its_column() {
         for name in ["abc", "あいう", "ae\u{301}b", "aｶﾞb", "a\tb", "a\u{200B}b"] {
             let stops = name.graphemes(true).count();
-            let at_end = input_cells(&mut renaming_tab(name), 20).0;
+            let at_end = input_row(name, 0, 20).0;
             for left in 0..=stops {
-                let mut app = renaming_tab(name);
-                for _ in 0..left {
-                    app.edit(Edit::Left);
-                }
-                let (row, reversed) = input_cells(&mut app, 20);
+                let (row, reversed) = input_row(name, left, 20);
                 assert_eq!(row, at_end, "{name:?}, {left} left");
                 assert!(!reversed.is_empty(), "{name:?}, {left} left");
             }
         }
     }
 
-    /// The cursor is a reversed blank past the last cluster, and an unfocused
-    /// line lays the text out the same with nothing reversed.
+    /// The cursor is a reversed blank past the last cluster.
     #[test]
     fn an_unfocused_line_keeps_the_columns_and_loses_the_reversal() {
         let mut app = renaming_workspace();
