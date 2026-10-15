@@ -333,7 +333,7 @@ The client is plain `http://` with no proxy: a TLS stack would pull in `ring`,
 whose build needs a C cross-compiler the musl release builds lack, and a proxy
 from the environment has no business seeing a local call.
 
-### The input line scrolls, and the cursor owns a cell
+### The input line scrolls, and the cursor is drawn over the text
 
 A name can be longer than the popup, so the text BEFORE the cursor claims the
 room first and is clipped from the left: that is where the typing is happening,
@@ -342,14 +342,23 @@ just typed. The text after the cursor fills whatever is left and is clipped from
 the right. With the cursor at the end, as it is unless moved, this shows the
 name's tail.
 
-The cursor is drawn into a **reserved cell of its own**, between the two halves
-of the text rather than inside either. That is the design, not an implementation detail. Four
-review rounds found this line wrong, and every one of them was the same shape —
-the clip took the cursor away with the text, because the cursor was part of the
-string being measured. Reserving the cell first makes that outcome unreachable
-instead of dependent on the arithmetic being right. Where the pane cannot hold
-both the `> ` prefix and the cursor, the cursor wins: it is what says the field
-is live.
+The cursor is **drawn over the text, not between it**: the cluster it stands on
+is shown reversed, and at the end of the line it is a reversed blank cell. No
+cell sits between the characters, so moving the cursor never pushes them apart;
+they move only when the name and the end-of-line cursor cell together outgrow
+the room and the line scrolls. An earlier design drew a glyph of its own between
+the two halves of the text, which shifted everything right of it by a column per
+keystroke and broke on a terminal or font that measured that glyph differently.
+An unfocused line is laid out the same, with nothing reversed.
+
+The cursor's cells are still reserved BEFORE the text before it is measured.
+Four review rounds found this line wrong, and every one of them was the same
+shape — the clip took the cursor away with the text, because the cursor was
+part of the string being measured. Reserving them first makes that outcome
+unreachable instead of dependent on the arithmetic being right. A cluster the
+room cannot hold whole is shown as a reversed blank, never halved. Where the
+pane cannot hold both the `> ` prefix and the cursor, the cursor wins: it is
+what says the field is live.
 
 Width comes from ratatui's own `CellWidth`, per grapheme cluster. Nothing local
 computes it. The rounds above each found a *different* scalar that a local rule
