@@ -69,8 +69,36 @@ impl Herdr {
     /// Runs a catalog entry. Surfaces a failure verbatim so a drifted entry
     /// reports itself the first time it is used rather than silently doing
     /// nothing (§4) — the caller names the command id alongside this.
-    pub fn dispatch(&self, args: &[String]) -> Result<(), String> {
-        self.call(args).map(|_| ())
+    ///
+    /// `Some` is something the user should read before the palette closes.
+    pub fn dispatch(&self, args: &[String]) -> Result<Option<String>, String> {
+        if args.first().map(String::as_str) == Some("update") {
+            return self.update(args).map(Some);
+        }
+        self.call(args).map(|_| None)
+    }
+
+    /// `herdr update` refuses to run with `HERDR_ENV` set, which plugin panes
+    /// inherit. It answers in plain text, so success is the exit status.
+    fn update(&self, args: &[String]) -> Result<String, String> {
+        let out = Proc::new(&self.bin)
+            .args(args)
+            .env_remove("HERDR_ENV")
+            .output()
+            .map_err(|e| format!("could not run {}: {e}", self.bin))?;
+        let said = what_herdr_said(&out.stdout, &out.stderr);
+        if out.status.success() {
+            return Ok(if said.is_empty() {
+                "herdr update finished with no output".to_string()
+            } else {
+                said
+            });
+        }
+        Err(if said.is_empty() {
+            format!("herdr update exited {}", out.status)
+        } else {
+            said
+        })
     }
 
     /// Resolves a `resolve` key into candidate rows. The three list APIs all
@@ -500,5 +528,47 @@ mod tests {
                 "{hostile} was not refused: {err}"
             );
         }
+    }
+
+    fn stub(dir: &std::path::Path, body: &str) -> Herdr {
+        use std::os::unix::fs::PermissionsExt;
+        let path = dir.join("herdr");
+        std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        Herdr::new(path.to_string_lossy().into_owned())
+    }
+
+    /// The stub refuses when it sees `HERDR_ENV`, as the real `herdr update` does.
+    #[test]
+    fn update_runs_without_herdr_env_and_other_commands_keep_it() {
+        let dir = std::env::temp_dir().join(format!("herdr-update-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let herdr = stub(
+            &dir,
+            r#"if [ -n "$HERDR_ENV" ]; then echo "update failed: run outside herdr" >&2; exit 1; fi
+echo plain text, not an envelope"#,
+        );
+        std::env::set_var("HERDR_ENV", "1");
+        let args = |a: &[&str]| a.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+
+        assert_eq!(
+            herdr.dispatch(&args(&["update", "--handoff"])),
+            Ok(Some("plain text, not an envelope".to_string()))
+        );
+        assert!(herdr.dispatch(&args(&["server", "reload-config"])).is_err());
+        std::env::remove_var("HERDR_ENV");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_failed_update_reports_what_herdr_said() {
+        let dir = std::env::temp_dir().join(format!("herdr-update-fail-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let herdr = stub(&dir, "echo 'download failed' >&2; exit 1");
+        let err = herdr
+            .dispatch(&["update".to_string(), "--handoff".to_string()])
+            .unwrap_err();
+        assert_eq!(err, "download failed");
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }

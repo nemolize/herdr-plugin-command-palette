@@ -349,6 +349,7 @@ mod tests {
             (&["workspace", "close"], 1),
             (&["workspace", "rename"], 2),
             (&["server", "reload-config"], 0),
+            (&["update"], 0),
             // The worktree rows from 0.9.3.
             (&["worktree", "create"], 0),
             (&["worktree", "open"], 0),

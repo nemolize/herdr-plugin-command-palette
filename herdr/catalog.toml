@@ -326,3 +326,13 @@ title = "Reload config"
 args = ["server", "reload-config"]
 contexts = ["global", "workspace", "tab", "pane"]
 binding = "reload_config"
+
+# `--handoff` hands the running server's panes to the new binary after
+# installing, so they keep running through the update. `herdr update` refuses to
+# run inside herdr; the palette dispatches it without `HERDR_ENV`
+# (src/herdr.rs `update`).
+[[command]]
+id = "server.update"
+title = "Update herdr (live handoff)"
+args = ["update", "--handoff"]
+contexts = ["global", "workspace", "tab", "pane"]

@@ -263,7 +263,7 @@ fn run() -> Result<(), String> {
                     Dispatched::Ran => return Ok(()),
                     // Because a message printed after the popup closes is one
                     // nobody reads, the palette comes back carrying it instead.
-                    Dispatched::Failed(screen, e) => {
+                    Dispatched::Reopened(screen, e) => {
                         app.status = Some(e);
                         screen
                     }
@@ -373,30 +373,32 @@ fn shown_key(binding: keys::Binding<'_>) -> String {
 
 enum Dispatched {
     Ran,
-    Failed(ui::Screen, String),
+    /// The palette is back up carrying a failure, or what the command said.
+    Reopened(ui::Screen, String),
 }
 
-/// Drops the screen, runs `f`, and re-enters only to carry a failure back to
-/// the user — success is the palette's exit, so restoring it there would flash
-/// the popup back up after the command it was closed for.
+/// Drops the screen, runs `f`, and re-enters only to carry a message back to
+/// the user — a command with nothing to say is the palette's exit, so restoring
+/// it there would flash the popup back up after the command it was closed for.
 fn run_without_screen<F>(screen: ui::Screen, f: F) -> Result<Dispatched, String>
 where
-    F: FnOnce() -> Result<(), String>,
+    F: FnOnce() -> Result<Option<String>, String>,
 {
     drop(screen);
-    let Err(failure) = f() else {
-        return Ok(Dispatched::Ran);
+    let message = match f() {
+        Ok(None) => return Ok(Dispatched::Ran),
+        Ok(Some(said)) | Err(said) => said,
     };
-    // A screen that will not reopen has nowhere to show the failure, so it
+    // A screen that will not reopen has nowhere to show the message, so it
     // leaves as this function's own error and `main` prints it.
-    let screen = ui::Screen::enter().map_err(|_| failure.clone())?;
-    Ok(Dispatched::Failed(screen, failure))
+    let screen = ui::Screen::enter().map_err(|_| message.clone())?;
+    Ok(Dispatched::Reopened(screen, message))
 }
 
 /// Runs what the user picked. A failure names the command id, so a drifted
 /// catalog entry reports itself the first time it is used instead of silently
 /// doing nothing (§4).
-fn dispatch(herdr: &Herdr, outcome: Outcome) -> Result<(), String> {
+fn dispatch(herdr: &Herdr, outcome: Outcome) -> Result<Option<String>, String> {
     let (id, args) = argv(outcome);
     herdr
         .dispatch(&args)
