@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.11.1
+
+### Patch Changes
+
+- e6c8786: The input cursor is now drawn over the text (reversed) instead of between it, so the characters right of it no longer move a column while the cursor does
+
 ## 0.11.0
 
 ### Minor Changes
