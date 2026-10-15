@@ -14,10 +14,7 @@ use unicode_segmentation::UnicodeSegmentation;
 
 use crate::app::{App, Stage, Step};
 use crate::generate_row::GenerateRow;
-use crate::glyph::{
-    control_picture, CURSOR, CURSOR_COLUMNS, HIGHLIGHT_COLUMNS, HIGHLIGHT_SYMBOL, SEPARATOR,
-    STAND_IN,
-};
+use crate::glyph::{control_picture, HIGHLIGHT_COLUMNS, HIGHLIGHT_SYMBOL, SEPARATOR, STAND_IN};
 use crate::line_edit::{Edit, LineEdit};
 
 /// Restores the terminal on drop, so an error path cannot leave the pane in raw
@@ -380,42 +377,58 @@ fn render_generate_row(f: &mut Frame, row: &GenerateRow, area: Rect) {
     }
 }
 
-/// Draws the query or the typed name with the cursor in it (docs/design.md §4).
-///
-/// The cursor is reserved a cell BEFORE the text is measured, which is what
-/// makes clipping it away with the text unreachable rather than a calculation
-/// to keep honest. The text before the cursor claims the room first, so the
-/// cursor and what was just typed stay on screen.
-///
-/// An unfocused line keeps the cursor's cell blank rather than dropping it, so
-/// the text does not shift when focus moves.
+/// Draws the query or the typed name with the cursor over it (docs/design.md §4).
+/// The cursor's cells are reserved before the text before it is measured.
 fn render_input(f: &mut Frame, line: &LineEdit, focused: bool, area: Rect) {
     if area.width == 0 {
         return;
     }
     let (before, after) = line.split();
     let (before, after) = (drawn_clusters(before), drawn_clusters(after));
+    let (under, after) = match after.split_first() {
+        Some((first, rest)) => (Some(first), rest),
+        None => (None, &after[..]),
+    };
     // The cursor outranks the prefix when the pane cannot hold both: it is what
     // says the field is live, and a lone `>` says nothing.
-    let cursor_column = match area.width.checked_sub(PROMPT_COLUMNS + CURSOR_COLUMNS) {
-        None => 0,
-        Some(room) => {
-            let kept = tail_within(&before, room);
-            f.render_widget(Paragraph::new("> "), area);
-            render_clusters(f, kept, area.x + PROMPT_COLUMNS, area);
-            PROMPT_COLUMNS + clusters_width(kept)
-        }
+    let prompt = if area.width > PROMPT_COLUMNS {
+        f.render_widget(Paragraph::new("> "), area);
+        PROMPT_COLUMNS
+    } else {
+        0
     };
+    let room = area.width - prompt;
+    let wanted = under.map_or(1, |cluster| drawn_width(cluster));
+    let cursor_width = wanted.min(room);
+    let kept = if prompt == 0 {
+        &before[before.len()..]
+    } else {
+        tail_within(&before, room - cursor_width)
+    };
+    render_clusters(f, kept, area.x + prompt, area);
 
+    let cursor_column = prompt + clusters_width(kept);
     let cursor = Rect {
         x: area.x + cursor_column,
-        width: CURSOR_COLUMNS,
+        width: cursor_width,
         ..area
     };
-    f.render_widget(Paragraph::new(if focused { CURSOR } else { " " }), cursor);
-    let rest = cursor_column + CURSOR_COLUMNS;
-    let room = area.width.saturating_sub(rest);
-    render_clusters(f, head_within(&after, room), area.x + rest, area);
+    let shown = under.filter(|_| wanted <= cursor_width).map_or(" ", |c| c);
+    let style = if focused {
+        Style::new().reversed()
+    } else {
+        Style::new()
+    };
+    f.render_widget(Span::styled(shown, style), cursor);
+
+    let rest = cursor_column + cursor_width;
+    let room = area.width - rest;
+    let after = if under.is_some_and(|_| wanted > cursor_width) {
+        &after[after.len()..]
+    } else {
+        head_within(after, room)
+    };
+    render_clusters(f, after, area.x + rest, area);
 }
 
 /// The drawn form of each cluster of `text`, the clusters `LineEdit` puts its
@@ -772,7 +785,7 @@ mod render_tests {
         );
         let lines = draw(&mut app, 36, 8);
         assert_eq!(lines[0], "Focus tab...", "{lines:#?}");
-        assert_eq!(lines[1], "> ⎸", "{lines:#?}");
+        assert_eq!(lines[1], ">", "{lines:#?}");
     }
 
     fn entry(id: &str, title: &str, args: &[&str]) -> Command {
@@ -849,7 +862,7 @@ mod render_tests {
     fn commands_stage_starts_at_the_query_line() {
         let mut app = app_with(vec![command("split.right", "Split pane: right", None)]);
         let lines = draw(&mut app, 36, 8);
-        assert_eq!(lines[0], "> ⎸", "{lines:#?}");
+        assert_eq!(lines[0], ">", "{lines:#?}");
     }
 
     /// Width is the axis docs/design.md §5 gives a readability floor to, and
@@ -973,7 +986,7 @@ mod render_tests {
     fn a_workspace_rename_shows_the_generate_row_under_the_input() {
         let mut app = renaming_workspace();
         let lines = draw(&mut app, 40, 8);
-        assert_eq!(lines[1].trim_end(), "> editor\u{23B8}", "{lines:#?}");
+        assert_eq!(lines[1].trim_end(), "> editor", "{lines:#?}");
         assert_eq!(
             lines[2].trim_end(),
             "  \u{2728}  Auto generate",
@@ -1079,228 +1092,286 @@ mod render_tests {
     /// while the bug was live.
     #[test]
     fn the_input_line_lands_where_it_is_expected() {
-        let cases: &[(&str, &str, u16, &[&str])] = &[
+        let cases: &[(&str, &str, u16, &[&str], u16)] = &[
             (
                 "short name",
                 "ab",
                 8,
-                &[">", " ", "a", "b", "⎸", " ", " ", " "],
+                &[">", " ", "a", "b", " ", " ", " ", " "],
+                4,
             ),
             (
                 "clipped to the tail, cursor after it",
                 "abcdef",
                 6,
-                &[">", " ", "d", "e", "f", "⎸"],
+                &[">", " ", "d", "e", "f", " "],
+                5,
             ),
             (
                 "a wide glyph owns two cells, the second its continuation",
                 "あい",
                 8,
-                &[">", " ", "あ", " ", "い", " ", "⎸", " "],
+                &[">", " ", "あ", " ", "い", " ", " ", " "],
+                6,
             ),
             (
                 "clipped between wide glyphs, never inside one",
                 "あいう",
                 6,
-                &[">", " ", "う", " ", "⎸", " "],
+                &[">", " ", "う", " ", " ", " "],
+                4,
             ),
             (
                 "one cluster of width 2 — the case Line::width reports as 1",
                 "ｶﾞ",
                 6,
-                &[">", " ", "ｶﾞ", " ", "⎸", " "],
+                &[">", " ", "ｶﾞ", " ", " ", " "],
+                4,
             ),
             (
                 "text after a cluster ratatui counts wider than unicode-width does",
                 "ｶﾞa",
                 8,
-                &[">", " ", "ｶﾞ", " ", "a", "⎸", " ", " "],
+                &[">", " ", "ｶﾞ", " ", "a", " ", " ", " "],
+                5,
             ),
             (
                 "a lone halfwidth sound mark is drawn",
                 "\u{FF9E}a",
                 8,
-                &[">", " ", "\u{FF9E}", "a", "⎸", " ", " ", " "],
-            ),
-            (
-                "the cursor glyph typed as a name is still just text",
-                "⎸⎸",
-                8,
-                &[">", " ", "⎸", "⎸", "⎸", " ", " ", " "],
+                &[">", " ", "\u{FF9E}", "a", " ", " ", " ", " "],
+                4,
             ),
             (
                 "a combining mark rides with the letter it sits on",
                 "e\u{301}",
                 8,
-                &[">", " ", "e\u{301}", "⎸", " ", " ", " ", " "],
+                &[">", " ", "e\u{301}", " ", " ", " ", " ", " "],
+                3,
             ),
             (
                 "a variation selector rides with its base — round 5's U+FE01",
                 "\u{2018}\u{FE01}",
                 8,
-                &[">", " ", "‘\u{FE01}", " ", "⎸", " ", " ", " "],
+                &[">", " ", "‘\u{FE01}", " ", " ", " ", " ", " "],
+                4,
             ),
             (
                 "a ZWJ sequence is one cluster — round 4's family emoji",
                 "\u{1F469}\u{200D}\u{1F4BB}",
                 8,
-                &[">", " ", "👩\u{200D}💻", " ", "⎸", " ", " ", " "],
+                &[">", " ", "👩\u{200D}💻", " ", " ", " ", " ", " "],
+                4,
             ),
             (
                 "a skin tone rides with its base — round 4's bare swatch",
                 "\u{1F44D}\u{1F3FD}",
                 8,
-                &[">", " ", "👍🏽", " ", "⎸", " ", " ", " "],
+                &[">", " ", "👍🏽", " ", " ", " ", " ", " "],
+                4,
             ),
             (
                 "a flag is one cluster, never half a letter",
                 "\u{1F1EF}\u{1F1F5}",
                 8,
-                &[">", " ", "🇯🇵", " ", "⎸", " ", " ", " "],
+                &[">", " ", "🇯🇵", " ", " ", " ", " ", " "],
+                4,
             ),
             (
                 "emoji presentation is drawn wide — round 3's U+FE0F",
                 "\u{2764}\u{FE0F}",
                 8,
-                &[">", " ", "❤\u{FE0F}", " ", "⎸", " ", " ", " "],
+                &[">", " ", "❤\u{FE0F}", " ", " ", " ", " ", " "],
+                4,
             ),
             (
                 "a control character is drawn as its picture",
                 "a\tb",
                 8,
-                &[">", " ", "a", "␉", "b", "⎸", " ", " "],
+                &[">", " ", "a", "␉", "b", " ", " ", " "],
+                5,
             ),
             (
                 "a zero-width format character is drawn as a stand-in",
                 "a\u{200B}",
                 8,
-                &[">", " ", "a", "◌", "⎸", " ", " ", " "],
+                &[">", " ", "a", "◌", " ", " ", " ", " "],
+                4,
             ),
             (
                 "a mark after a control character is drawn apart from its picture",
                 "\t\u{301}",
                 8,
-                &[">", " ", "␉", "◌\u{301}", "⎸", " ", " ", " "],
+                &[">", " ", "␉", "◌\u{301}", " ", " ", " ", " "],
+                4,
             ),
             (
                 "a spacing mark after a control character keeps a cell of its own",
                 "\t\u{903}",
                 8,
-                &[">", " ", "␉", "\u{903}", "⎸", " ", " ", " "],
+                &[">", " ", "␉", "\u{903}", " ", " ", " ", " "],
+                4,
             ),
             (
                 "a prepended character before a control character keeps a cell of its own",
                 "\u{600}\t",
                 8,
-                &[">", " ", "\u{600}", "␉", "⎸", " ", " ", " "],
+                &[">", " ", "\u{600}", "␉", " ", " ", " ", " "],
+                4,
             ),
             (
                 "a CR LF pair is one cluster drawn in two cells",
                 "a\r\n",
                 8,
-                &[">", " ", "a", "␍", "␊", "⎸", " ", " "],
+                &[">", " ", "a", "␍", "␊", " ", " ", " "],
+                5,
             ),
         ];
 
-        for (what, name, width, expected) in cases {
+        for (what, name, width, expected, cursor) in cases {
             let mut picked = command("tab.rename", "Rename tab...", None);
             picked.args = vec!["tab".into(), "rename".into(), "t1".into(), "{text}".into()];
             picked.prompt = Some("N".into());
             let mut app = app_with(vec![picked.clone()]);
             app.enter_prompt(picked, name.to_string());
 
-            let mut terminal = Terminal::new(TestBackend::new(*width, 8)).unwrap();
-            terminal.draw(|f| render(f, &mut app)).unwrap();
-            let buffer = terminal.backend().buffer();
-            let row: Vec<&str> = (0..*width).map(|x| buffer[(x, 1)].symbol()).collect();
+            let (row, reversed) = input_cells(&mut app, *width);
 
             assert_eq!(&row, expected, "{what}: {name:?} at width {width}");
+            assert_eq!(reversed, [*cursor], "{what}: {name:?} at width {width}");
         }
     }
 
     /// Literal cells, as above. The text before the cursor claims the room
     /// first; what follows fills whatever is left.
     #[test]
-    fn a_cursor_inside_the_text_is_drawn_where_it_stands() {
-        let cases: &[(&str, &str, usize, u16, &[&str])] = &[
+    fn a_cursor_inside_the_text_is_drawn_over_the_cluster_it_stands_on() {
+        type Case<'a> = (&'a str, &'a str, usize, u16, &'a [&'a str], &'a [u16]);
+        let cases: &[Case] = &[
             (
                 "between letters",
                 "abcd",
                 2,
                 8,
-                &[">", " ", "a", "b", "⎸", "c", "d", " "],
+                &[">", " ", "a", "b", "c", "d", " ", " "],
+                &[4],
             ),
             (
                 "at the start of a name too long to show",
                 "abcdef",
                 6,
                 6,
-                &[">", " ", "⎸", "a", "b", "c"],
+                &[">", " ", "a", "b", "c", "d"],
+                &[2],
             ),
             (
                 "the text before it wins the room",
                 "abcdef",
                 2,
                 6,
-                &[">", " ", "b", "c", "d", "⎸"],
+                &[">", " ", "b", "c", "d", "e"],
+                &[5],
             ),
             (
-                "a wide glyph after it is dropped whole, never halved",
+                "a wide glyph under it is drawn whole, reversed on its first cell",
+                "あいう",
+                2,
+                8,
+                &[">", " ", "あ", " ", "い", " ", "う", " "],
+                &[4],
+            ),
+            (
+                "a wide glyph the room cannot hold is a blank, never halved",
                 "あいう",
                 1,
-                8,
-                &[">", " ", "あ", " ", "い", " ", "⎸", " "],
+                3,
+                &[">", " ", " "],
+                &[2],
             ),
             (
-                "text after a wide-counted cluster past the cursor",
+                "text after a wide-counted cluster under the cursor",
                 "aｶﾞb",
                 2,
                 8,
-                &[">", " ", "a", "⎸", "ｶﾞ", " ", "b", " "],
+                &[">", " ", "a", "ｶﾞ", " ", "b", " ", " "],
+                &[3],
             ),
             (
                 "a control character is a visible cursor stop",
                 "a\tb",
-                1,
+                2,
                 8,
-                &[">", " ", "a", "␉", "⎸", "b", " ", " "],
+                &[">", " ", "a", "␉", "b", " ", " ", " "],
+                &[3],
             ),
             (
                 "a combining mark with no base after it rides on a stand-in",
                 "\u{301}ab",
                 3,
                 8,
-                &[">", " ", "⎸", "◌\u{301}", "a", "b", " ", " "],
+                &[">", " ", "◌\u{301}", "a", "b", " ", " ", " "],
+                &[2],
             ),
             (
                 "a mark split from a control character stays drawn",
                 "\t\u{301}",
                 1,
                 8,
-                &[">", " ", "␉", "⎸", "◌\u{301}", " ", " ", " "],
+                &[">", " ", "␉", "◌\u{301}", " ", " ", " ", " "],
+                &[3],
             ),
         ];
 
-        for (what, name, left, width, expected) in cases {
-            let mut picked = command("tab.rename", "Rename tab...", None);
-            picked.args = vec!["tab".into(), "rename".into(), "t1".into(), "{text}".into()];
-            picked.prompt = Some("N".into());
-            let mut app = app_with(vec![picked.clone()]);
-            app.enter_prompt(picked, name.to_string());
+        for (what, name, left, width, expected, cursor) in cases {
+            let mut app = renaming_tab(name);
             for _ in 0..*left {
                 app.edit(Edit::Left);
             }
 
-            let mut terminal = Terminal::new(TestBackend::new(*width, 8)).unwrap();
-            terminal.draw(|f| render(f, &mut app)).unwrap();
-            let buffer = terminal.backend().buffer();
-            let row: Vec<&str> = (0..*width).map(|x| buffer[(x, 1)].symbol()).collect();
+            let (row, reversed) = input_cells(&mut app, *width);
 
             assert_eq!(
                 &row, expected,
                 "{what}: {name:?}, {left} left, width {width}"
             );
+            assert_eq!(
+                &reversed, cursor,
+                "{what}: {name:?}, {left} left, width {width}"
+            );
         }
+    }
+
+    /// Issue #268: the cursor is drawn over the text, so no cluster moves while
+    /// it does. Wide, combining and halfwidth-voiced text included.
+    #[test]
+    fn moving_the_cursor_leaves_every_cluster_in_its_column() {
+        for name in ["abc", "あいう", "ae\u{301}b", "aｶﾞb", "a\tb", "a\u{200B}b"] {
+            let stops = name.graphemes(true).count();
+            let at_end = input_cells(&mut renaming_tab(name), 20).0;
+            for left in 0..=stops {
+                let mut app = renaming_tab(name);
+                for _ in 0..left {
+                    app.edit(Edit::Left);
+                }
+                let (row, reversed) = input_cells(&mut app, 20);
+                assert_eq!(row, at_end, "{name:?}, {left} left");
+                assert!(!reversed.is_empty(), "{name:?}, {left} left");
+            }
+        }
+    }
+
+    /// The cursor is a reversed blank past the last cluster, and an unfocused
+    /// line lays the text out the same with nothing reversed.
+    #[test]
+    fn an_unfocused_line_keeps_the_columns_and_loses_the_reversal() {
+        let mut app = renaming_workspace();
+        let (focused, reversed) = input_cells(&mut app, 40);
+        assert_eq!(reversed, [8]);
+
+        app.move_selection(1);
+        let (unfocused, reversed) = input_cells(&mut app, 40);
+        assert_eq!(unfocused, focused);
+        assert!(reversed.is_empty(), "{reversed:?}");
     }
 
     /// Issue #224: a format character is its own cluster, so a cursor stop each
@@ -1309,16 +1380,13 @@ mod render_tests {
     fn a_zero_width_format_character_is_a_visible_cursor_stop() {
         for format in ['\u{200B}', '\u{FEFF}', '\u{200E}'] {
             let name = format!("a{format}b");
-            assert_eq!(
-                input_row(&name, 1, 8),
-                [">", " ", "a", "◌", "⎸", "b", " ", " "],
-                "{name:?}"
-            );
-            assert_eq!(
-                input_row(&name, 2, 8),
-                [">", " ", "a", "⎸", "◌", "b", " ", " "],
-                "{name:?}"
-            );
+            let row: Vec<String> = [">", " ", "a", "◌", "b", " ", " ", " "]
+                .map(String::from)
+                .to_vec();
+            let (symbols, reversed) = input_row(&name, 1, 8);
+            assert_eq!((symbols, reversed), (row.clone(), vec![4]), "{name:?}");
+            let (symbols, reversed) = input_row(&name, 2, 8);
+            assert_eq!((symbols, reversed), (row.clone(), vec![3]), "{name:?}");
         }
     }
 
@@ -1328,7 +1396,7 @@ mod render_tests {
     fn a_cr_lf_pair_is_kept_or_clipped_whole() {
         for (name, left) in [("ab\r\n", 0), ("\r\nab", 4), ("a\r\nb", 1), ("a\r\nb", 2)] {
             for width in 1..=8 {
-                let row = input_row(name, left, width).concat();
+                let row = input_row(name, left, width).0.concat();
                 assert_eq!(
                     row.contains('␍'),
                     row.contains("␍␊"),
@@ -1343,22 +1411,35 @@ mod render_tests {
         }
     }
 
-    fn input_row(name: &str, left: usize, width: u16) -> Vec<String> {
+    fn renaming_tab(name: &str) -> App {
         let mut picked = command("tab.rename", "Rename tab...", None);
         picked.args = vec!["tab".into(), "rename".into(), "t1".into(), "{text}".into()];
         picked.prompt = Some("N".into());
         let mut app = app_with(vec![picked.clone()]);
         app.enter_prompt(picked, name.to_string());
+        app
+    }
+
+    fn input_row(name: &str, left: usize, width: u16) -> (Vec<String>, Vec<u16>) {
+        let mut app = renaming_tab(name);
         for _ in 0..left {
             app.edit(Edit::Left);
         }
+        input_cells(&mut app, width)
+    }
 
+    /// The input line's cell symbols and the columns drawn reversed.
+    fn input_cells(app: &mut App, width: u16) -> (Vec<String>, Vec<u16>) {
         let mut terminal = Terminal::new(TestBackend::new(width, 8)).unwrap();
-        terminal.draw(|f| render(f, &mut app)).unwrap();
+        terminal.draw(|f| render(f, app)).unwrap();
         let buffer = terminal.backend().buffer();
-        (0..width)
+        let symbols = (0..width)
             .map(|x| buffer[(x, 1)].symbol().to_string())
-            .collect()
+            .collect();
+        let reversed = (0..width)
+            .filter(|&x| buffer[(x, 1)].modifier.contains(Modifier::REVERSED))
+            .collect();
+        (symbols, reversed)
     }
 
     /// The cursor is what says the field is live, so it outranks the prefix when
@@ -1366,18 +1447,9 @@ mod render_tests {
     #[test]
     fn a_pane_too_narrow_for_the_prefix_still_shows_a_cursor() {
         for width in 1..=3u16 {
-            let mut picked = command("tab.rename", "Rename tab...", None);
-            picked.args = vec!["tab".into(), "rename".into(), "t1".into(), "{text}".into()];
-            picked.prompt = Some("N".into());
-            let mut app = app_with(vec![picked.clone()]);
-            app.enter_prompt(picked, "abc".into());
+            let (_, reversed) = input_cells(&mut renaming_tab("abc"), width);
 
-            let mut terminal = Terminal::new(TestBackend::new(width, 8)).unwrap();
-            terminal.draw(|f| render(f, &mut app)).unwrap();
-            let buffer = terminal.backend().buffer();
-            let row: String = (0..width).map(|x| buffer[(x, 1)].symbol()).collect();
-
-            assert!(row.contains('⎸'), "width {width} drew no cursor: {row:?}");
+            assert_eq!(reversed, [if width > 2 { 2 } else { 0 }], "width {width}");
         }
     }
 
@@ -2093,7 +2165,7 @@ mod wiring_tests {
         let input: String = (0..36)
             .map(|x| terminal.backend().buffer()[(x, 0)].symbol())
             .collect();
-        assert_eq!(input.trim_end(), "> split⎸");
+        assert_eq!(input.trim_end(), "> split");
     }
 
     /// Esc closes outright rather than stepping back a stage: the stage it

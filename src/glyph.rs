@@ -9,11 +9,6 @@ pub const HIGHLIGHT_COLUMNS: u16 = 2;
 /// Not `·`, which is `A`.
 pub const SEPARATOR: &str = " ⋅ ";
 
-/// Not `▏`, which is `A`.
-pub const CURSOR: &str = "⎸";
-
-pub const CURSOR_COLUMNS: u16 = 1;
-
 /// Drawn for a cluster that draws nothing on its own, so its cursor stops stay
 /// apart: a mark rides on it, the dotted circle Unicode shows a lone mark on.
 pub const STAND_IN: char = '◌';
@@ -41,8 +36,8 @@ mod tests {
     use unicode_width::UnicodeWidthStr;
 
     use super::{
-        control_picture, same_width_in_every_locale, CURSOR, CURSOR_COLUMNS, HIGHLIGHT_COLUMNS,
-        HIGHLIGHT_SYMBOL, SEPARATOR, STAND_IN,
+        control_picture, same_width_in_every_locale, HIGHLIGHT_COLUMNS, HIGHLIGHT_SYMBOL,
+        SEPARATOR, STAND_IN,
     };
 
     #[test]
@@ -50,7 +45,6 @@ mod tests {
         for (glyph, cells) in [
             (HIGHLIGHT_SYMBOL, HIGHLIGHT_COLUMNS),
             (SEPARATOR, 3),
-            (CURSOR, CURSOR_COLUMNS),
             (&STAND_IN.to_string(), 1),
         ] {
             assert_eq!(glyph.width(), usize::from(cells), "{glyph:?}");
