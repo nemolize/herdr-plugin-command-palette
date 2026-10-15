@@ -637,7 +637,10 @@ def main() -> int:
             if proc.returncode != 0:
                 rejected.append((entry["id"], args, proc.returncode, proc.stderr.strip()))
                 print(f"FAIL {entry['id']}", file=sys.stderr)
-            elif (reason := unaccepted_response(proc.stdout, proc.stderr)) is not None:
+            # `herdr update` answers in plain text; the palette judges it by exit status (src/herdr.rs).
+            elif args[0] != "update" and (
+                reason := unaccepted_response(proc.stdout, proc.stderr)
+            ) is not None:
                 unaccepted.append(
                     (entry["id"], args, reason, proc.stdout.strip(), proc.stderr.strip())
                 )
