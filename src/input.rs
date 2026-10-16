@@ -95,12 +95,8 @@ fn apply(app: &mut App, event: Event, drawn_rows: u16) -> Option<Step> {
     })
 }
 
-/// Keys in, argv out. Every other test here stops at a boundary: `app::tests`
-/// checks `confirm` against a state built by hand, and `render_tests` checks
-/// what is drawn. Neither covers the join — that a key the user presses reaches
-/// `App`, that Enter reaches `confirm`, and that what falls out is the argv
-/// `Herdr::dispatch` spawns. A break anywhere along that path shows up as a
-/// palette that takes the keypress and runs nothing.
+/// Keys in, argv out: the join between a keypress and `App::confirm`, which
+/// `app::tests` (state built by hand) and `ui::render_tests` (what is drawn) each stop short of.
 #[cfg(test)]
 mod wiring_tests {
     use super::*;

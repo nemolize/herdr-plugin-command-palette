@@ -614,7 +614,7 @@ mod tests {
     }
 
     /// A rename entry as the palette sees it: the context id is already
-    /// substituted by the time an entry becomes a candidate (`main.rs`).
+    /// substituted by the time an entry becomes a candidate (`candidates::assemble`).
     fn renamer() -> Cmd {
         let mut c = cmd(
             "tab.rename",
