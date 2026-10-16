@@ -16,6 +16,7 @@ use crate::app::{App, Stage, Step};
 use crate::generate_row::GenerateRow;
 use crate::glyph::{control_picture, HIGHLIGHT_COLUMNS, HIGHLIGHT_SYMBOL, SEPARATOR, STAND_IN};
 use crate::line_edit::{Edit, LineEdit};
+use crate::status;
 
 /// Restores the terminal on drop, so an error path cannot leave the pane in raw
 /// mode with the alternate screen still up.
@@ -152,7 +153,7 @@ fn apply(app: &mut App, event: Event, drawn_rows: u16) -> Option<Step> {
 /// too-short message: the tallest stage, Commands with a skip reason, listing
 /// two candidates. Herdr's manifest has no size floor, so the palette enforces
 /// it (docs/design.md §5).
-const MIN_ROWS: u16 = INPUT_ROWS + FLOOR_CANDIDATES + REASON_ROWS + FOOTER_ROWS;
+const MIN_ROWS: u16 = INPUT_ROWS + FLOOR_KEPT_CANDIDATE_ROWS + REASON_ROWS + FOOTER_ROWS;
 
 /// The query, or the typed name.
 const INPUT_ROWS: u16 = 1;
@@ -183,29 +184,21 @@ fn render(f: &mut Frame, app: &mut App) {
         ),
     };
 
-    let status = app.status.as_ref().map(|msg| {
-        Paragraph::new(msg.trim_end().to_string())
-            .wrap(Wrap { trim: false })
-            .dim()
-    });
+    let status = app.status.as_deref().map(status::paragraph);
     let reserved = u16::from(header.is_some())
         + INPUT_ROWS
         + if matches!(app.stage, Stage::Prompt { .. }) {
             LIST_MIN_ROWS
         } else {
-            FLOOR_CANDIDATES
+            FLOOR_KEPT_CANDIDATE_ROWS
         }
         + if app.selected_note().is_some() {
             REASON_ROWS
         } else {
             0
         };
-    let status_room = rows.saturating_sub(reserved).clamp(1, MAX_STATUS_ROWS);
     let (status_height, status_cut) = match &status {
-        Some(p) => {
-            let needed = wrapped_height(p, f.area().width);
-            (needed.min(status_room), needed > status_room)
-        }
+        Some(p) => status::fit(p, f.area().width, rows, reserved),
         None => (FOOTER_ROWS, false),
     };
 
@@ -270,49 +263,23 @@ fn render(f: &mut Frame, app: &mut App) {
     render_status(f, app, status, status_cut, chunks[3]);
 }
 
-const MAX_STATUS_ROWS: u16 = 5;
-
 const LIST_MIN_ROWS: u16 = 1;
 
-/// A status message never takes these.
-const FLOOR_CANDIDATES: u16 = 2;
+/// The candidate rows the height floor keeps; a status message never takes them.
+const FLOOR_KEPT_CANDIDATE_ROWS: u16 = 2;
 
 const REASON_ROWS: u16 = 2;
-
-/// ASCII rather than `…`, which is East Asian Ambiguous (see `glyph`).
-const CUT_MARKER: &str = "...";
 
 fn render_status(f: &mut Frame, app: &App, status: Option<Paragraph>, cut: bool, area: Rect) {
     match status {
         Some(p) => {
             f.render_widget(p, area);
             if cut {
-                mark_cut(f.buffer_mut(), area);
+                status::mark_cut(f.buffer_mut(), area);
             }
         }
         None => render_footer(f, app, area),
     }
-}
-
-fn mark_cut(buffer: &mut Buffer, area: Rect) {
-    if area.is_empty() {
-        return;
-    }
-    let y = area.bottom() - 1;
-    let marker_width = CUT_MARKER.len() as u16;
-    let text_end = (area.left()..area.right())
-        .filter(|&x| buffer[(x, y)].symbol().trim() != "")
-        .map(|x| x + buffer[(x, y)].symbol().cell_width().max(1))
-        .max()
-        .unwrap_or(area.left());
-    let x = text_end.min(area.right().saturating_sub(marker_width).max(area.left()));
-    // The cell left of the marker may hold a wide glyph whose second half the
-    // marker now covers; a half-drawn glyph would overprint the marker.
-    if x > area.left() && buffer[(x - 1, y)].symbol().cell_width() > 1 {
-        buffer[(x - 1, y)].reset();
-    }
-    let style = buffer[(x.min(area.right() - 1), y)].style();
-    buffer.set_stringn(x, y, CUT_MARKER, (area.right() - x) as usize, style);
 }
 
 /// Columns the `> ` prefix takes from the input line.
@@ -373,7 +340,7 @@ fn render_generate_row(f: &mut Frame, row: &GenerateRow, area: Rect) {
     let area = Rect { height: 1, ..area };
     f.render_widget(Paragraph::new(line), area);
     if cut {
-        mark_cut(f.buffer_mut(), area);
+        status::mark_cut(f.buffer_mut(), area);
     }
 }
 
@@ -535,14 +502,6 @@ fn render_footer(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(Paragraph::new(footer(&counts, area.width)).dim(), area);
 }
 
-/// Counted rather than rendered into a probe: a probe only as tall as the pane
-/// misses text after a longer run of blank lines (#151).
-fn wrapped_height(status: &Paragraph, width: u16) -> u16 {
-    u16::try_from(status.line_count(width))
-        .unwrap_or(u16::MAX)
-        .max(1)
-}
-
 /// The counts on the left, the running version flush right. Herdr can hand the
 /// plugin a region narrower than docs/design.md §5's floor, and there the counts
 /// are what has to survive — so the version is dropped rather than either half
@@ -571,6 +530,7 @@ mod render_tests {
     use crate::catalog::Command;
     use crate::frecency::Frecency;
     use crate::listing::Target;
+    use crate::status::{CUT_MARKER, MAX_STATUS_ROWS};
     use ratatui::backend::TestBackend;
     use std::path::Path;
 
@@ -1656,11 +1616,6 @@ mod render_tests {
         assert_eq!(lines.last().unwrap(), "Split pane: right", "{lines:#?}");
     }
 
-    /// A dispatch failure carries herdr's own message and runs well past the
-    /// popup's width. Truncated to one line it loses the half naming the cause,
-    /// which leaves the user where the silent failure did — knowing only that
-    /// nothing happened.
-
     #[test]
     fn a_dispatch_failure_is_readable_in_full() {
         let message =
@@ -1699,7 +1654,6 @@ mod render_tests {
         );
     }
 
-    /// Herdr's stderr quoted whole (#144): many lines, more than the cap.
     fn long_error() -> String {
         (0..20)
             .map(|i| format!("herdr: error line {i}"))
@@ -1726,8 +1680,8 @@ mod render_tests {
         assert!(!lines[14].contains("herdr"), "{lines:#?}");
     }
 
-    /// Issues #149 and #154. The manifest's 60-column popup is 58 inside
-    /// Herdr's border, and a narrow device clamps it to 51 (docs/design.md §5).
+    /// The manifest's 60-column popup is 58 inside Herdr's border, and a narrow
+    /// device clamps it to 51 (docs/design.md §5).
     #[test]
     fn every_startup_note_fits_whole_inside_the_popup() {
         let dir = std::env::temp_dir().join(format!("palette-ui-notes-{}", std::process::id()));
@@ -1760,7 +1714,6 @@ mod render_tests {
         }
     }
 
-    /// A cut wide glyph would overprint the marker, so it is blanked instead.
     #[test]
     fn a_cut_marker_after_a_wide_glyph_at_the_edge_replaces_it_whole() {
         let mut app = app_with(vec![command("split.right", "Split pane: right", None)]);
@@ -1832,8 +1785,6 @@ mod render_tests {
         assert_eq!(lines[3..], ["line 0", "line 1", "line 2..."], "{lines:#?}");
     }
 
-    /// The floor's two candidates outrank status rows, so there the status is
-    /// one row — still marked as cut.
     #[test]
     fn a_long_status_leaves_the_floor_its_two_candidates() {
         let mut candidates = vec![Candidate::note("tab.rename", "no {text}")];
@@ -1872,8 +1823,8 @@ mod render_tests {
         assert!(lines.last().unwrap().ends_with("..."), "{lines:#?}");
     }
 
-    /// Issue #102: the skipped-entries note is 37 cells, so at the floor it would
-    /// wrap and take a candidate's row.
+    /// The skipped-entries note is 37 cells, so at the floor it would wrap and
+    /// take a candidate's row.
     #[test]
     fn the_skipped_note_leaves_the_floor_its_two_candidates() {
         for width in [36, 30] {
