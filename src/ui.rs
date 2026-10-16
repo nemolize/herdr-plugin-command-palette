@@ -265,7 +265,7 @@ fn render(f: &mut Frame, app: &mut App) {
 
 const LIST_MIN_ROWS: u16 = 1;
 
-/// The candidate rows the height floor keeps; a status message never takes them.
+/// A status message never takes these.
 const FLOOR_KEPT_CANDIDATE_ROWS: u16 = 2;
 
 const REASON_ROWS: u16 = 2;

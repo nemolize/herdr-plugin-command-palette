@@ -1,5 +1,6 @@
 //! The status message that replaces the footer: how many rows it may take, and
-//! the marker drawn when it is cut (docs/design.md §5).
+//! the marker drawn when it is cut (docs/design.md §5). The marker is also what
+//! the Auto-generate row gets when its text is cut.
 
 use ratatui::buffer::CellWidth;
 use ratatui::prelude::*;

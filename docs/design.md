@@ -491,7 +491,7 @@ about 8–10 rows inside, so a slightly larger font or keyboard would have made
 the palette refuse rather than merely tighten.
 
 A status message replacing the footer wraps to at most five rows, and to
-fewer when more would take those two candidates; a longer one ends in `...`
+fewer when more would take the floor's two candidates; a longer one ends in `...`
 (#144). Herdr's errors are quoted whole, so without the cap one long error
 leaves the list no room.
 
