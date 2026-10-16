@@ -17,6 +17,7 @@ mod selection;
 mod settings;
 #[cfg(test)]
 mod source_literals;
+mod status;
 mod ui;
 
 use std::path::PathBuf;
