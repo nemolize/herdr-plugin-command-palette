@@ -6,7 +6,7 @@ adds one; a change nobody installing the plugin can observe (CI, docs, tests,
 refactors, dependency bumps with no behaviour change) adds none.
 
 ```sh
-pnpm install --ignore-scripts
+pnpm install --frozen-lockfile --ignore-scripts
 pnpm exec changeset add --minor herdr-command-palette -m "Add vertical pane swaps to the command palette"
 ```
 

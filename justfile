@@ -43,7 +43,7 @@ zizmor path='.':
 zizmor-test:
     node --test scripts/zizmor.test.mjs
 
-# Needs `pnpm install --ignore-scripts` first, for the Changesets CLI the lockfile pins.
+# Needs `pnpm install --frozen-lockfile --ignore-scripts` first, for the Changesets CLI the lockfile pins.
 release-test:
     node scripts/sync-version.mjs --check
     node --test scripts/release.test.mjs
