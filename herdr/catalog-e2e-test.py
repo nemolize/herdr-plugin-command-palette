@@ -19,6 +19,9 @@ from contextlib import redirect_stderr
 from pathlib import Path
 from unittest import mock
 
+import catalog_placeholders
+from catalog_placeholders import flag_before, resolved_args
+
 HARNESS = Path(__file__).resolve().parent / "catalog-e2e.py"
 spec = importlib.util.spec_from_file_location("catalog_e2e", HARNESS)
 catalog_e2e = importlib.util.module_from_spec(spec)
@@ -245,6 +248,67 @@ RESIZE_LEFT = '["pane", "resize", "--pane", "{pane}", "--direction", "left"]'
 SWAP_LEFT = '["pane", "swap", "--pane", "{pane}", "--direction", "left"]'
 RESIZED = '{"id":"cli:pane:resize","result":{"type":"pane_resize"}}'
 SWAPPED = '{"id":"cli:pane:swap","result":{"type":"pane_swap"}}'
+
+
+class ResolvedArgs(unittest.TestCase):
+    IDS = {
+        "{pane}": "p1",
+        "{tab}": "t1",
+        "{workspace}": "w1",
+        "{another tab}": "t2",
+        "{repo}": "/repo",
+        "{worktree path}": "/wt",
+        "{worktree workspace}": "w2",
+    }
+
+    def resolve(self, args, resolve=None, entry_id="x.y"):
+        entry = {"id": entry_id, "args": args}
+        if resolve is not None:
+            entry["resolve"] = resolve
+        return resolved_args(entry, self.IDS)
+
+    def test_catalog_e2e_uses_the_module_rather_than_its_own_copy(self):
+        self.assertIs(catalog_e2e.resolved_args, catalog_placeholders.resolved_args)
+        self.assertIs(catalog_e2e.flag_before, catalog_placeholders.flag_before)
+
+    def test_substitutes_fixture_ids_and_leaves_other_words_alone(self):
+        self.assertEqual(
+            self.resolve(["pane", "rename", "{pane}", "--tab", "{tab}", "{text}"]),
+            ["pane", "rename", "p1", "--tab", "t1", "e2e renamed"],
+        )
+
+    def test_gives_a_branch_name_no_space(self):
+        self.assertEqual(
+            self.resolve(["worktree", "create", "--cwd", "{repo}", "--branch", "{text}"]),
+            ["worktree", "create", "--cwd", "/repo", "--branch", "e2e-created"],
+        )
+
+    def test_picks_the_target_each_resolve_names(self):
+        for resolve, args, expected in (
+            ("tab list", ["tab", "focus", "{}"], "t2"),
+            ("pane list", ["pane", "close", "{}"], "p1"),
+            ("workspace list", ["workspace", "close", "{}"], "w1"),
+            ("worktree list", ["worktree", "open", "--path", "{}"], "/wt"),
+            ("worktree list", ["worktree", "remove", "--workspace", "{}"], "w2"),
+        ):
+            with self.subTest(resolve=resolve, args=args):
+                self.assertEqual(self.resolve(args, resolve)[-1], expected)
+
+    def test_names_the_entry_when_resolve_is_one_it_was_not_taught(self):
+        with self.assertRaises(RuntimeError) as caught:
+            self.resolve(["tab", "focus", "{}"], "layout list", entry_id="tab.focus")
+        self.assertIn("tab.focus", str(caught.exception))
+        self.assertIn("'layout list'", str(caught.exception))
+
+    def test_names_the_entry_when_a_worktree_list_has_no_flag_to_pick_by(self):
+        with self.assertRaises(RuntimeError) as caught:
+            self.resolve(["worktree", "open", "{}"], "worktree list", entry_id="worktree.open")
+        self.assertIn("worktree.open", str(caught.exception))
+
+    def test_flag_before_reads_the_word_ahead_of_the_placeholder(self):
+        self.assertEqual(flag_before(["a", "--path", "{}"], "{}"), "--path")
+        self.assertIsNone(flag_before(["{}", "a"], "{}"))
+        self.assertIsNone(flag_before(["a", "b"], "{}"))
 
 
 class MainVerdict(unittest.TestCase):
