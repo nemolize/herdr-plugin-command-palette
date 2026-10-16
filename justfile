@@ -3,7 +3,7 @@
 
 default: ci
 
-ci: lint test palette-e2e open-test catalog-e2e-test popup-collision-e2e-test release-test build-musl zizmor zizmor-test
+ci: lint test palette-e2e open-test catalog-e2e-test popup-collision-e2e-test release-test build-musl zizmor zizmor-test actionlint-probe actionlint-probe-test
 
 fmt:
     cargo fmt --all
@@ -42,6 +42,16 @@ zizmor path='.':
 # check would pass there unnoticed; this runs it on fixtures that must trip it.
 zizmor-test:
     node --test scripts/zizmor.test.mjs
+
+# Fails once actionlint accepts the `$/` self-repository form, which is when
+# release-plan.yml's zizmor ignore can go; the failure message says how.
+actionlint-probe:
+    node scripts/actionlint-probe.mjs
+
+# The probe passes while actionlint rejects the form, so a probe that never
+# fails looks like one that works; this feeds it an accepted form and a broken run.
+actionlint-probe-test:
+    node --test scripts/actionlint-probe.test.mjs
 
 # Needs `pnpm install --frozen-lockfile --ignore-scripts` first, for the Changesets CLI the lockfile pins.
 release-test:

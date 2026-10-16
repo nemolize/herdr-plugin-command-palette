@@ -95,7 +95,7 @@ jobs:
   Assets:
     needs: Draft-Release
     if: contains(fromJSON('["create", "retry"]'), needs.Draft-Release.outputs.action)
-    # actionlint 1.7.12 rejects the `$/` self-repository form.
+    # actionlint rejects the `$/` self-repository form; `just actionlint-probe` fails when it stops.
     uses: ./.github/workflows/release.yml # zizmor: ignore[self-repository]
     permissions:
       contents: write
