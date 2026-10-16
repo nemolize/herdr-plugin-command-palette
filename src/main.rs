@@ -19,6 +19,7 @@ mod settings;
 mod source_literals;
 mod status;
 mod ui;
+mod width;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
