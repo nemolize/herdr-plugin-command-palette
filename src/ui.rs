@@ -1661,8 +1661,6 @@ mod render_tests {
             .join("\n")
     }
 
-    /// Nine commands behind a skipped entry whose reason is selected: the
-    /// Commands stage at its tallest.
     fn app_with_skipped_entry() -> App {
         let mut candidates = vec![Candidate::note("tab.rename", "no {text}")];
         candidates.extend((0..9).map(|i| {
@@ -1676,23 +1674,12 @@ mod render_tests {
         app
     }
 
-    /// Whether a drawn row that mentions "skipped" without being the skipped
-    /// entry itself (the `catalog: N skipped` status row) counts as a candidate.
-    enum SkippedStatusRow {
-        Counted,
-        Excluded,
-    }
-
-    /// Rows of the Commands stage that are candidates: a command, or the
-    /// skipped entry.
-    fn listed_commands(lines: &[String], status_row: SkippedStatusRow) -> usize {
-        let skipped_entry = match status_row {
-            SkippedStatusRow::Counted => "skipped",
-            SkippedStatusRow::Excluded => "skipped `",
-        };
+    /// The backtick leaves out the `catalog: N skipped` status row, which is
+    /// not a candidate.
+    fn listed_commands(lines: &[String]) -> usize {
         lines
             .iter()
-            .filter(|l| l.contains("Cmd") || l.contains(skipped_entry))
+            .filter(|l| l.contains("Cmd") || l.contains("skipped `"))
             .count()
     }
 
@@ -1825,7 +1812,7 @@ mod render_tests {
         let mut app = app_with_skipped_entry();
         app.status = Some(long_error());
         let lines = draw(&mut app, 36, MIN_ROWS);
-        let listed = listed_commands(&lines, SkippedStatusRow::Counted);
+        let listed = listed_commands(&lines);
         assert_eq!(listed, 2, "Commands: {lines:#?}");
         assert_eq!(
             lines.last().unwrap(),
@@ -1859,7 +1846,7 @@ mod render_tests {
             let mut app = app_with_skipped_entry();
             app.add_status(crate::skipped_note(1));
             let lines = draw(&mut app, width, MIN_ROWS);
-            let listed = listed_commands(&lines, SkippedStatusRow::Excluded);
+            let listed = listed_commands(&lines);
             assert_eq!(listed, 2, "width {width}: {lines:#?}");
             assert_eq!(
                 lines.last().unwrap(),
@@ -1884,15 +1871,13 @@ mod render_tests {
         assert_eq!(lines.last().unwrap(), counts, "{lines:#?}");
     }
 
-    /// Two candidates in every stage is what the floor is derived from. The
-    /// Commands stage with a skip reason selected is the tallest; Targets pays
-    /// for a header line. More candidates than can fit, so each count is the
-    /// list's height.
+    /// Two candidates in every stage is what the floor is derived from. More
+    /// candidates than can fit, so each count is the list's height.
     #[test]
     fn every_stage_shows_two_candidates_at_the_height_floor() {
         let mut app = app_with_skipped_entry();
         let lines = draw(&mut app, 36, MIN_ROWS);
-        let listed = listed_commands(&lines, SkippedStatusRow::Counted);
+        let listed = listed_commands(&lines);
         assert_eq!(listed, 2, "Commands: {lines:#?}");
 
         let picked = command("focus.tab", "Focus tab...", Some("tabs"));
