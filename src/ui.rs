@@ -437,8 +437,9 @@ fn drawn_clusters(text: &str) -> Vec<String> {
     text.graphemes(true).map(drawn_cluster).collect()
 }
 
-/// `cluster` with controls as Control Pictures (`CellWidth` panics on a raw one
-/// in a debug build), and on `STAND_IN` if it would draw nothing at all.
+/// `cluster` with every control character as its Control Picture, so none
+/// reaches `CellWidth`, which panics on a raw one in a debug build. A cluster
+/// that would still draw nothing goes onto `STAND_IN`.
 fn drawn_cluster(cluster: &str) -> String {
     let drawn: String = cluster
         .chars()
@@ -1432,6 +1433,129 @@ mod render_tests {
         }
     }
 
+    /// Literal cells at the width where `␍␊` just fits and one cell below it,
+    /// where it must go whole: before the cursor, after it, and under it.
+    #[test]
+    fn a_cr_lf_pair_at_the_clip_width_is_drawn_or_dropped_whole() {
+        type Case<'a> = (&'a str, &'a str, usize, u16, &'a [&'a str], &'a [u16]);
+        let cases: &[Case] = &[
+            (
+                "before the cursor, just fits",
+                "ab\r\n",
+                0,
+                5,
+                &[">", " ", "␍", "␊", " "],
+                &[4],
+            ),
+            (
+                "before the cursor, one cell short",
+                "ab\r\n",
+                0,
+                4,
+                &[">", " ", " ", " "],
+                &[2],
+            ),
+            (
+                "before a letter, just fits",
+                "a\r\nb",
+                1,
+                5,
+                &[">", " ", "␍", "␊", "b"],
+                &[4],
+            ),
+            (
+                "before a letter, one cell short",
+                "a\r\nb",
+                1,
+                4,
+                &[">", " ", "b", " "],
+                &[2],
+            ),
+            (
+                "after the cursor, just fits",
+                "ab\r\n",
+                2,
+                6,
+                &[">", " ", "a", "b", "␍", "␊"],
+                &[3],
+            ),
+            (
+                "after the cursor, one cell short",
+                "ab\r\n",
+                2,
+                5,
+                &[">", " ", "a", "b", " "],
+                &[3],
+            ),
+            (
+                "under the cursor with one cell of room, a blank",
+                "a\r\nb",
+                2,
+                3,
+                &[">", " ", " "],
+                &[2],
+            ),
+        ];
+
+        for (what, name, left, width, expected, cursor) in cases {
+            let (row, reversed) = input_row(name, *left, *width);
+
+            assert_eq!(
+                &row, expected,
+                "{what}: {name:?}, {left} left, width {width}"
+            );
+            assert_eq!(
+                &reversed, cursor,
+                "{what}: {name:?}, {left} left, width {width}"
+            );
+        }
+    }
+
+    /// Slices of drawn clusters, `␍␊` being one cluster of two cells.
+    fn clusters(parts: &[&str]) -> Vec<String> {
+        parts.iter().map(ToString::to_string).collect()
+    }
+
+    /// Widths 1, 2, 2, 1: a room is filled exactly, or a cluster is left out
+    /// whole, never cut.
+    #[test]
+    fn the_tail_within_a_room_is_whole_clusters_from_the_end() {
+        let all = clusters(&["a", "あ", "␍␊", "b"]);
+        let cases: &[(u16, &[&str])] = &[
+            (0, &[]),
+            (1, &["b"]),
+            (2, &["b"]),
+            (3, &["␍␊", "b"]),
+            (4, &["␍␊", "b"]),
+            (5, &["あ", "␍␊", "b"]),
+            (6, &["a", "あ", "␍␊", "b"]),
+            (7, &["a", "あ", "␍␊", "b"]),
+        ];
+
+        for (room, expected) in cases {
+            assert_eq!(tail_within(&all, *room), clusters(expected), "room {room}");
+        }
+    }
+
+    #[test]
+    fn the_head_within_a_room_is_whole_clusters_from_the_start() {
+        let all = clusters(&["a", "あ", "␍␊", "b"]);
+        let cases: &[(u16, &[&str])] = &[
+            (0, &[]),
+            (1, &["a"]),
+            (2, &["a"]),
+            (3, &["a", "あ"]),
+            (4, &["a", "あ"]),
+            (5, &["a", "あ", "␍␊"]),
+            (6, &["a", "あ", "␍␊", "b"]),
+            (7, &["a", "あ", "␍␊", "b"]),
+        ];
+
+        for (room, expected) in cases {
+            assert_eq!(head_within(&all, *room), clusters(expected), "room {room}");
+        }
+    }
+
     fn renaming_tab(name: &str) -> App {
         let mut picked = command("tab.rename", "Rename tab...", None);
         picked.args = vec!["tab".into(), "rename".into(), "t1".into(), "{text}".into()];
@@ -1468,7 +1592,7 @@ mod render_tests {
     #[test]
     fn a_pane_too_narrow_for_the_prefix_still_shows_a_cursor() {
         for width in 1..=3u16 {
-            let (_, reversed) = input_cells(&mut renaming_tab("abc"), width);
+            let (_, reversed) = input_row("abc", 0, width);
 
             assert_eq!(reversed, [if width > 2 { 2 } else { 0 }], "width {width}");
         }
