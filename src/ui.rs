@@ -1661,6 +1661,28 @@ mod render_tests {
             .join("\n")
     }
 
+    fn app_with_skipped_entry() -> App {
+        let mut candidates = vec![Candidate::note("tab.rename", "no {text}")];
+        candidates.extend((0..9).map(|i| {
+            Candidate::from_command(command(&format!("c{i}"), &format!("Cmd {i}"), None))
+        }));
+        let app = App::new(candidates, Frecency::load(Path::new("/nonexistent")));
+        assert!(
+            app.selected_note().is_some(),
+            "the skip reason is not shown"
+        );
+        app
+    }
+
+    /// The backtick leaves out the `catalog: N skipped` status row, which is
+    /// not a candidate.
+    fn listed_commands(lines: &[String]) -> usize {
+        lines
+            .iter()
+            .filter(|l| l.contains("Cmd") || l.contains("skipped `"))
+            .count()
+    }
+
     #[test]
     fn a_long_status_takes_five_rows_and_says_it_was_cut() {
         let mut app = app_with(vec![command("split.right", "Split pane: right", None)]);
@@ -1787,17 +1809,10 @@ mod render_tests {
 
     #[test]
     fn a_long_status_leaves_the_floor_its_two_candidates() {
-        let mut candidates = vec![Candidate::note("tab.rename", "no {text}")];
-        candidates.extend((0..9).map(|i| {
-            Candidate::from_command(command(&format!("c{i}"), &format!("Cmd {i}"), None))
-        }));
-        let mut app = App::new(candidates, Frecency::load(Path::new("/nonexistent")));
+        let mut app = app_with_skipped_entry();
         app.status = Some(long_error());
         let lines = draw(&mut app, 36, MIN_ROWS);
-        let listed = lines
-            .iter()
-            .filter(|l| l.contains("Cmd") || l.contains("skipped"))
-            .count();
+        let listed = listed_commands(&lines);
         assert_eq!(listed, 2, "Commands: {lines:#?}");
         assert_eq!(
             lines.last().unwrap(),
@@ -1828,21 +1843,10 @@ mod render_tests {
     #[test]
     fn the_skipped_note_leaves_the_floor_its_two_candidates() {
         for width in [36, 30] {
-            let mut candidates = vec![Candidate::note("tab.rename", "no {text}")];
-            candidates.extend((0..9).map(|i| {
-                Candidate::from_command(command(&format!("c{i}"), &format!("Cmd {i}"), None))
-            }));
-            let mut app = App::new(candidates, Frecency::load(Path::new("/nonexistent")));
-            assert!(
-                app.selected_note().is_some(),
-                "the skip reason is not shown"
-            );
+            let mut app = app_with_skipped_entry();
             app.add_status(crate::skipped_note(1));
             let lines = draw(&mut app, width, MIN_ROWS);
-            let listed = lines
-                .iter()
-                .filter(|l| l.contains("Cmd") || l.contains("skipped `"))
-                .count();
+            let listed = listed_commands(&lines);
             assert_eq!(listed, 2, "width {width}: {lines:#?}");
             assert_eq!(
                 lines.last().unwrap(),
@@ -1867,26 +1871,13 @@ mod render_tests {
         assert_eq!(lines.last().unwrap(), counts, "{lines:#?}");
     }
 
-    /// Two candidates in every stage is what the floor is derived from. The
-    /// Commands stage with a skip reason selected is the tallest; Targets pays
-    /// for a header line. More candidates than can fit, so each count is the
-    /// list's height.
+    /// Two candidates in every stage is what the floor is derived from. More
+    /// candidates than can fit, so each count is the list's height.
     #[test]
     fn every_stage_shows_two_candidates_at_the_height_floor() {
-        let mut candidates = vec![Candidate::note("tab.rename", "no {text}")];
-        candidates.extend((0..9).map(|i| {
-            Candidate::from_command(command(&format!("c{i}"), &format!("Cmd {i}"), None))
-        }));
-        let mut app = App::new(candidates, Frecency::load(Path::new("/nonexistent")));
-        assert!(
-            app.selected_note().is_some(),
-            "the skip reason is not shown"
-        );
+        let mut app = app_with_skipped_entry();
         let lines = draw(&mut app, 36, MIN_ROWS);
-        let listed = lines
-            .iter()
-            .filter(|l| l.contains("Cmd") || l.contains("skipped"))
-            .count();
+        let listed = listed_commands(&lines);
         assert_eq!(listed, 2, "Commands: {lines:#?}");
 
         let picked = command("focus.tab", "Focus tab...", Some("tabs"));
