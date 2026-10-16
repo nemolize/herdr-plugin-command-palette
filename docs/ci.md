@@ -148,14 +148,16 @@ scoped to this crate.
 the commands exist once rather than as lists kept in sync by discipline.
 `just ci` runs the recipes of every `ci.yml` job but `E2ETests` (those need a
 fetched herdr), reproducing a CI failure locally with no push. Of the five
-tools CI pins and installs for itself, `just ci` needs `just`, `zizmor` and
-`actionlint` (the last two installed through `mise`), and `cargo-deny` is for
-`just deny`:
+tools CI pins and installs for itself (`just`, `mise`, `zizmor`, `actionlint`
+and `cargo-deny`), `just ci` needs `just`, `zizmor` and `actionlint`, and
+`cargo-deny` is for `just deny`. Locally `mise` is what installs `zizmor` and
+`actionlint`:
 
 ```sh
 cargo install just --version 1.58.0 --locked
 # mise, at the `version:` of the `jdx/mise-action` step in ci.yml
 curl https://mise.run | MISE_VERSION=v<that version> sh
+mise --version          # must print that version; a Homebrew mise earlier on PATH wins otherwise
 mise install            # zizmor and actionlint, at the versions mise.toml pins
 cargo install cargo-deny --version 0.20.2 --locked
 ```
