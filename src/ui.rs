@@ -335,12 +335,12 @@ fn row_line(title: &str, key: &str, width: u16) -> Line<'static> {
     let Some(room) = width.checked_sub(HIGHLIGHT_COLUMNS) else {
         return without_key();
     };
-    let key_width = drawn_width(key);
-    if room < drawn_width(title) + KEY_GAP + key_width {
-        return without_key();
-    }
     // ratatui draws a control character as nothing, yet `Span::width` counts it.
     let shown: String = title.chars().filter(|c| !c.is_control()).collect();
+    let key_width = drawn_width(key);
+    if room < drawn_width(&shown) + KEY_GAP + key_width {
+        return without_key();
+    }
     // `Line` starts a span at the previous `Span::width`, a cell short after `ｶﾞ`,
     // so a gap span of its own would overwrite the title's last glyph.
     let next_span_column = Span::raw(shown.as_str()).width();
@@ -731,6 +731,23 @@ mod render_tests {
         assert_eq!(row[6..].concat(), "prefix+c", "{row:?}");
 
         let mut app = app_with_key("a\t\t\tb", "prefix+c");
+        let row = cells(&mut app, exact - 1, 8, 1);
+        assert!(!row.concat().contains("prefix"), "{row:?}");
+    }
+
+    /// Issue #236: a control character between `❤` and its variation selector
+    /// splits them in the raw title, so it measures narrower than the title the
+    /// row draws, where the two join into one two-cell glyph.
+    #[test]
+    fn a_key_beside_a_split_variation_sequence_is_dropped_by_the_drawn_title() {
+        let exact = 2 + 4 + 2 + 8;
+        let title = "a\u{2764}\u{7}\u{FE0F}b";
+
+        let mut app = app_with_key(title, "prefix+c");
+        let row = cells(&mut app, exact, 8, 1);
+        assert_eq!(row[8..].concat(), "prefix+c", "{row:?}");
+
+        let mut app = app_with_key(title, "prefix+c");
         let row = cells(&mut app, exact - 1, 8, 1);
         assert!(!row.concat().contains("prefix"), "{row:?}");
     }
