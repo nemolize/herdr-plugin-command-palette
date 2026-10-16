@@ -30,6 +30,9 @@ test("fails with the removal steps once actionlint accepts the form", () => {
   assert.equal(result.status, 1, result.stderr);
   assert.ok(result.stderr.includes("release-plan.yml"), result.stderr);
   assert.ok(result.stderr.includes("# zizmor: ignore[self-repository]"), result.stderr);
+  for (const leftover of ["`ci:` list", "jdx/mise-action", "pin in mise.toml", "docs/ci.md"]) {
+    assert.ok(result.stderr.includes(leftover), `${leftover} missing from: ${result.stderr}`);
+  }
 });
 
 test("fails as undecided when actionlint cannot run", () => {

@@ -2,10 +2,9 @@ import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 
-const CALLEE = "./.github/workflows/callee.yml";
 const SELF_REPOSITORY = "$/.github/workflows/callee.yml";
 const USES_LINE = 6;
 
@@ -95,7 +94,9 @@ function main() {
         "actionlint now accepts the `$/` self-repository form.",
         "In .github/workflows/release-plan.yml, change the `Assets` job's `uses: ./.github/workflows/release.yml` to `uses: $/.github/workflows/release.yml`,",
         "delete its `# zizmor: ignore[self-repository]` and the comment above it about actionlint,",
-        "then delete this probe: the `actionlint-probe` recipes in the justfile, the `ci.yml` steps that run them, scripts/actionlint-probe*.mjs and the two docs/ci.md rows.",
+        "then delete the probe and what only it needed: the two `actionlint-probe` recipes and their entries in the justfile's `ci:` list,",
+        "the `ci.yml` steps that run them and the `jdx/mise-action` step that installs actionlint, the actionlint pin in mise.toml,",
+        "scripts/actionlint-probe*.mjs, and the two docs/ci.md rows and the install prose that name actionlint.",
       ].join("\n"),
     );
     return 1;
@@ -111,6 +112,6 @@ function main() {
   return 2;
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
   process.exit(main());
 }
