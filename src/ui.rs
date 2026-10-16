@@ -1495,6 +1495,14 @@ mod render_tests {
                 &[">", " ", " "],
                 &[2],
             ),
+            (
+                "under the cursor, just fits, reversed on both cells",
+                "a\r\nb",
+                2,
+                4,
+                &[">", " ", "␍", "␊"],
+                &[2, 3],
+            ),
         ];
 
         for (what, name, left, width, expected, cursor) in cases {
