@@ -147,12 +147,15 @@ scoped to this crate.
 `justfile` holds the check definitions and each CI job runs them as recipes, so
 the commands exist once rather than as lists kept in sync by discipline.
 `just ci` runs the recipes of every `ci.yml` job but `E2ETests` (those need a
-fetched herdr), reproducing a CI failure locally with no push. Of the four
+fetched herdr), reproducing a CI failure locally with no push. Of the five
 tools CI pins and installs for itself, `just ci` needs `just`, `zizmor` and
-`actionlint`, and `cargo-deny` is for `just deny`:
+`actionlint` (the last two installed through `mise`), and `cargo-deny` is for
+`just deny`:
 
 ```sh
 cargo install just --version 1.58.0 --locked
+# mise, at the `version:` of the `jdx/mise-action` step in ci.yml
+curl https://mise.run | MISE_VERSION=v<that version> sh
 mise install            # zizmor and actionlint, at the versions mise.toml pins
 cargo install cargo-deny --version 0.20.2 --locked
 ```
@@ -167,7 +170,7 @@ actionlint's release page has binaries for its version.
 `gh auth token` for the online audits, and fails rather than running them offline.
 `just zizmor-test` needs the same, plus Node.
 
-All four are installed here at the versions CI installs, because a local tool
+All five are installed here at the versions CI installs, because a local tool
 that disagrees with CI's is the "clean here, red there" divergence this setup
 exists to prevent. `brew install just` is fine for everyday use and is what most
 setups already have; it just tracks the current formula rather than 1.58.0, so

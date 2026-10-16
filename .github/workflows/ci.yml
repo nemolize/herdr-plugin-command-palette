@@ -40,6 +40,7 @@ jobs:
       # taiki-e/install-action has no actionlint; mise reads the version from mise.toml.
       - uses: jdx/mise-action@9b200bcecbfd6303e69a4a261b2e09e3757440a7 # v5.2.0
         with:
+          version: 2026.10.11
           install_args: aqua:rhysd/actionlint
           cache: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
