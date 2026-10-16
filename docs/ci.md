@@ -26,6 +26,8 @@ read from `.github/workflows/`.
 | `cargo clippy --locked --all-targets -- -D warnings` | The default lint group is a correctness floor, and the tree already passes at `-D warnings`, so adopting it costs nothing today and catches real bug classes later. |
 | `just zizmor` | Audits the workflows themselves: every external `uses:` must be a full commit SHA, its trailing version comment must name that SHA's tag, and the known footguns (persisted checkout credentials, caches feeding a release, template injection) fail the job. Suppressions are inline `# zizmor: ignore[...]` comments on the line they excuse, each with its reason beside it — never on an external `uses:` line, whose comment must be the tag alone. |
 | `just zizmor-test` | The repository's own pins all carry their tag, so `just zizmor`'s version-comment check never fires on them, and a check that stopped working — zizmor renaming the audit it filters on, or `ZIZMOR_OFFLINE` set in the shell — would pass the same way. This writes fixture workflows into a temporary directory and asserts that `just zizmor` rejects a pin with no version comment, naming its line, and accepts one whose comment is its tag. |
+| `just actionlint-probe` | `release-plan.yml` calls `release.yml` as `./.github/workflows/release.yml` under `# zizmor: ignore[self-repository]`, because the pinned actionlint rejects the `$/` form zizmor asks for. Nothing else here runs actionlint, so nothing would say when a newer one accepts `$/` and the ignore can go. This runs the `actionlint` first on `PATH` on a fixture whose `uses:` is the `$/` form and passes while it is rejected. In CI that is the version `mise.toml` pins; locally, `mise exec -- just actionlint-probe` runs the same one, and a Homebrew build ahead of the pin can answer differently. It fails once the form is accepted, and its message lists the steps to drop the ignore and then the probe itself. It fires when the pin in `mise.toml` is bumped, not before. |
+| `just actionlint-probe-test` | The probe passes in today's world, so one that never fails looks the same as one that works. This feeds it a form actionlint accepts, and an actionlint that cannot start, and asserts the removal steps and the "could not tell" failure; it also asserts the verdict for each kind of actionlint output, including the unreadable-callee finding the same rule reports. |
 | `cargo test --locked` | The unit tests, which were being run by hand until now. |
 | `python3 herdr/palette-e2e.py` | The unit tests stop at the seams: `Screen` needs a real terminal, so nothing in-process sees a pick become a running command. This drives the built binary through a PTY against a stubbed herdr, and asserts that a rejected dispatch is readable in the pane rather than printed to a stderr the closing popup takes with it — the shape of "I picked it and nothing happened". |
 | `python3 herdr/open-test.py` | The action hop tells a popup collision from any other open failure by reading herdr's error envelope, whose shape changed between 0.8.2 and 0.9 (docs/design.md §6). A shape it stops matching shows only as a different message, so this runs the hop against a stub answering each envelope and asserts the message and exit status. |
@@ -145,25 +147,27 @@ scoped to this crate.
 `justfile` holds the check definitions and each CI job runs them as recipes, so
 the commands exist once rather than as lists kept in sync by discipline.
 `just ci` runs the recipes of every `ci.yml` job but `E2ETests` (those need a
-fetched herdr), reproducing a CI failure locally with no push. Of the three
-tools CI pins and installs for itself, `just ci` needs `just` and `zizmor`, and
-`cargo-deny` is for `just deny`:
+fetched herdr), reproducing a CI failure locally with no push. Of the four
+tools CI pins and installs for itself, `just ci` needs `just`, `zizmor` and
+`actionlint`, and `cargo-deny` is for `just deny`:
 
 ```sh
 cargo install just --version 1.58.0 --locked
-mise install            # zizmor, at the version mise.toml pins
+mise install            # zizmor and actionlint, at the versions mise.toml pins
 cargo install cargo-deny --version 0.20.2 --locked
 ```
 
-zizmor's version lives in `mise.toml`, and CI's `Lint` job installs the version
-it reads from there, so a bump is one edit. Without mise,
-`cargo install zizmor --locked --version` that version works the same.
+zizmor's and actionlint's versions live in `mise.toml`. CI's `Lint` job installs
+zizmor at the version it reads from there, and actionlint through `jdx/mise-action`
+(`taiki-e/install-action` has no actionlint), so a bump is one edit. Without mise,
+`cargo install zizmor --locked --version` that version works the same, and
+actionlint's release page has binaries for its version.
 
 `just zizmor` also needs `jq` and a logged-in `gh`: outside CI it takes
 `gh auth token` for the online audits, and fails rather than running them offline.
 `just zizmor-test` needs the same, plus Node.
 
-All three are installed here at the versions CI installs, because a local tool
+All four are installed here at the versions CI installs, because a local tool
 that disagrees with CI's is the "clean here, red there" divergence this setup
 exists to prevent. `brew install just` is fine for everyday use and is what most
 setups already have; it just tracks the current formula rather than 1.58.0, so
