@@ -96,7 +96,7 @@ function main() {
         "delete its `# zizmor: ignore[self-repository]` and the comment above it about actionlint,",
         "then delete the probe and what only it needed: the two `actionlint-probe` recipes and their entries in the justfile's `ci:` list,",
         "the `ci.yml` steps that run them and the `jdx/mise-action` step that installs actionlint, the actionlint pin in mise.toml,",
-        "scripts/actionlint-probe*.mjs, and the two docs/ci.md rows and the install prose that name actionlint.",
+        "scripts/actionlint-probe*.mjs, and the two docs/ci.md rows and the install prose that name actionlint or that step's mise version pin.",
       ].join("\n"),
     );
     return 1;
