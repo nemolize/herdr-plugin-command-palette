@@ -50,12 +50,12 @@ the conventions should not.
 need none ride `Test` instead. The split is by what a check must install, not
 by what kind of test it is.
 
-The `Audit` and `Release` workflows run two more recipes, outside `ci.yml`:
+These recipes have steps in the `Audit` and `Release` workflows, not in `ci.yml`:
 
 | Recipe | Why it is in |
 |---|---|
 | `just deny` | Runs in its own `Audit` workflow rather than CI. See the group table below. |
-| `just build-release <target>` | Builds one release asset, in the `Release` workflow rather than CI; it runs for each of the five targets and cuts the release (docs/design.md §11). Adds the three assets CI's `Build` job cannot reach — the two macOS targets need their own runner, Android the NDK — so nothing else compiles those three before the release build. On the Changesets route that is `Release Plan` building the release draft's commit, before any tag exists; on the manual tag route it is the run the tag triggers (`docs/release.md` says which route a release is on). A `workflow_dispatch` dry run builds them earlier on either route. |
+| `just build-release <target>` | Builds one release asset. `Release` runs it for each of the five targets, which cuts the release (docs/design.md §11); CI reaches it only through `just build-musl`, for the two musl targets. Adds the three assets CI's `Build` job cannot reach — the two macOS targets need their own runner, Android the NDK — so nothing else compiles those three before the release build. On the Changesets route that is `Release Plan` building the release draft's commit, before any tag exists; on the manual tag route it is the run the tag triggers (`docs/release.md` says which route a release is on). A `workflow_dispatch` dry run builds them earlier on either route. |
 
 ## What does not run
 
