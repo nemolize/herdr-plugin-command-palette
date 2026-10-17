@@ -248,15 +248,17 @@ tag comes into existence**, only at that point. Nothing in `Release` reads the
 tag from git: both jobs check out the release commit by SHA, and the manifest
 assertion compares the tag as a string.
 
-**Retrying a failed release.** A failed target usually leaves the draft
-unpublished and untagged, so nothing is public, but not always:
-`action-gh-release` keeps calling the API after it publishes the draft, so a
-run can end red with the release already live. Run `gh release view <tag>`
-first. A release that is not a draft is live: the run did its work, so retry and
-delete nothing, and a later `Release Plan` run skips it. Otherwise, either
-re-run the failed jobs of that `Release Plan` run, or run `Release Plan` by hand
-(`gh workflow run release-plan.yml`) — any later push to `main` does the same. Each rebuilds the commit the draft
-targets under the same version; no new changeset or version bump is involved.
+**Retrying a failed release.** A run that fails while building a target leaves
+the draft unpublished and untagged, so nothing is public. A run that fails in
+`Publish` can differ: `action-gh-release` keeps calling the API after it
+publishes the draft, so the run can end red with the release already live. Run
+`gh release view <tag>` first. A release that is not a draft is live: the run
+did its work, so retry nothing and delete nothing, and a later `Release Plan`
+run skips it. Otherwise, either re-run the failed jobs of that `Release Plan`
+run, which works for a day after the build only, or run `Release Plan` by hand
+(`gh workflow run release-plan.yml`) — any later push to `main` does the same.
+Each rebuilds the commit the draft targets under the same version; no new
+changeset or version bump is involved.
 Only the checkout of the draft's tree is pinned to that commit: `release.yml`
 is called with `./`, which GitHub loads from the run's own commit, and so are
 the scripts it checks out into `.release-tooling`. So a fault in either is
@@ -269,11 +271,11 @@ retried away: ship the fix with a changeset as the next version, and restate
 the stuck version's changelog entries in that changeset's note — its own
 section reaches no published release. Until the fix's version PR merges, each
 run rebuilds the broken draft and fails again; afterwards nothing targets the
-old version, so delete its draft (`gh release delete <tag>`) and it stays
-unreleased. Run `gh release view <tag>` again first and delete only a release
-that is still a draft: one that is no longer a draft is live, and deleting it
-would withdraw it. An in-progress run is never cancelled, so a push landing
-mid-build waits and then sees the published release or the draft to retry.
+old version. Check it with `gh release view <tag>`: a draft can be deleted
+(`gh release delete <tag>`), after which it stays unreleased, but a release that
+is no longer a draft is live, and deleting it would withdraw it. An in-progress
+run is never cancelled, so a push landing mid-build waits and then sees the
+published release or the draft to retry.
 
 None of this starts without a repository setting no file here can carry:
 **Settings → Actions → General → "Allow GitHub Actions to create and approve
