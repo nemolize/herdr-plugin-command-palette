@@ -4,7 +4,7 @@ Status: accepted (2026-09-05). Decision 1 and the commit-message consequence are
 superseded by ADR 0002 (`docs/adr/0002-changesets-release-planning.md`);
 decisions 2 and 3 stand, with `Release Plan` in the role `Release-Please` had.
 
-`docs/ci.md` describes how releases are cut today. This records what was
+`docs/release.md` describes how releases are cut today. This records what was
 rejected on the way there, which that document does not carry and a reader
 cannot recover from the workflows: every alternative below leaves no trace in
 the files that were kept.
@@ -142,7 +142,7 @@ and the bypass is what remains available when it cannot be.
 Decision 1's option comparison and decision 2's credential weighing were worked
 through for `banaris/website` on 2026-08-26 and 2026-08-28, and are reused here
 rather than re-derived; the `workflow_call` route is this repository's own and
-its reasoning is recorded in `docs/ci.md` under "Cutting a release".
+its reasoning is recorded in `docs/release.md`.
 
 Decision 2's account of that repository was corrected on 2026-09-12: it had read
 the App as unavoidable there, and the dispatch route removed it.
