@@ -566,9 +566,34 @@ mod tests {
     }
 
     /// Another thread forking while a stub is written made its first run fail
-    /// with "Text file busy" (Linux only).
+    /// with "Text file busy" (Linux only). It runs in a child process: the
+    /// flood of exiting children interrupts syscalls of tests sharing a process.
     #[test]
     fn a_stub_runs_while_other_threads_spawn_processes() {
+        let out = Proc::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "--ignored",
+                "herdr::tests::stub_race_in_its_own_process",
+            ])
+            .output()
+            .unwrap();
+        let report = format!(
+            "{}\n{}\n{}",
+            out.status,
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert!(out.status.success(), "{report}");
+        assert!(
+            report.contains("1 passed"),
+            "the child ran no test: {report}"
+        );
+    }
+
+    #[test]
+    #[ignore = "run by a_stub_runs_while_other_threads_spawn_processes"]
+    fn stub_race_in_its_own_process() {
         let dir = std::env::temp_dir().join(format!("herdr-busy-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         struct StopOnDrop(std::sync::Arc<std::sync::atomic::AtomicBool>);
