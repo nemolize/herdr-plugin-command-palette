@@ -74,7 +74,7 @@ class RunOpenAction(unittest.TestCase):
                 return completed({"log": {"log_id": "plugin-log-2"}})
             return completed({"logs": next(lists)})
 
-        with mock.patch.object(popup_collision_e2e.catalog_e2e, "herdr", herdr), \
+        with mock.patch.object(popup_collision_e2e.herdr_fixture, "herdr", herdr), \
                 mock.patch.object(popup_collision_e2e.time, "sleep"):
             run = popup_collision_e2e.run_open_action(Path("/nonexistent"))
         self.assertEqual(run, finished)
@@ -83,7 +83,7 @@ class RunOpenAction(unittest.TestCase):
         def herdr(*args, home, check=True):
             return subprocess.CompletedProcess([], 1, "", "plugin not found")
 
-        with mock.patch.object(popup_collision_e2e.catalog_e2e, "herdr", herdr):
+        with mock.patch.object(popup_collision_e2e.herdr_fixture, "herdr", herdr):
             with self.assertRaisesRegex(RuntimeError, r"^herdr plugin action invoke .* exited 1"):
                 popup_collision_e2e.run_open_action(Path("/nonexistent"))
 
@@ -96,7 +96,7 @@ class ReshapedAnswer(unittest.TestCase):
         def herdr(*args, home, check=True):
             return subprocess.CompletedProcess([], 0, stdout, "")
 
-        with mock.patch.object(popup_collision_e2e.catalog_e2e, "herdr", herdr):
+        with mock.patch.object(popup_collision_e2e.herdr_fixture, "herdr", herdr):
             with self.assertRaisesRegex(RuntimeError, rf"^{message}$"):
                 popup_collision_e2e.run_open_action(Path("/nonexistent"))
 
@@ -124,7 +124,7 @@ class ReshapedAnswer(unittest.TestCase):
                 return completed({"log": {"log_id": "plugin-log-1"}})
             return completed({"logs": ["plugin-log-1"]})
 
-        with mock.patch.object(popup_collision_e2e.catalog_e2e, "herdr", herdr):
+        with mock.patch.object(popup_collision_e2e.herdr_fixture, "herdr", herdr):
             with self.assertRaisesRegex(
                 RuntimeError,
                 r"^herdr plugin log list answered without result\.logs\[0\]\.log_id$",
@@ -137,7 +137,7 @@ class ReshapedAnswer(unittest.TestCase):
                 return completed({"log": {"log_id": "plugin-log-1"}})
             return completed({"logs": {}})
 
-        with mock.patch.object(popup_collision_e2e.catalog_e2e, "herdr", herdr):
+        with mock.patch.object(popup_collision_e2e.herdr_fixture, "herdr", herdr):
             with self.assertRaisesRegex(
                 RuntimeError,
                 r"^herdr plugin log list answered result\.logs as a dict, not a list$",
@@ -150,14 +150,14 @@ class MainVerdict(unittest.TestCase):
     the run's exit status and the server's shutdown are covered."""
 
     def run_main(self, *runs: dict | Exception) -> tuple[int, str]:
-        catalog_e2e = popup_collision_e2e.catalog_e2e
+        herdr_fixture = popup_collision_e2e.herdr_fixture
         stderr = io.StringIO()
         with tempfile.TemporaryDirectory() as root, \
-                mock.patch.object(catalog_e2e, "HERDR", "herdr"), \
-                mock.patch.object(catalog_e2e, "FIXTURE_ROOT", Path(root)), \
-                mock.patch.object(catalog_e2e, "Fixture") as fixture, \
-                mock.patch.object(catalog_e2e, "herdr"), \
-                mock.patch.object(catalog_e2e, "running_herdr_version", return_value="0.9.3"), \
+                mock.patch.object(herdr_fixture, "HERDR", "herdr"), \
+                mock.patch.object(herdr_fixture, "FIXTURE_ROOT", Path(root)), \
+                mock.patch.object(herdr_fixture, "Fixture") as fixture, \
+                mock.patch.object(herdr_fixture, "herdr"), \
+                mock.patch.object(herdr_fixture, "running_herdr_version", return_value="0.9.3"), \
                 mock.patch.object(popup_collision_e2e, "run_open_action", side_effect=runs), \
                 redirect_stderr(stderr):
             code = popup_collision_e2e.main()

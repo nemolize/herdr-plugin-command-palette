@@ -20,7 +20,9 @@ from pathlib import Path
 from unittest import mock
 
 import catalog_placeholders
+import herdr_fixture
 from catalog_placeholders import flag_before, resolved_args
+from herdr_answer import answer, answer_field
 
 HARNESS = Path(__file__).resolve().parent / "catalog-e2e.py"
 spec = importlib.util.spec_from_file_location("catalog_e2e", HARNESS)
@@ -30,8 +32,6 @@ unaccepted_response = catalog_e2e.unaccepted_response
 effect_target = catalog_e2e.effect_target
 missing_effect = catalog_e2e.missing_effect
 layout_rect = catalog_e2e.layout_rect
-answer = catalog_e2e.answer
-answer_field = catalog_e2e.answer_field
 
 
 class UnacceptedResponse(unittest.TestCase):
@@ -329,9 +329,13 @@ class MainVerdict(unittest.TestCase):
         self.catalog = catalog
         self.use_entry("pane.close", '["pane", "close", "{pane}"]')
         fixtures = scratch / "fixtures"
-        for name, value in (("HERDR", str(stub)), ("CATALOG", catalog), ("FIXTURE_ROOT", fixtures)):
-            self.addCleanup(setattr, catalog_e2e, name, getattr(catalog_e2e, name))
-            setattr(catalog_e2e, name, value)
+        for module, name, value in (
+            (herdr_fixture, "HERDR", str(stub)),
+            (catalog_e2e, "CATALOG", catalog),
+            (herdr_fixture, "FIXTURE_ROOT", fixtures),
+        ):
+            self.addCleanup(setattr, module, name, getattr(module, name))
+            setattr(module, name, value)
 
     def use_entry(self, entry_id: str, args: str, resolve: str | None = None) -> None:
         line = f'resolve = "{resolve}"\n' if resolve else ""
