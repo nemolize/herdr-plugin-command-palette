@@ -101,21 +101,29 @@ unapproved (`docs/release.md`) rather than a routine merge route.
 `continue-on-error` appears nowhere and should not be added: it turns the commit
 status green, which hides a failure rather than making it advisory.
 
-The intended reading of a red `Test` or `Build` is *the diff broke
-something* — each fails only for a reason present in the change, which is what
-makes them safe to require. Two required checks hold a weaker version of that
-property, because each watches something that changes outside this repo.
-`E2ETests` resolves a herdr release rather than pinning one, so a constraint
-herdr adds can turn it red against an unchanged catalog. That is the point of
-the job — a silent catalog drift is exactly what issue #24 was opened about —
-but it means a red `E2ETests` is worth reading before assuming the diff caused
-it. `Lint`'s `zizmor` step asks GitHub about every pinned action, so a published
-advisory, an upstream tag moved or deleted from under its version comment, or a
-GitHub API error or rate limit turns `Lint` red against an unchanged workflow.
-That is accepted rather than split into a second, non-blocking run: an advisory
-or a moved tag wants the same bump Renovate would propose, and an API error
-clears on a re-run. `Audit` stays outside the required set, so an advisory
-published against an unchanged lockfile reports rather than blocks a merge.
+A red `Test` or `Build` is meant to say *the diff broke something*: each fails
+for a reason present in the change, which is what makes them safe to require.
+No required check is fully insulated from outside this repo, though. Every job
+installs tools and fetches dependencies at run time — GitHub for actions and
+tool binaries, crates.io, the Rust toolchain host, the npm registry in `Test`,
+`herdr.dev` in `E2ETests`; `.github/workflows/ci.yml` shows which job uses
+which — so an outage, a GitHub API error or a rate limit can turn any of the
+four red against an unchanged diff. A re-run clears that.
+
+Two checks can also go red against an unchanged diff for a reason a re-run does
+not clear. `E2ETests` resolves a herdr release rather than pinning one, so a
+constraint herdr adds can turn it red against an unchanged catalog. That is the
+point of the job — a silent catalog drift is exactly what issue #24 was opened
+about — but it means a red `E2ETests` is worth reading before assuming the diff
+caused it. `Lint`'s `zizmor` step asks GitHub about every pinned action, so a
+published advisory against a pinned action, or a tag moved or deleted from under
+its version comment, turns `Lint` red against an unchanged workflow; the author
+re-pins to a tag that exists and is not flagged. That is accepted rather than
+split into a second, non-blocking run: a non-blocking run would let a
+vulnerable pin, or one that no tag names, merge, and the other cause, a GitHub
+API error or rate limit, is answered by a re-run. `Audit` stays outside the
+required set, so an advisory published against an unchanged lockfile reports
+rather than blocks a merge.
 
 On a scheduled failure `Audit` opens (or comments on) an issue, because a red
 cron run on a repo with one maintainer otherwise reaches nobody. That step is not
@@ -145,10 +153,14 @@ rather than one per consumer.
 
 CI installs it via `actions-rust-lang/setup-rust-toolchain` with no `toolchain:`
 input, which reads the file. That action's `rustflags` input defaults to
-`-D warnings`; it is set to `""` here deliberately. A global `RUSTFLAGS` is part
-of cargo's fingerprint, so it would diverge the CI cache from every local
-build. Clippy's `-D warnings` is passed per-invocation instead, where it is
-scoped to this crate.
+`-D warnings`; it is set to `""` here deliberately. The default would turn a
+rustc warning into an error in every compile of this crate, including `Build`'s
+release builds for the musl targets and `Release`'s for all five. A warning only
+a release target or profile raises is one host clippy never compiles, so it
+would fail those builds on a commit that passes `Lint`. A global `RUSTFLAGS` is
+also part of cargo's fingerprint, so it would diverge the CI cache from every
+local build. Clippy's `-D warnings` is passed per-invocation instead, where it
+is scoped to this crate.
 
 `justfile` holds the check definitions and each CI job runs them as recipes, so
 the commands exist once rather than as lists kept in sync by discipline.
