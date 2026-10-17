@@ -121,8 +121,12 @@ class LayoutRect(unittest.TestCase):
 
     def test_raises_naming_the_entry_on_each_reshaped_answer(self):
         for stdout, part in (
-            ("layout unavailable", "without a result.layout.panes list"),
-            ('{"result":{"layout":{"tabs":[]}}}', "without a result.layout.panes list"),
+            ("layout unavailable", "answered without a JSON envelope: layout unavailable"),
+            ('{"result":{"layout":{"tabs":[]}}}', "answered without result.layout.panes"),
+            (
+                '{"result":{"layout":{"panes":{}}}}',
+                "answered result.layout.panes as a dict, not a list",
+            ),
             (layout({"pane_id": "p9", "rect": CENTRE}), "pane p1 is missing from its own layout"),
             (layout("p1"), "pane p1 is missing from its own layout"),
             (layout({"pane_id": "p1"}), "rect is not numeric"),
@@ -152,7 +156,7 @@ class FixtureAnswer(unittest.TestCase):
             ("worktree list", '{"result":{"repo_root":"/r"}}', "source.repo_root", "result.source"),
         ):
             with self.subTest(call=call, stdout=stdout), self.assertRaisesRegex(
-                RuntimeError, rf"^fixture setup: herdr {call} answered without {re.escape(missing)}$"
+                RuntimeError, rf"^herdr {call} answered without {re.escape(missing)}$"
             ):
                 answer(call, stdout, path)
 
@@ -164,13 +168,13 @@ class FixtureAnswer(unittest.TestCase):
         ):
             path = "pane.pane_id" if kind is str else "pane"
             with self.subTest(stdout=stdout), self.assertRaisesRegex(
-                RuntimeError, rf"^fixture setup: herdr pane split answered {re.escape(message)}$"
+                RuntimeError, rf"^herdr pane split answered {re.escape(message)}$"
             ):
                 answer("pane split", stdout, path, kind)
 
     def test_raises_naming_the_call_on_an_answer_that_is_not_json(self):
         with self.assertRaisesRegex(
-            RuntimeError, r"^fixture setup: herdr pane list answered without a JSON envelope: oops$"
+            RuntimeError, r"^herdr pane list answered without a JSON envelope: oops$"
         ):
             answer("pane list", "oops\n", "panes")
 

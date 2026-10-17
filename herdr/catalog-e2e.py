@@ -34,6 +34,7 @@ import tomllib
 from pathlib import Path
 
 from catalog_placeholders import flag_before, resolved_args
+from herdr_answer import answer, answer_field, parse_envelope
 
 REPO = Path(__file__).resolve().parent.parent
 CATALOG = REPO / "herdr" / "catalog.toml"
@@ -79,38 +80,6 @@ def herdr(*args: str, home: Path, check: bool = True) -> subprocess.CompletedPro
             f"exit={proc.returncode}\n{proc.stderr.strip()}"
         )
     return proc
-
-
-def answer_field(
-    call: str, node: object, path: str, kind: type = str, within: str = ""
-) -> object:
-    """The `kind` value at dotted `path` under `node`, the part of herdr's answer
-    to `call` found at `within`. A reshaped answer raises a RuntimeError naming the
-    call and the key, which `main` reports as that entry's BROKE line where a
-    KeyError or TypeError would abort the whole run (#173)."""
-    walked = within
-    for key in path.split("."):
-        walked = f"{walked}.{key}" if walked else key
-        if not isinstance(node, dict) or key not in node:
-            raise RuntimeError(f"fixture setup: herdr {call} answered without {walked}")
-        node = node[key]
-    if not isinstance(node, kind):
-        raise RuntimeError(
-            f"fixture setup: herdr {call} answered {walked} as a "
-            f"{type(node).__name__}, not a {kind.__name__}"
-        )
-    return node
-
-
-def answer(call: str, stdout: str, path: str, kind: type = str) -> object:
-    """`answer_field` on the `result` of herdr's answer to `call`."""
-    body = parse_envelope(stdout)
-    if body is None:
-        raise RuntimeError(
-            f"fixture setup: herdr {call} answered without a JSON envelope: "
-            f"{stdout.strip()[:200]}"
-        )
-    return answer_field(call, body, f"result.{path}", kind)
 
 
 def start_server_and_await_readiness(home: Path) -> subprocess.Popen:
@@ -238,7 +207,7 @@ class Fixture:
     def _read_ids(self) -> dict[str, str]:
         rows = answer("pane list", herdr("pane", "list", home=self.home).stdout, "panes", list)
         if not rows:
-            raise RuntimeError("fixture setup: herdr pane list answered an empty result.panes")
+            raise RuntimeError("herdr pane list answered an empty result.panes")
         for i, row in enumerate(rows):
             for key in ("pane_id", "tab_id", "workspace_id"):
                 answer_field("pane list", row, key, within=f"result.panes[{i}]")
@@ -265,14 +234,6 @@ class Fixture:
             self.server.wait(timeout=10)
         except subprocess.TimeoutExpired:
             self.server.kill()
-
-
-def parse_envelope(text: str) -> dict | None:
-    try:
-        body = json.loads(text)
-    except ValueError:
-        return None
-    return body if isinstance(body, dict) else None
 
 
 def unaccepted_response(stdout: str, stderr: str) -> str | None:
@@ -377,15 +338,10 @@ def is_numeric_rect(rect: object) -> bool:
 
 
 def layout_rect(entry_id: str, pane: str, stdout: str) -> dict:
-    body = parse_envelope(stdout)
-    result = body.get("result") if body else None
-    layout = result.get("layout") if isinstance(result, dict) else None
-    rows = layout.get("panes") if isinstance(layout, dict) else None
-    if not isinstance(rows, list):
-        raise RuntimeError(
-            f"{entry_id}: herdr pane layout --pane {pane} answered without a "
-            f"result.layout.panes list: {stdout.strip()[:200]}"
-        )
+    try:
+        rows = answer(f"pane layout --pane {pane}", stdout, "layout.panes", list)
+    except RuntimeError as e:
+        raise RuntimeError(f"{entry_id}: {e}") from None
     row = next((r for r in rows if isinstance(r, dict) and r.get("pane_id") == pane), None)
     if row is None:
         raise RuntimeError(f"{entry_id}: pane {pane} is missing from its own layout")
