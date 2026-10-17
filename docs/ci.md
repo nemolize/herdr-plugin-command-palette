@@ -317,11 +317,11 @@ It exists because macOS and Android compile nowhere else — CI's `Build` job
 covers only the two musl targets — so without it the first compile of three of
 the five assets would be the release build, on either route. `Publish` runs on a
 dispatch too, so its five-asset check and checksum are rehearsed rather than
-first executing in a release build. It skips five steps there: the manifest
-assertion and the upload, which run only when publishing, and the draft-target
-assertion with the two steps preparing it (checking out the release tooling,
-setting up Node), which run only when `Release Plan` passes a draft's tag. No
-dry run exercises that assertion, then.
+first executing in a release build. It skips the tag-gated steps there: the
+manifest assertion and the upload, which run only when publishing, and the
+draft-target assertion with the two steps preparing it (checking out the
+release tooling, setting up Node), which run only when `Release Plan` passes a
+draft's tag. No dry run exercises that assertion, then.
 
 Registering the dispatch needs the workflow on the default branch, so *this*
 workflow could not be rehearsed before it merged. That is a one-time bootstrap
