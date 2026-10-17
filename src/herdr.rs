@@ -571,17 +571,22 @@ mod tests {
     fn a_stub_runs_while_other_threads_spawn_processes() {
         let dir = std::env::temp_dir().join(format!("herdr-busy-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
+        struct StopOnDrop(std::sync::Arc<std::sync::atomic::AtomicBool>);
+        impl Drop for StopOnDrop {
+            fn drop(&mut self) {
+                self.0.store(true, std::sync::atomic::Ordering::Relaxed);
+            }
+        }
         let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let spawners: Vec<_> = (0..4)
-            .map(|_| {
-                let stop = stop.clone();
-                std::thread::spawn(move || {
-                    while !stop.load(std::sync::atomic::Ordering::Relaxed) {
-                        let _ = std::process::Command::new("true").status();
-                    }
-                })
-            })
-            .collect();
+        let _stop_spawners = StopOnDrop(stop.clone());
+        for _ in 0..4 {
+            let stop = stop.clone();
+            std::thread::spawn(move || {
+                while !stop.load(std::sync::atomic::Ordering::Relaxed) {
+                    let _ = Proc::new("true").status();
+                }
+            });
+        }
 
         for i in 0..50 {
             let sub = dir.join(i.to_string());
@@ -591,10 +596,6 @@ mod tests {
             assert_eq!(out.stdout, b"ok\n", "run {i}");
         }
 
-        stop.store(true, std::sync::atomic::Ordering::Relaxed);
-        for spawner in spawners {
-            spawner.join().unwrap();
-        }
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
