@@ -15,7 +15,6 @@ stderr come back from `herdr plugin log list`.
 
 from __future__ import annotations
 
-import importlib.util
 import json
 import shutil
 import sys
@@ -23,14 +22,10 @@ import tempfile
 import time
 from pathlib import Path
 
+import herdr_fixture
 from herdr_answer import answer, answer_field
 
-HARNESS = Path(__file__).resolve().parent / "catalog-e2e.py"
-spec = importlib.util.spec_from_file_location("catalog_e2e", HARNESS)
-catalog_e2e = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(catalog_e2e)
-
-HOP = catalog_e2e.REPO / "herdr" / "open.sh"
+HOP = herdr_fixture.REPO / "herdr" / "open.sh"
 PLUGIN_ID = "popup-collision-e2e"
 COLLISION = "command palette: a popup is already open (press Esc in it to close)\n"
 RUN_TIMEOUT_SECS = 15
@@ -64,9 +59,9 @@ def herdr_answer(
     call: str, *args: str, home: Path, path: str, kind: type = str
 ) -> object:
     """The `kind` value at `path` in the `result` of a call made after setup,
-    failing with its own argv — `catalog_e2e.herdr` would label any failure as
+    failing with its own argv — `herdr_fixture.herdr` would label any failure as
     fixture setup."""
-    proc = catalog_e2e.herdr(*args, home=home, check=False)
+    proc = herdr_fixture.herdr(*args, home=home, check=False)
     if proc.returncode != 0:
         raise RuntimeError(
             f"herdr {' '.join(args)} exited {proc.returncode}\n"
@@ -121,22 +116,22 @@ def failure(first: dict, second: dict) -> str | None:
 
 
 def main() -> int:
-    if catalog_e2e.HERDR is None:
+    if herdr_fixture.HERDR is None:
         print(
             "no herdr found — run `just fetch-herdr`, or put one on PATH",
             file=sys.stderr,
         )
         return 1
 
-    catalog_e2e.FIXTURE_ROOT.mkdir(parents=True, exist_ok=True)
-    home = Path(tempfile.mkdtemp(dir=catalog_e2e.FIXTURE_ROOT))
+    herdr_fixture.FIXTURE_ROOT.mkdir(parents=True, exist_ok=True)
+    home = Path(tempfile.mkdtemp(dir=herdr_fixture.FIXTURE_ROOT))
     try:
-        fixture = catalog_e2e.Fixture(home)
+        fixture = herdr_fixture.Fixture(home)
         try:
             plugin = home / "plugin"
             plugin.mkdir()
             (plugin / "herdr-plugin.toml").write_text(MANIFEST)
-            catalog_e2e.herdr("plugin", "link", str(plugin), home=home)
+            herdr_fixture.herdr("plugin", "link", str(plugin), home=home)
             first = run_open_action(home)
             second = run_open_action(home)
         finally:
@@ -147,7 +142,7 @@ def main() -> int:
     finally:
         shutil.rmtree(home, ignore_errors=True)
 
-    running = catalog_e2e.running_herdr_version() or "(version unknown)"
+    running = herdr_fixture.running_herdr_version() or "(version unknown)"
     reason = failure(first, second)
     if reason is not None:
         print(f"FAIL against herdr {running}: {reason}", file=sys.stderr)
