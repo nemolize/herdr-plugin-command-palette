@@ -23,6 +23,8 @@ import tempfile
 import time
 from pathlib import Path
 
+from herdr_answer import answer, answer_field
+
 HARNESS = Path(__file__).resolve().parent / "catalog-e2e.py"
 spec = importlib.util.spec_from_file_location("catalog_e2e", HARNESS)
 catalog_e2e = importlib.util.module_from_spec(spec)
@@ -58,33 +60,36 @@ command = ["sh", {json.dumps(str(HOP))}]
 """
 
 
-def herdr_result(*args: str, home: Path) -> dict:
-    """The `result` of a call made after setup, failing with its own argv —
-    `catalog_e2e.herdr` would label any failure as fixture setup."""
+def herdr_answer(
+    call: str, *args: str, home: Path, path: str, kind: type = str
+) -> object:
+    """The `kind` value at `path` in the `result` of a call made after setup,
+    failing with its own argv — `catalog_e2e.herdr` would label any failure as
+    fixture setup."""
     proc = catalog_e2e.herdr(*args, home=home, check=False)
-    try:
-        result = json.loads(proc.stdout)["result"]
-    except (ValueError, KeyError, TypeError):
-        result = None
-    if proc.returncode != 0 or not isinstance(result, dict):
+    if proc.returncode != 0:
         raise RuntimeError(
             f"herdr {' '.join(args)} exited {proc.returncode}\n"
             f"{(proc.stdout + proc.stderr).strip()}"
         )
-    return result
+    return answer(call, proc.stdout, path, kind)
 
 
 def run_open_action(home: Path) -> dict:
     """Invoke the action once and return its log entry once the hop has exited."""
-    invoked = herdr_result("plugin", "action", "invoke", "open", "--plugin", PLUGIN_ID, home=home)
-    log_id = (invoked.get("log") or {}).get("log_id")
+    log_id = herdr_answer(
+        "plugin action invoke", "plugin", "action", "invoke", "open", "--plugin", PLUGIN_ID,
+        home=home, path="log.log_id",
+    )
     if not log_id:
-        raise RuntimeError(f"`plugin action invoke` named no log_id: {json.dumps(invoked)}")
+        raise RuntimeError("herdr plugin action invoke answered an empty result.log.log_id")
     deadline = time.monotonic() + RUN_TIMEOUT_SECS
     while time.monotonic() < deadline:
-        logs = herdr_result("plugin", "log", "list", home=home).get("logs")
-        if not isinstance(logs, list):
-            raise RuntimeError(f"`plugin log list` answered without a log list: {logs!r}")
+        logs = herdr_answer(
+            "plugin log list", "plugin", "log", "list", home=home, path="logs", kind=list
+        )
+        for i, log in enumerate(logs):
+            answer_field("plugin log list", log, "log_id", within=f"result.logs[{i}]")
         run = next((log for log in logs if log.get("log_id") == log_id), None)
         if run is not None and run.get("finished_unix_ms") is not None:
             return run

@@ -88,6 +88,63 @@ class RunOpenAction(unittest.TestCase):
                 popup_collision_e2e.run_open_action(Path("/nonexistent"))
 
 
+class ReshapedAnswer(unittest.TestCase):
+    """The same message `catalog-e2e` gives for the same reshaped answer: both
+    read herdr's answers through `herdr_answer.py`."""
+
+    def raises(self, stdout: str, message: str) -> None:
+        def herdr(*args, home, check=True):
+            return subprocess.CompletedProcess([], 0, stdout, "")
+
+        with mock.patch.object(popup_collision_e2e.catalog_e2e, "herdr", herdr):
+            with self.assertRaisesRegex(RuntimeError, rf"^{message}$"):
+                popup_collision_e2e.run_open_action(Path("/nonexistent"))
+
+    def test_names_a_missing_log_id(self):
+        self.raises(
+            json.dumps({"result": {"log": {}}}),
+            r"herdr plugin action invoke answered without result\.log\.log_id",
+        )
+
+    def test_names_an_answer_that_is_not_json(self):
+        self.raises(
+            "oops\n",
+            r"herdr plugin action invoke answered without a JSON envelope: oops",
+        )
+
+    def test_names_an_empty_log_id(self):
+        self.raises(
+            json.dumps({"result": {"log": {"log_id": ""}}}),
+            r"herdr plugin action invoke answered an empty result\.log\.log_id",
+        )
+
+    def test_names_a_log_row_that_is_not_an_object(self):
+        def herdr(*args, home, check=True):
+            if args[:3] == ("plugin", "action", "invoke"):
+                return completed({"log": {"log_id": "plugin-log-1"}})
+            return completed({"logs": ["plugin-log-1"]})
+
+        with mock.patch.object(popup_collision_e2e.catalog_e2e, "herdr", herdr):
+            with self.assertRaisesRegex(
+                RuntimeError,
+                r"^herdr plugin log list answered without result\.logs\[0\]\.log_id$",
+            ):
+                popup_collision_e2e.run_open_action(Path("/nonexistent"))
+
+    def test_names_a_log_list_of_another_type(self):
+        def herdr(*args, home, check=True):
+            if args[:3] == ("plugin", "action", "invoke"):
+                return completed({"log": {"log_id": "plugin-log-1"}})
+            return completed({"logs": {}})
+
+        with mock.patch.object(popup_collision_e2e.catalog_e2e, "herdr", herdr):
+            with self.assertRaisesRegex(
+                RuntimeError,
+                r"^herdr plugin log list answered result\.logs as a dict, not a list$",
+            ):
+                popup_collision_e2e.run_open_action(Path("/nonexistent"))
+
+
 class MainVerdict(unittest.TestCase):
     """Runs `main()` with each run stubbed, so the call site of `failure()`,
     the run's exit status and the server's shutdown are covered."""
