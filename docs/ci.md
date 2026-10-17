@@ -90,7 +90,7 @@ The ruleset also requires a pull request, forbids deletion and non-fast-forward
 pushes, and asks for no approving review — a repository with one maintainer
 would otherwise block on a review nobody can give. It lets the admin role bypass
 via pull request, which is the version PR's escape hatch when the check runs sit
-unapproved (below) rather than a routine merge route.
+unapproved (`docs/release.md`) rather than a routine merge route.
 
 `continue-on-error` appears nowhere and should not be added: it turns the commit
 status green, which hides a failure rather than making it advisory.

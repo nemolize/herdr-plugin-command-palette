@@ -117,8 +117,8 @@ still publishes, so a release can be cut when `Release Plan` cannot. It writes
 no changelog, and the version it tags must already be in `package.json` and
 every manifest `just release-test` checks — the publish asserts
 `herdr-plugin.toml` against the tag. Either way the same matrix builds the five
-assets of §11 with `fail-fast: false`. Three properties are worth stating
-because each fails silently otherwise:
+assets of `docs/design.md` §11 with `fail-fast: false`. Three properties are
+worth stating because each fails silently otherwise:
 
 - **The publish is all-or-nothing.** `install.sh` requests exactly one asset
   name per platform, so a release carrying four of the five is not a partial
@@ -130,9 +130,10 @@ because each fails silently otherwise:
   disagreement publishes assets nobody will ever ask for. Asserted at publish.
 - **Each artefact is checked against the name it is about to be published
   under.** A mispublished asset fails at exec on the user's machine rather than
-  at install, and on Termux both wrong picks still exit 0 (§2) — so the check
-  reads what the binary *is* via `file`, the same assertion `install.sh` makes
-  downstream, at the one point a bad artefact can still be stopped.
+  at install, and on Termux both wrong picks still exit 0 (`docs/design.md`
+  §2) — so the check reads what the binary *is* via `file`, the same assertion
+  `install.sh` makes downstream, at the one point a bad artefact can still be
+  stopped.
 
 The NDK is pinned by writing its version into the path rather than following
 `ANDROID_NDK_ROOT`: the runner image carries several and rotates which one that
