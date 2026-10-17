@@ -273,17 +273,13 @@ changelog entries in that changeset's note — its own section reaches no
 published release. Until the fix's version PR merges, each run rebuilds the
 broken draft and fails again; afterwards nothing targets the old version.
 
-The stuck version itself can still be released, by the manual tag route: merge
-the fix to `main`, wait until no `Release Plan` run is in flight, delete the
-draft, and hand-push the tag on a commit carrying the fix before anything else
-lands on `main` (that push would draft the stuck version again; the last case
-of "A hand-pushed tag whose run has not ended green"). That needs the commit to
-still carry the stuck version in `package.json` and every manifest `just
-release-test` checks, so it stops being available once a later version has
-landed on `main`. The route also attaches GitHub's generated release notes
-instead of the changelog section, which stays in `CHANGELOG.md` only. A new
-version is required when either of those matters, or when the fix is
-itself worth a changelog entry.
+The stuck version itself can sometimes be released without a new version, by
+hand-pushing its tag on the draft's commit (`gh release view <tag> --json
+targetCommitish`) with the fix cherry-picked onto it — never on `main`'s head,
+which also carries every change merged since the version commit. Nothing here
+rehearses that route and no CI job runs on that commit, so treat it as a
+fallback; the tag's own steps are in "A hand-pushed tag whose run has not ended
+green". Otherwise a new version is required.
 
 Check the draft with `gh release view <tag>`: a draft can be deleted
 (`gh release delete <tag>`), after which it stays unreleased until a tag
