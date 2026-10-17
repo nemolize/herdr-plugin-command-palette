@@ -266,13 +266,28 @@ fixed by merging the fix to `main` without a changeset, and that push rebuilds
 the draft with it, provided the fix needs nothing new from the draft's tree;
 re-running the failed jobs reuses the old workflow and cannot pick the fix up.
 A fault in anything the release jobs read from the draft's tree — the
-`justfile` and toolchain file as much as source and Cargo files — cannot be
-retried away: ship the fix with a changeset as the next version, and restate
-the stuck version's changelog entries in that changeset's note — its own
-section reaches no published release. Until the fix's version PR merges, each
-run rebuilds the broken draft and fails again; afterwards nothing targets the
-old version. Check it with `gh release view <tag>`: a draft can be deleted
-(`gh release delete <tag>`), after which it stays unreleased, but a release that
+`justfile` and toolchain file as much as source and Cargo files — is not fixed
+by a rebuild, which reads the same tree. The usual route is to ship the fix
+with a changeset as the next version, and restate the stuck version's
+changelog entries in that changeset's note — its own section reaches no
+published release. Until the fix's version PR merges, each run rebuilds the
+broken draft and fails again; afterwards nothing targets the old version.
+
+The stuck version itself can still be released, by the manual tag route: merge
+the fix to `main`, wait until no `Release Plan` run is in flight, delete the
+draft, and hand-push the tag on a commit carrying the fix before anything else
+lands on `main` (that push would draft the stuck version again; the last case
+of "A hand-pushed tag whose run has not ended green"). That needs the commit to
+still carry the stuck version in `package.json` and every manifest `just
+release-test` checks, so it stops being available once a later version has
+landed on `main`. The route also attaches GitHub's generated release notes
+instead of the changelog section, which stays in `CHANGELOG.md` only. A new
+version is required when either of those matters, or when the fix is
+itself worth a changelog entry.
+
+Check the draft with `gh release view <tag>`: a draft can be deleted
+(`gh release delete <tag>`), after which it stays unreleased until a tag
+publishes it, but a release that
 is no longer a draft is live, and deleting it would withdraw it. An in-progress
 run is never cancelled, so a push landing mid-build waits and then sees the
 published release or the draft to retry.
