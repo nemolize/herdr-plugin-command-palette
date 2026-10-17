@@ -61,8 +61,7 @@ pub fn generate(settings: &AutoName, system: &str, prompt: &str) -> Result<Strin
         let remaining = deadline.saturating_duration_since(Instant::now());
         match post(&url, &body, remaining) {
             Ok((status, text)) => return answer_from(status, &text),
-            Err(e) if is_interrupted(&e) && !remaining.is_zero() => {}
-            Err(e) if is_interrupted(&e) => return Err(timed_out(settings)),
+            Err(e) if is_interrupted(&e) => {}
             Err(e) => return Err(failure(&e, settings)),
         }
     }
@@ -352,13 +351,13 @@ mod tests {
         assert_eq!(err, "timed out after 1s");
     }
 
-    /// A signal handler that runs while the read blocks fails it with EINTR; the
-    /// wait must go on to its timeout instead of reporting the interruption.
+    /// A signal handler that runs while the read blocks fails it with EINTR.
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     #[test]
     fn a_signal_during_the_wait_does_not_end_it() {
         extern "C" {
-            fn signal(signum: i32, handler: extern "C" fn(i32)) -> usize;
+            fn signal(signum: i32, handler: usize) -> usize;
+            fn siginterrupt(signum: i32, flag: i32) -> i32;
             fn pthread_self() -> usize;
             fn pthread_kill(thread: usize, signum: i32) -> i32;
         }
@@ -375,9 +374,11 @@ mod tests {
             std::thread::sleep(Duration::from_secs(5));
             drop(held);
         });
-        let target = unsafe {
-            signal(SIGUSR2, ignore);
-            pthread_self()
+        // BSD `signal` restarts an interrupted read, which hides the failure on macOS.
+        let (target, previous) = unsafe {
+            let previous = signal(SIGUSR2, ignore as *const () as usize);
+            siginterrupt(SIGUSR2, 1);
+            (pthread_self(), previous)
         };
         let interrupter = std::thread::spawn(move || {
             for _ in 0..5 {
@@ -385,14 +386,18 @@ mod tests {
                 unsafe { pthread_kill(target, SIGUSR2) };
             }
         });
+        let started = Instant::now();
         let err = generate(
             &settings_at(&format!("http://127.0.0.1:{port}"), 1),
             "x",
             "x",
         )
         .unwrap_err();
+        let waited = started.elapsed();
         interrupter.join().unwrap();
+        unsafe { signal(SIGUSR2, previous) };
         assert_eq!(err, "timed out after 1s");
+        assert!(waited >= Duration::from_secs(1), "gave up after {waited:?}");
     }
 
     #[test]
