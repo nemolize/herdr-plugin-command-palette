@@ -391,9 +391,38 @@ fn what_herdr_said(stdout: &[u8], stderr: &[u8]) -> String {
     }
 }
 
+/// A thread forking mid-write holds the script open until its exec, so running
+/// it fails with ETXTBSY; run it once, with no arguments, until it starts.
+#[cfg(test)]
+pub(crate) fn write_stub(path: &std::path::Path, script: &str) {
+    use std::os::unix::fs::PermissionsExt;
+    use std::process::Stdio;
+
+    std::fs::write(path, script).unwrap();
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        match Proc::new(path)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+        {
+            Err(e) if e.kind() == std::io::ErrorKind::ExecutableFileBusy => {
+                assert!(std::time::Instant::now() < deadline, "{path:?} stayed busy");
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+            result => {
+                result.unwrap();
+                return;
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{read_response, Herdr, PluginAction};
+    use super::{read_response, write_stub, Herdr, PluginAction, Proc};
 
     /// The envelope's own error is what names a failure; the exit status is 1
     /// for an API error and 1 for a missing binary alike.
@@ -531,11 +560,68 @@ mod tests {
     }
 
     fn stub(dir: &std::path::Path, body: &str) -> Herdr {
-        use std::os::unix::fs::PermissionsExt;
         let path = dir.join("herdr");
-        std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        write_stub(&path, &format!("#!/bin/sh\n{body}\n"));
         Herdr::new(path.to_string_lossy().into_owned())
+    }
+
+    /// Another thread forking while a stub is written made its first run fail
+    /// with "Text file busy" (Linux only). It runs in a child process: the
+    /// flood of exiting children interrupts syscalls of tests sharing a process.
+    #[test]
+    fn a_stub_runs_while_other_threads_spawn_processes() {
+        let out = Proc::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "--ignored",
+                "herdr::tests::stub_race_in_its_own_process",
+            ])
+            .output()
+            .unwrap();
+        let report = format!(
+            "{}\n{}\n{}",
+            out.status,
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert!(out.status.success(), "{report}");
+        assert!(
+            report.contains("1 passed"),
+            "the child ran no test: {report}"
+        );
+    }
+
+    #[test]
+    #[ignore = "run by a_stub_runs_while_other_threads_spawn_processes"]
+    fn stub_race_in_its_own_process() {
+        let dir = std::env::temp_dir().join(format!("herdr-busy-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        struct StopOnDrop(std::sync::Arc<std::sync::atomic::AtomicBool>);
+        impl Drop for StopOnDrop {
+            fn drop(&mut self) {
+                self.0.store(true, std::sync::atomic::Ordering::Relaxed);
+            }
+        }
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let _stop_spawners = StopOnDrop(stop.clone());
+        for _ in 0..4 {
+            let stop = stop.clone();
+            std::thread::spawn(move || {
+                while !stop.load(std::sync::atomic::Ordering::Relaxed) {
+                    let _ = Proc::new("true").status();
+                }
+            });
+        }
+
+        for i in 0..50 {
+            let sub = dir.join(i.to_string());
+            std::fs::create_dir_all(&sub).unwrap();
+            let herdr = stub(&sub, "echo ok");
+            let out = Proc::new(&herdr.bin).output().unwrap();
+            assert_eq!(out.stdout, b"ok\n", "run {i}");
+        }
+
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     /// The stub refuses when it sees `HERDR_ENV`, as the real `herdr update` does.
