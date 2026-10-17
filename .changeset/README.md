@@ -27,4 +27,4 @@ Add vertical pane swaps to the command palette
 
 Merging it to `main` opens or updates the `Version Packages` pull request.
 Merging that pull request consumes every pending file, bumps the version and
-drafts the release. `docs/ci.md`, "Cutting a release", has the rest.
+drafts the release. `docs/release.md` has the rest.

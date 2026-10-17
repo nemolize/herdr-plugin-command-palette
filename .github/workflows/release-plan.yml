@@ -91,7 +91,7 @@ jobs:
           gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --draft --target "$SHA" \
             --title "$TAG" --notes-file "$RUNNER_TEMP/notes.md"
 
-  # Called rather than left to the tag's own push event (docs/ci.md).
+  # Called rather than left to the tag's own push event (docs/release.md).
   Assets:
     needs: Draft-Release
     if: contains(fromJSON('["create", "retry"]'), needs.Draft-Release.outputs.action)

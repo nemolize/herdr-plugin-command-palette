@@ -4,7 +4,7 @@ Status: accepted (2026-09-29). Supersedes ADR 0001's decision 1 and its
 commit-message consequence; ADR 0001's decisions 2 (`workflow_call`, no PAT or
 App) and 3 (the version PR's approval click) stand.
 
-`docs/ci.md`, "Cutting a release", describes the flow as built. This records
+`docs/release.md` describes the flow as built. This records
 why release-please was replaced and what the replacement costs.
 
 ## Context
@@ -71,7 +71,7 @@ from commit subjects — without changing the merge policy.
   declared intent; review is what catches it.
 - **A fault in what the release reads from the drafted tree usually needs a
   new version.** A failed build leaves an untagged draft that later runs rebuild
-  under the same version (`docs/ci.md`, "Retrying a failed release").
+  under the same version (`docs/release.md`, "Retrying a failed release").
 - **v0.4.0 is the baseline.** It was cut by release-please and is already
   published; the migration adds no changeset for it and cuts no release of its
   own.
