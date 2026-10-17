@@ -328,10 +328,11 @@ workflow could not be rehearsed before it merged. That is a one-time bootstrap
 cost, not a standing property: a dispatch runs the selected ref's version of the
 file, so a later branch editing `Release` rehearses its own version directly.
 
-**A hand-pushed tag whose run has not published.** The tag exists from the
+**A hand-pushed tag whose run has not ended green.** The tag exists from the
 push, but its release only once the run's `Publish` job has attached every
-asset: the release starts as a draft, so a run failing after that leaves a draft
-carrying the tag. `Release Plan` reads either as unfinished. Once `main`'s
+asset: the release starts as a draft, so a run failing after that usually leaves
+a draft carrying the tag, and rarely a live release (see "The run failed").
+`Release Plan` reads a bare tag or a draft as unfinished. Once `main`'s
 `package.json` carries the tag's version, each of its runs stops at
 `Draft-Release`, before building anything, with "tag … exists without a
 release" — or "draft … and a tag … both exist" when a draft is there.
@@ -341,11 +342,11 @@ release is published.
 
 - **The run is in flight:** wait, and leave the tag alone until the run has
   ended. When it publishes, the release exists and `Release Plan` skips.
-- **The run failed:** usually nothing is published, but not always. The release
-  action finalizes the draft with an API call it retries three times, so a run
-  can end red after GitHub applied a call whose reply never arrived. Run
-  `gh release view <tag>` before touching anything: a draft is unpublished, a
-  release that is not a draft is live.
+- **The run failed:** usually nothing is published, but not always.
+  `action-gh-release` keeps calling the API after it publishes the draft, so a
+  run can end red with the release already live. Run `gh release view <tag>`
+  before touching anything: a draft is unpublished, a release that is not a
+  draft is live, and "release not found" means nothing was published.
   - A published release: the run did its work. Delete nothing; a later
     `Release Plan` run skips it.
   - A transient fault with no published release (a runner or network flake):
@@ -353,9 +354,10 @@ release is published.
     its copy of `Release`, so it cannot pick up a fix, and the assets already
     built are kept for a day only — after that, re-run all jobs.
   - A fault a fix must correct, with no published release: the tag cannot stay,
-    nor a draft carrying it. Delete both (`git push origin :refs/tags/<tag>`,
-    `gh release delete <tag>`; `gh release list` shows the draft), then push a
-    new tag on a commit carrying the fix and the tagged version.
+    nor a draft carrying it. Delete the tag (`git push origin :refs/tags/<tag>`)
+    and, if `gh release view` showed a draft, the draft (`gh release delete
+    <tag>`; `gh release list` shows drafts), then push a new tag on a commit
+    carrying the fix and the tagged version.
 
 ## Not covered here
 
