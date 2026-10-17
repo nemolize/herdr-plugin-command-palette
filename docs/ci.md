@@ -341,15 +341,21 @@ release is published.
 
 - **The run is in flight:** wait, and leave the tag alone until the run has
   ended. When it publishes, the release exists and `Release Plan` skips.
-- **The run failed:** nothing is published.
-  - A transient fault (a runner or network flake): re-run the failed jobs of the
-    tag's run. That reuses the tag's commit and its copy of `Release`, so it
-    cannot pick up a fix, and the assets already built are kept for a day only —
-    after that, re-run all jobs.
-  - A fault a fix must correct: the tag cannot stay, nor a draft carrying it.
-    Delete both (`git push origin :refs/tags/<tag>`, `gh release delete <tag>`;
-    `gh release list` shows the draft), then push a new tag on a commit carrying
-    the fix and the tagged version.
+- **The run failed:** usually nothing is published, but not always. The release
+  action finalizes the draft with an API call it retries three times, so a run
+  can end red after GitHub applied a call whose reply never arrived. Run
+  `gh release view <tag>` before touching anything: a draft is unpublished, a
+  release that is not a draft is live.
+  - A published release: the run did its work. Delete nothing; a later
+    `Release Plan` run skips it.
+  - A transient fault with no published release (a runner or network flake):
+    re-run the failed jobs of the tag's run. That reuses the tag's commit and
+    its copy of `Release`, so it cannot pick up a fix, and the assets already
+    built are kept for a day only — after that, re-run all jobs.
+  - A fault a fix must correct, with no published release: the tag cannot stay,
+    nor a draft carrying it. Delete both (`git push origin :refs/tags/<tag>`,
+    `gh release delete <tag>`; `gh release list` shows the draft), then push a
+    new tag on a commit carrying the fix and the tagged version.
 
 ## Not covered here
 
