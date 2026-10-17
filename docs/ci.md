@@ -117,13 +117,14 @@ point of the job — a silent catalog drift is exactly what issue #24 was opened
 about — but it means a red `E2ETests` is worth reading before assuming the diff
 caused it. `Lint`'s `zizmor` step asks GitHub about every pinned action, so a
 published advisory against a pinned action, or a tag moved or deleted from under
-its version comment, turns `Lint` red against an unchanged workflow; the author
-re-pins to a tag that exists and is not flagged. That is accepted rather than
-split into a second, non-blocking run: a non-blocking run would let a
-vulnerable pin, or one that no tag names, merge, and the other cause, a GitHub
-API error or rate limit, is answered by a re-run. `Audit` stays outside the
-required set, so an advisory published against an unchanged lockfile reports
-rather than blocks a merge.
+its version comment, turns `Lint` red against an unchanged workflow. The author
+re-pins that action to a tag that exists and is not flagged; for
+`actions/checkout`, `scripts/zizmor.test.mjs` pins it too, in the fixtures
+`just zizmor-test` audits, so that pin moves with it. This is accepted rather
+than split into a second, non-blocking run: pins are what the check exists to
+hold, and a non-blocking run would let a pull request that adds or keeps a
+vulnerable pin, or one that no tag names, merge. The cost is that every pull
+request waits for the re-pin.
 
 On a scheduled failure `Audit` opens (or comments on) an issue, because a red
 cron run on a repo with one maintainer otherwise reaches nobody. That step is not
