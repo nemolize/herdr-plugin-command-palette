@@ -266,13 +266,24 @@ fixed by merging the fix to `main` without a changeset, and that push rebuilds
 the draft with it, provided the fix needs nothing new from the draft's tree;
 re-running the failed jobs reuses the old workflow and cannot pick the fix up.
 A fault in anything the release jobs read from the draft's tree — the
-`justfile` and toolchain file as much as source and Cargo files — cannot be
-retried away: ship the fix with a changeset as the next version, and restate
-the stuck version's changelog entries in that changeset's note — its own
-section reaches no published release. Until the fix's version PR merges, each
-run rebuilds the broken draft and fails again; afterwards nothing targets the
-old version. Check it with `gh release view <tag>`: a draft can be deleted
-(`gh release delete <tag>`), after which it stays unreleased, but a release that
+`justfile` and toolchain file as much as source and Cargo files — is not fixed
+by a rebuild, which reads the same tree. The usual route is to ship the fix
+with a changeset as the next version, and restate the stuck version's
+changelog entries in that changeset's note — its own section reaches no
+published release. Until the fix's version PR merges, each run rebuilds the
+broken draft and fails again; afterwards nothing targets the old version.
+
+The stuck version itself can sometimes be released without a new version, by
+hand-pushing its tag on the draft's commit (`gh release view <tag> --json
+targetCommitish`) with the fix cherry-picked onto it — never on `main`'s head,
+which also carries every change merged since the version commit. Nothing here
+rehearses that route and no CI job runs on that commit, so treat it as a
+fallback; the tag's own steps are in "A hand-pushed tag whose run has not ended
+green". Otherwise a new version is required.
+
+Check the draft with `gh release view <tag>`: a draft can be deleted
+(`gh release delete <tag>`), after which it stays unreleased until a tag
+publishes it, but a release that
 is no longer a draft is live, and deleting it would withdraw it. An in-progress
 run is never cancelled, so a push landing mid-build waits and then sees the
 published release or the draft to retry.
