@@ -2,7 +2,7 @@
 //! and how its answer becomes a name.
 use std::io::ErrorKind;
 use std::net::ToSocketAddrs;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
 use unicode_segmentation::UnicodeSegmentation;
@@ -54,8 +54,23 @@ pub fn generate(settings: &AutoName, system: &str, prompt: &str) -> Result<Strin
     if !resolves(&settings.base_url) {
         return Err(no_ollama_at(settings));
     }
+    let url = format!("{}/api/generate", settings.base_url.trim_end_matches('/'));
+    let body = request_body(&settings.model, system, prompt).to_string();
+    let deadline = Instant::now() + Duration::from_secs(settings.timeout_secs);
+    loop {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        match post(&url, &body, remaining) {
+            Ok((status, text)) => return answer_from(status, &text),
+            Err(e) if is_interrupted(&e) && !remaining.is_zero() => {}
+            Err(e) if is_interrupted(&e) => return Err(timed_out(settings)),
+            Err(e) => return Err(failure(&e, settings)),
+        }
+    }
+}
+
+fn post(url: &str, body: &str, timeout: Duration) -> Result<(u16, String), ureq::Error> {
     let agent: ureq::Agent = ureq::Agent::config_builder()
-        .timeout_global(Some(Duration::from_secs(settings.timeout_secs)))
+        .timeout_global(Some(timeout))
         // A 4xx/5xx carries Ollama's own reason in its body, which beats a bare
         // status code — so the body is read rather than turned into an error.
         .http_status_as_error(false)
@@ -64,19 +79,21 @@ pub fn generate(settings: &AutoName, system: &str, prompt: &str) -> Result<Strin
         .proxy(None)
         .build()
         .into();
-    let url = format!("{}/api/generate", settings.base_url.trim_end_matches('/'));
-    let body = request_body(&settings.model, system, prompt).to_string();
     let mut response = agent
-        .post(&url)
+        .post(url)
         .header("Content-Type", "application/json")
-        .send(body)
-        .map_err(|e| failure(&e, settings))?;
+        .send(body)?;
     let status = response.status().as_u16();
-    let text = response
-        .body_mut()
-        .read_to_string()
-        .map_err(|e| failure(&e, settings))?;
-    answer_from(status, &text)
+    let text = response.body_mut().read_to_string()?;
+    Ok((status, text))
+}
+
+fn is_interrupted(e: &ureq::Error) -> bool {
+    matches!(e, ureq::Error::Io(io) if io.kind() == ErrorKind::Interrupted)
+}
+
+fn timed_out(settings: &AutoName) -> String {
+    format!("timed out after {}s", settings.timeout_secs)
 }
 
 fn answer_from(status: u16, text: &str) -> Result<String, String> {
@@ -101,7 +118,7 @@ fn answer_from(status: u16, text: &str) -> Result<String, String> {
 
 fn failure(e: &ureq::Error, settings: &AutoName) -> String {
     match e {
-        ureq::Error::Timeout(_) => format!("timed out after {}s", settings.timeout_secs),
+        ureq::Error::Timeout(_) => timed_out(settings),
         ureq::Error::ConnectionFailed | ureq::Error::HostNotFound => no_ollama_at(settings),
         ureq::Error::Io(io) if NOT_LISTENING.contains(&io.kind()) => no_ollama_at(settings),
         other => other.to_string(),
@@ -332,6 +349,49 @@ mod tests {
             "x",
         )
         .unwrap_err();
+        assert_eq!(err, "timed out after 1s");
+    }
+
+    /// A signal handler that runs while the read blocks fails it with EINTR; the
+    /// wait must go on to its timeout instead of reporting the interruption.
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[test]
+    fn a_signal_during_the_wait_does_not_end_it() {
+        extern "C" {
+            fn signal(signum: i32, handler: extern "C" fn(i32)) -> usize;
+            fn pthread_self() -> usize;
+            fn pthread_kill(thread: usize, signum: i32) -> i32;
+        }
+        extern "C" fn ignore(_: i32) {}
+        #[cfg(target_os = "linux")]
+        const SIGUSR2: i32 = 12;
+        #[cfg(target_os = "macos")]
+        const SIGUSR2: i32 = 31;
+
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let _held = std::thread::spawn(move || {
+            let held = listener.accept();
+            std::thread::sleep(Duration::from_secs(5));
+            drop(held);
+        });
+        let target = unsafe {
+            signal(SIGUSR2, ignore);
+            pthread_self()
+        };
+        let interrupter = std::thread::spawn(move || {
+            for _ in 0..5 {
+                std::thread::sleep(Duration::from_millis(100));
+                unsafe { pthread_kill(target, SIGUSR2) };
+            }
+        });
+        let err = generate(
+            &settings_at(&format!("http://127.0.0.1:{port}"), 1),
+            "x",
+            "x",
+        )
+        .unwrap_err();
+        interrupter.join().unwrap();
         assert_eq!(err, "timed out after 1s");
     }
 
