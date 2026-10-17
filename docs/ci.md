@@ -248,10 +248,14 @@ tag comes into existence**, only at that point. Nothing in `Release` reads the
 tag from git: both jobs check out the release commit by SHA, and the manifest
 assertion compares the tag as a string.
 
-**Retrying a failed release.** A failed target leaves the draft unpublished and
-untagged, so nothing is public. Either re-run the failed jobs of that `Release
-Plan` run, or run `Release Plan` by hand (`gh workflow run release-plan.yml`) —
-any later push to `main` does the same. Each rebuilds the commit the draft
+**Retrying a failed release.** A failed target usually leaves the draft
+unpublished and untagged, so nothing is public, but not always:
+`action-gh-release` keeps calling the API after it publishes the draft, so a
+run can end red with the release already live. Run `gh release view <tag>`
+first. A release that is not a draft is live: the run did its work, so retry and
+delete nothing, and a later `Release Plan` run skips it. Otherwise, either
+re-run the failed jobs of that `Release Plan` run, or run `Release Plan` by hand
+(`gh workflow run release-plan.yml`) — any later push to `main` does the same. Each rebuilds the commit the draft
 targets under the same version; no new changeset or version bump is involved.
 Only the checkout of the draft's tree is pinned to that commit: `release.yml`
 is called with `./`, which GitHub loads from the run's own commit, and so are
@@ -266,8 +270,10 @@ the stuck version's changelog entries in that changeset's note — its own
 section reaches no published release. Until the fix's version PR merges, each
 run rebuilds the broken draft and fails again; afterwards nothing targets the
 old version, so delete its draft (`gh release delete <tag>`) and it stays
-unreleased. An in-progress run is never cancelled, so a push landing mid-build
-waits and then sees the published release or the draft to retry.
+unreleased. Run `gh release view <tag>` again first and delete only a release
+that is still a draft: one that is no longer a draft is live, and deleting it
+would withdraw it. An in-progress run is never cancelled, so a push landing
+mid-build waits and then sees the published release or the draft to retry.
 
 None of this starts without a repository setting no file here can carry:
 **Settings → Actions → General → "Allow GitHub Actions to create and approve
