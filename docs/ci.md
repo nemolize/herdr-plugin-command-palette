@@ -328,32 +328,28 @@ workflow could not be rehearsed before it merged. That is a one-time bootstrap
 cost, not a standing property: a dispatch runs the selected ref's version of the
 file, so a later branch editing `Release` rehearses its own version directly.
 
-**A hand-pushed tag whose run has not published.** The tag exists from the push,
-but its release only once the run's `Publish` job uploads, so until then
-`Release Plan` sees a tag without a release. Once the tagged version's commit is
-on `main`, each `Release Plan` run stops at `Draft-Release` with "tag … exists
-without a release", before building anything; `Version-PR` is unaffected.
+**A hand-pushed tag whose run has not published.** The tag exists from the
+push, but its release only once the run's `Publish` job has attached every
+asset: the release starts as a draft, so a run failing after that leaves a draft
+carrying the tag. `Release Plan` reads either as unfinished. Once `main`'s
+`package.json` carries the tag's version, each of its runs stops at
+`Draft-Release`, before building anything, with "tag … exists without a
+release" — or "draft … and a tag … both exist" when a draft is there.
+`Version-PR` is unaffected. A red run stays red; a later run (a re-run,
+`gh workflow run release-plan.yml`, or a push to `main`) skips once the tag's
+release is published.
 
 - **The run is in flight:** wait, and leave the tag alone until the run has
-  ended. When it publishes, the release exists and `Release Plan` skips: re-run
-  that run's failed jobs, run `gh workflow run release-plan.yml`, or let the next
-  push to `main` turn it green.
-- **The run failed:** nothing is published, and `Release Plan` stays red until
-  the tag is dealt with.
+  ended. When it publishes, the release exists and `Release Plan` skips.
+- **The run failed:** nothing is published.
   - A transient fault (a runner or network flake): re-run the failed jobs of the
     tag's run. That reuses the tag's commit and its copy of `Release`, so it
-    cannot pick up a fix.
-  - Any fix needs a new commit, and the tag goes with it
-    (`git push origin :refs/tags/<tag>`) — the version is still unreleased. A
-    fault only in `release.yml` or the scripts it checks out: merge the fix to
-    `main` with the tag still in place (`Release Plan` is red meanwhile), then
-    delete the tag, then run `Release Plan` by hand: it drafts and builds the
-    version's commit with the fixed workflow, as in "Retrying a failed release".
-    A fault anywhere else in the tree: merge the fix first the same way, delete
-    the tag, then push it again on a commit carrying the fix. Deleting the tag
-    before the fix reaches `main` lets that push's `Release Plan` draft the old
-    commit, and the re-pushed tag then meets its draft ("draft … and a tag …
-    both exist").
+    cannot pick up a fix, and the assets already built are kept for a day only —
+    after that, re-run all jobs.
+  - A fault a fix must correct: the tag cannot stay, nor a draft carrying it.
+    Delete both (`git push origin :refs/tags/<tag>`, `gh release delete <tag>`;
+    `gh release list` shows the draft), then push a new tag on a commit carrying
+    the fix and the tagged version.
 
 ## Not covered here
 
