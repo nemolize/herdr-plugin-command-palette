@@ -23,7 +23,7 @@ import tempfile
 import time
 from pathlib import Path
 
-from herdr_answer import answer
+from herdr_answer import answer, answer_field
 
 HARNESS = Path(__file__).resolve().parent / "catalog-e2e.py"
 spec = importlib.util.spec_from_file_location("catalog_e2e", HARNESS)
@@ -81,11 +81,15 @@ def run_open_action(home: Path) -> dict:
         "plugin action invoke", "plugin", "action", "invoke", "open", "--plugin", PLUGIN_ID,
         home=home, path="log.log_id",
     )
+    if not log_id:
+        raise RuntimeError("herdr plugin action invoke answered an empty result.log.log_id")
     deadline = time.monotonic() + RUN_TIMEOUT_SECS
     while time.monotonic() < deadline:
         logs = herdr_answer(
             "plugin log list", "plugin", "log", "list", home=home, path="logs", kind=list
         )
+        for i, log in enumerate(logs):
+            answer_field("plugin log list", log, "log_id", within=f"result.logs[{i}]")
         run = next((log for log in logs if log.get("log_id") == log_id), None)
         if run is not None and run.get("finished_unix_ms") is not None:
             return run

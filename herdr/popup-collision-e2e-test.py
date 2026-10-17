@@ -112,6 +112,25 @@ class ReshapedAnswer(unittest.TestCase):
             r"herdr plugin action invoke answered without a JSON envelope: oops",
         )
 
+    def test_names_an_empty_log_id(self):
+        self.raises(
+            json.dumps({"result": {"log": {"log_id": ""}}}),
+            r"herdr plugin action invoke answered an empty result\.log\.log_id",
+        )
+
+    def test_names_a_log_row_that_is_not_an_object(self):
+        def herdr(*args, home, check=True):
+            if args[:3] == ("plugin", "action", "invoke"):
+                return completed({"log": {"log_id": "plugin-log-1"}})
+            return completed({"logs": ["plugin-log-1"]})
+
+        with mock.patch.object(popup_collision_e2e.catalog_e2e, "herdr", herdr):
+            with self.assertRaisesRegex(
+                RuntimeError,
+                r"^herdr plugin log list answered without result\.logs\[0\]\.log_id$",
+            ):
+                popup_collision_e2e.run_open_action(Path("/nonexistent"))
+
     def test_names_a_log_list_of_another_type(self):
         def herdr(*args, home, check=True):
             if args[:3] == ("plugin", "action", "invoke"):
