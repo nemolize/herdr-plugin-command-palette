@@ -382,12 +382,11 @@ mod tests {
     /// Workspace w1 with two panes in tab t1 and one in t2, w2 with one, and a
     /// `pane read` that answers only when asked for exactly 120 lines.
     fn stub_herdr(name: &str) -> Herdr {
-        use std::os::unix::fs::PermissionsExt;
         let dir = std::env::temp_dir().join(format!("palette-gen-{}-{name}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let bin = dir.join("herdr");
-        std::fs::write(
+        crate::herdr::write_stub(
             &bin,
             r#"#!/bin/sh
 case "$*" in
@@ -406,9 +405,7 @@ case "$*" in
   *) echo "unexpected: $*" >&2; exit 1 ;;
 esac
 "#,
-        )
-        .unwrap();
-        std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
+        );
         Herdr::new(bin.to_string_lossy().into_owned())
     }
 
