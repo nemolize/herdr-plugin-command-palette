@@ -20,18 +20,22 @@ from pathlib import Path
 from unittest import mock
 
 import catalog_placeholders
+import catalog_verdicts
 import herdr_fixture
 from catalog_placeholders import flag_before, resolved_args
+from catalog_verdicts import (
+    effect_target,
+    layout_rect,
+    missing_effect,
+    unaccepted_response,
+    wrong_action,
+)
 from herdr_answer import answer, answer_field
 
 HARNESS = Path(__file__).resolve().parent / "catalog-e2e.py"
 spec = importlib.util.spec_from_file_location("catalog_e2e", HARNESS)
 catalog_e2e = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(catalog_e2e)
-unaccepted_response = catalog_e2e.unaccepted_response
-effect_target = catalog_e2e.effect_target
-missing_effect = catalog_e2e.missing_effect
-layout_rect = catalog_e2e.layout_rect
 
 
 class UnacceptedResponse(unittest.TestCase):
@@ -252,6 +256,41 @@ RESIZE_LEFT = '["pane", "resize", "--pane", "{pane}", "--direction", "left"]'
 SWAP_LEFT = '["pane", "swap", "--pane", "{pane}", "--direction", "left"]'
 RESIZED = '{"id":"cli:pane:resize","result":{"type":"pane_resize"}}'
 SWAPPED = '{"id":"cli:pane:swap","result":{"type":"pane_swap"}}'
+
+
+class WrongAction(unittest.TestCase):
+    def test_accepts_the_action_the_verb_names(self):
+        self.assertIsNone(wrong_action("swap", '{"result":{"type":"pane_swap"}}', ""))
+
+    def test_names_the_other_action_herdr_answered(self):
+        self.assertEqual(
+            wrong_action("swap", '{"result":{"type":"pane_resize"}}', ""),
+            "herdr answered 'pane_resize', not 'pane_swap'",
+        )
+
+    def test_reads_the_envelope_from_stderr_when_stdout_has_none(self):
+        self.assertIsNone(wrong_action("resize", "", '{"result":{"type":"pane_resize"}}'))
+
+    def test_names_a_missing_type_when_no_envelope_or_result_came_back(self):
+        for stdout in ("", "oops", '{"id":"cli:pane"}', '{"result":null}'):
+            with self.subTest(stdout=stdout):
+                self.assertEqual(
+                    wrong_action("swap", stdout, ""),
+                    "herdr answered None, not 'pane_swap'",
+                )
+
+
+class VerdictsModule(unittest.TestCase):
+    def test_catalog_e2e_uses_the_module_rather_than_its_own_copy(self):
+        for name in (
+            "effect_target",
+            "layout_rect",
+            "missing_effect",
+            "unaccepted_response",
+            "wrong_action",
+        ):
+            with self.subTest(name=name):
+                self.assertIs(getattr(catalog_e2e, name), getattr(catalog_verdicts, name))
 
 
 class ResolvedArgs(unittest.TestCase):
