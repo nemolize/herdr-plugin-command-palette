@@ -267,16 +267,16 @@ mod tests {
         assert_eq!(seed_from_row(&row), "");
     }
 
-    /// A named pane DOES report a label, and carries no `number` to mistake it
-    /// for — so the number rule must not swallow it.
     #[test]
     fn a_named_agent_seeds_its_name_and_an_unnamed_one_nothing() {
-        let named = serde_json::json!({"pane_id": "w1:p1", "name": "ship-repo-86"});
+        let named = json!({"pane_id": "w1:p1", "name": "ship-repo-86"});
         assert_eq!(seed_from_row(&named), "ship-repo-86");
-        let unnamed = serde_json::json!({"pane_id": "w1:p1", "agent": "claude"});
+        let unnamed = json!({"pane_id": "w1:p1", "agent": "claude"});
         assert_eq!(seed_from_row(&unnamed), "");
     }
 
+    /// A named pane DOES report a label, and carries no `number` to mistake it
+    /// for — so the number rule must not swallow it.
     #[test]
     fn a_named_pane_seeds_its_name() {
         let row = json!({"pane_id": "w5A:p1", "label": "editor"});

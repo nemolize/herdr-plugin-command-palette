@@ -87,8 +87,8 @@ looking at when the palette opened, not on something you pick, and the input
 starts from that thing's current name so renaming is an edit rather than a
 retype. `Rename agent...` changes the name of the agent running in that pane
 (the one `herdr agent rename` sets), and says so from herdr when the pane runs
-none; herdr accepts lowercase letters, digits, `-` and `_`, 1–32 characters, and
-`--clear` is refused as it is for a pane. `New worktree...` asks for a branch
+none; herdr judges the name and its error is shown as is, and `--clear` is
+refused as it is for a pane. `New worktree...` asks for a branch
 name the same way and starts empty.
 `Enter` runs it, `Esc` backs out. A name may contain spaces; it reaches
 herdr as one argument.

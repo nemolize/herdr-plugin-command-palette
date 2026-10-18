@@ -886,7 +886,7 @@ mod tests {
         }
     }
 
-    /// The guard is scoped to the one command that has the flag: `tab rename`
+    /// The guard is scoped to the commands that have the flag: `tab rename`
     /// stores `--clear` as an ordinary name (measured on 0.9.0).
     #[test]
     fn the_flag_guard_does_not_reach_a_command_without_that_flag() {

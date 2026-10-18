@@ -3,10 +3,8 @@
 
 /// Whether `text` would reach the command as one of its own flags.
 ///
-/// Measured on 0.9.0: `pane rename --clear` deletes the name and exits 0, while
-/// every other `-`-leading name is stored verbatim by all three commands.
-/// Measured on 0.9.5: `agent rename --clear` does the same, and every other
-/// `-`-leading name is refused by herdr's own name check.
+/// `pane rename --clear` and `agent rename --clear` delete the name and exit 0
+/// (docs/design.md); every other name is left to the command to judge.
 ///
 /// Matched on the subcommand pair rather than the first argument, so a leading
 /// global flag (`--session x pane rename …`) cannot walk past the guard and a

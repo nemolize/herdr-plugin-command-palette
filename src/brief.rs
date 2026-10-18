@@ -192,6 +192,11 @@ mod tests {
         assert_eq!(of(&["pane", "rename", "{text}"]), None, "no id to describe");
         assert_eq!(of(&["tab", "rename", "{tab}", "{text}"]), None);
         assert_eq!(of(&["worktree", "rename", "x", "{text}"]), None);
+        assert_eq!(
+            of(&["agent", "rename", "w3Y:p1", "{text}"]),
+            None,
+            "herdr refuses a generated name with spaces, so no Auto generate row"
+        );
         assert_eq!(of(&["tab", "rename"]), None);
     }
 
