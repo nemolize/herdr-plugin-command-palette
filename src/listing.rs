@@ -32,12 +32,14 @@ impl WorktreeKey {
 }
 
 /// The name to seed a rename input with, or empty when there is none to edit.
+/// An agent row carries its name as `name`; every other row as `label`.
 ///
 /// An unnamed tab's `label` IS its `number` as a string, so seeding from `label`
 /// alone would offer `1` and a bare Enter would apply it.
 pub fn seed_from_row(row: &serde_json::Value) -> String {
     let label = row
         .get("label")
+        .or_else(|| row.get("name"))
         .and_then(|v| v.as_str())
         .filter(|s| !s.is_empty())
         .unwrap_or_default();
@@ -263,6 +265,14 @@ mod tests {
     fn a_row_without_a_label_seeds_nothing() {
         let row = json!({"pane_id": "w5A:p1", "terminal_title_stripped": "Claude Code"});
         assert_eq!(seed_from_row(&row), "");
+    }
+
+    #[test]
+    fn a_named_agent_seeds_its_name_and_an_unnamed_one_nothing() {
+        let named = json!({"pane_id": "w1:p1", "name": "ship-repo-86"});
+        assert_eq!(seed_from_row(&named), "ship-repo-86");
+        let unnamed = json!({"pane_id": "w1:p1", "agent": "claude"});
+        assert_eq!(seed_from_row(&unnamed), "");
     }
 
     /// A named pane DOES report a label, and carries no `number` to mistake it

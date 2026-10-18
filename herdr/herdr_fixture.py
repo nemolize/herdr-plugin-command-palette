@@ -25,6 +25,9 @@ SESSION = "catalog-e2e"
 BOOT_TIMEOUT_SECS = 30
 BOOT_POLL_SECS = 0.2
 
+STUB_BIN = "stub-bin"
+AGENT_NAME = "e2e-agent"
+
 
 def herdr_binary() -> str | None:
     """Prefer the one `just fetch-herdr` puts in ./bin over whatever is on PATH,
@@ -40,8 +43,15 @@ HERDR = herdr_binary()
 
 def fixture_env(home: Path) -> dict[str, str]:
     """HOME as well as the config dir: herdr creates worktrees under
-    `~/.herdr/worktrees`, so a real HOME would collect one per run."""
-    return dict(os.environ, XDG_CONFIG_HOME=str(home), HOME=str(home))
+    `~/.herdr/worktrees`, so a real HOME would collect one per run.
+
+    PATH leads with the fixture's stub directory when it has one, so the panes
+    the server opens find the stub agent before any real one."""
+    env = dict(os.environ, XDG_CONFIG_HOME=str(home), HOME=str(home))
+    stubs = home / STUB_BIN
+    if stubs.is_dir():
+        env["PATH"] = f"{stubs}{os.pathsep}{env.get('PATH', '')}"
+    return env
 
 
 def herdr(*args: str, home: Path, check: bool = True) -> subprocess.CompletedProcess:
@@ -88,6 +98,18 @@ def start_server_and_await_readiness(home: Path) -> subprocess.Popen:
     )
 
 
+def write_stub_agent(home: Path) -> None:
+    """An executable called `claude` that only waits for input. herdr detects an
+    agent by the process in the pane, so this stands in for a real one without a
+    login, a network or a model. It reads rather than `exec sleep`: herdr 0.9.5
+    does not detect the agent once the script has become, or spawned, `sleep`."""
+    stubs = home / STUB_BIN
+    stubs.mkdir()
+    stub = stubs / "claude"
+    stub.write_text("#!/bin/sh\necho stub agent ready\nwhile read -r _; do :; done\n")
+    stub.chmod(0o755)
+
+
 def init_repository(path: Path, home: Path) -> None:
     """A one-commit repository: `worktree create` needs a HEAD to branch from."""
     path.mkdir()
@@ -119,13 +141,18 @@ class Fixture:
     rooted in a Git repository so the worktree entries have one to act on, and
     `worktree` adds a linked worktree — `remove` refuses the main checkout, so
     acting on that one would prove nothing. `closed` closes its workspace, so
-    `open` opens it rather than focusing what is already there.
+    `open` opens it rather than focusing what is already there. `agent` runs a
+    stub agent named `AGENT_NAME` in `{pane}`, which an agent entry needs to act on.
     """
 
-    def __init__(self, home: Path, worktree: bool = False, closed: bool = False):
+    def __init__(
+        self, home: Path, worktree: bool = False, closed: bool = False, agent: bool = False
+    ):
         self.home = home
         repo = home / "repo"
         init_repository(repo, home)
+        if agent:
+            write_stub_agent(home)
         self.server = start_server_and_await_readiness(home)
         # Past this point the server is running, so anything that raises has to
         # stop it — an exception here binds no Fixture for the caller to close.
@@ -134,6 +161,9 @@ class Fixture:
             herdr("tab", "create", home=home)
             self._surround(self._read_ids()["{pane}"])
             self.ids = self._read_ids()
+            if agent:
+                herdr("agent", "start", AGENT_NAME, "--kind", "claude",
+                      "--pane", self.ids["{pane}"], home=home)
             if worktree:
                 self.ids.update(self._create_worktree(closed))
         except BaseException:

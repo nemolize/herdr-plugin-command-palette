@@ -294,8 +294,8 @@ invocation already knows what that is, so a list to choose from is a step that
 only ever has one right answer. The input opens seeded with that thing's current
 name, which makes the common edit a few keystrokes rather than a retype; the seed
 is looked up by id from the same listing `resolve` would have used, and is the
-row's own `label`, never its id — an id offered as the suggested new name would
-be submitted by a bare Enter.
+row's own name (`label`, or `name` on an agent row), never its id — an id
+offered as the suggested new name would be submitted by a bare Enter.
 
 The typed text becomes exactly one argv element. All three rename commands take
 `<LABEL>...` variadically, so splitting on spaces would pass a name's second word
@@ -312,6 +312,23 @@ Two edges were settled by measuring 0.9.0 rather than reasoning about clap:
   nothing. Every other `-`-leading name (`-x`, `--unknown-flag`, `-`, `--`) is
   stored verbatim by all three commands — the guard names the one real case
   rather than rejecting a leading `-` on principle.
+
+`Rename agent...` (#86) is a fourth, on `herdr agent rename <pane> <name>`, with
+the pane the palette was opened over as the target: `agent get` and `agent
+rename` resolve a pane id to the agent running in it. Measured on 0.9.5:
+
+- **A pane running no agent is offered the entry anyway.** The call exits 1 with
+  `agent_not_found` and changes nothing, which the palette shows as the
+  failure; hiding the entry would cost an `agent list` on every open.
+- **`agent rename --clear` removes the name and exits 0**, and an orchestrator
+  addresses its workers by that name, so it is refused as for a pane. Unlike
+  the three above, herdr refuses every other `-`-leading name itself.
+- **herdr alone judges the name.** It takes a lowercase letter first, then
+  lowercase letters, digits, `-` and `_`, 1–32 characters, and answers
+  `invalid_agent_name` otherwise (a space, `-x` and `--` included); the palette
+  does not copy the rule. The input is seeded from the `name` of the agent's
+  `agent list` row — an agent row has no `label` — and empty when it has none.
+- **No `binding`.** herdr has no key and no `[keys]` action for it.
 
 ### A workspace, tab or pane name can be generated (#240, #243)
 

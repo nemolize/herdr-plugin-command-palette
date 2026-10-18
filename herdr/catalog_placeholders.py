@@ -18,7 +18,8 @@ def resolved_args(entry: dict, ids: dict[str, str]) -> list[str]:
     A tab-resolving entry takes the tab the pane is NOT in, so the move it
     performs is a real one. `{text}` carries a space because that is the shape
     that breaks if the palette ever splits the typed name across argv elements —
-    except as a branch name, which git refuses with one.
+    except as a branch name, which git refuses with one, and as an agent name,
+    which herdr limits to lowercase letters, digits, `-` and `_`.
 
     Raises on a `resolve` this file does not know: defaulting it to a tab id
     would substitute a plausible argument into an entry never taught here and
@@ -26,7 +27,11 @@ def resolved_args(entry: dict, ids: dict[str, str]) -> list[str]:
     """
     args = entry["args"]
     table = dict(ids)
-    table["{text}"] = "e2e-created" if flag_before(args, "{text}") == "--branch" else "e2e renamed"
+    table["{text}"] = (
+        "e2e-created" if flag_before(args, "{text}") == "--branch"
+        else "e2e-renamed" if args[:1] == ["agent"]
+        else "e2e renamed"
+    )
     resolve = entry.get("resolve")
     if resolve is not None:
         picked = {

@@ -189,6 +189,15 @@ prompt = "New pane name"
 contexts = ["pane"]
 binding = "rename_pane"
 
+# `agent rename --clear` removes the name and exits 0, so the palette refuses it
+# as it does for a pane. herdr binds no key to this.
+[[command]]
+id = "agent.rename"
+title = "Rename agent..."
+args = ["agent", "rename", "{pane}", "{text}"]
+prompt = "New agent name"
+contexts = ["pane"]
+
 # `pane close` takes its pane id positionally rather than behind --pane.
 [[command]]
 id = "pane.close"

@@ -173,6 +173,7 @@ impl Herdr {
             "pane list" => ("panes", "pane_id"),
             "tab list" => ("tabs", "tab_id"),
             "workspace list" => ("workspaces", "workspace_id"),
+            "agent list" => ("agents", "pane_id"),
             _ => return String::new(),
         };
         let args: Vec<String> = resolve.split_whitespace().map(str::to_owned).collect();
@@ -655,6 +656,29 @@ echo plain text, not an envelope"#,
             .dispatch(&["update".to_string(), "--handoff".to_string()])
             .unwrap_err();
         assert_eq!(err, "download failed");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn an_agent_is_seeded_with_its_name_from_the_agent_list() {
+        let dir = std::env::temp_dir().join(format!("herdr-seed-agent-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let herdr = stub(
+            &dir,
+            r#"echo '{"result":{"agents":[{"pane_id":"w1:p1","name":"other"},{"pane_id":"w1:p2","name":"ship-repo-86"},{"pane_id":"w1:p3"}]}}'"#,
+        );
+        assert_eq!(herdr.current_label("agent list", "w1:p2"), "ship-repo-86");
+        assert_eq!(herdr.current_label("agent list", "w1:p3"), "");
+        assert_eq!(herdr.current_label("agent list", "w1:p9"), "");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_failing_agent_list_seeds_nothing() {
+        let dir = std::env::temp_dir().join(format!("herdr-seed-fail-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let herdr = stub(&dir, "echo 'boom' >&2; exit 1");
+        assert_eq!(herdr.current_label("agent list", "w1:p1"), "");
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }
