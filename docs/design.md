@@ -492,9 +492,12 @@ the palette refuse rather than merely tighten.
 
 The notes shown when the palette opens (an older herdr, skipped entries, a
 retired icon setting, an unusable settings file) are held apart from the status
-message. The command list shows them after the status, so an error stands above
-them rather than replacing them, and they come back whenever a stage is left;
-Targets and Prompt show only their own status (#115).
+message. The command list shows them after the status and they come back
+whenever a stage is left; Targets and Prompt show only their own status
+(#115). An error stands above them, and a long one that fills the five rows
+cuts them off behind `...`. While any is held the command list draws no counts
+or `esc to close` line, since a footer message takes that row; there is no way
+to dismiss them.
 
 A status message replacing the footer wraps to at most five rows, and to
 fewer when more would take the floor's two candidates; a longer one ends in `...`

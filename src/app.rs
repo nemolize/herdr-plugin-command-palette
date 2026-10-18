@@ -165,15 +165,13 @@ impl App {
         self.status = None;
     }
 
-    /// Adds a startup note after any already held, so a later note never hides
-    /// an earlier one. Notes outlive `status`, which a stage change clears.
     pub fn add_startup_note(&mut self, note: String) {
         self.startup_notes.push(note);
     }
 
     /// What the footer says: on the command list the status, if any, then every
     /// startup note; a stage shows its own status alone.
-    pub fn footer(&self) -> Option<String> {
+    pub fn status_line(&self) -> Option<String> {
         let notes = matches!(self.stage, Stage::Commands)
             .then_some(self.startup_notes.as_slice())
             .unwrap_or_default();
@@ -486,15 +484,18 @@ mod tests {
     fn a_later_startup_note_follows_an_earlier_one_rather_than_replacing_it() {
         let mut app = app_with(vec![]);
         app.add_startup_note("first".into());
-        assert_eq!(app.footer().as_deref(), Some("first"));
+        assert_eq!(app.status_line().as_deref(), Some("first"));
         app.add_startup_note("second".into());
         app.add_startup_note("third".into());
-        assert_eq!(app.footer().as_deref(), Some("first ⋅ second ⋅ third"));
+        assert_eq!(app.status_line().as_deref(), Some("first ⋅ second ⋅ third"));
     }
 
     /// The four notes `main` adds at startup, as the real constructors build them.
     fn startup_notes() -> [(&'static str, String); 4] {
-        let dir = std::env::temp_dir().join(format!("palette-app-notes-{}", std::process::id()));
+        static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let dir =
+            std::env::temp_dir().join(format!("palette-app-notes-{}-{n}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(
             dir.join(crate::settings::FILE_NAME),
@@ -543,7 +544,7 @@ mod tests {
         for (name, note) in startup_notes() {
             let mut app = app_holding(&note);
             app.edit(Edit::Insert('t'));
-            assert_eq!(app.footer().as_deref(), Some(note.as_str()), "{name}");
+            assert_eq!(app.status_line().as_deref(), Some(note.as_str()), "{name}");
         }
     }
 
@@ -552,9 +553,13 @@ mod tests {
         for (name, note) in startup_notes() {
             let mut app = app_holding(&note);
             stage_target(&mut app);
-            assert_eq!(app.footer(), None, "{name}: a stage shows its own footer");
+            assert_eq!(
+                app.status_line(),
+                None,
+                "{name}: a stage shows its own status alone"
+            );
             assert!(app.leave_stage());
-            assert_eq!(app.footer().as_deref(), Some(note.as_str()), "{name}");
+            assert_eq!(app.status_line().as_deref(), Some(note.as_str()), "{name}");
         }
     }
 
@@ -563,9 +568,9 @@ mod tests {
         for (name, note) in startup_notes() {
             let mut app = app_holding(&note);
             app.enter_prompt(focus_tab(), String::new());
-            assert_eq!(app.footer(), None, "{name}");
+            assert_eq!(app.status_line(), None, "{name}");
             assert!(app.leave_stage());
-            assert_eq!(app.footer().as_deref(), Some(note.as_str()), "{name}");
+            assert_eq!(app.status_line().as_deref(), Some(note.as_str()), "{name}");
         }
     }
 
@@ -575,7 +580,7 @@ mod tests {
             let mut app = app_holding(&note);
             app.status = Some("`tab.focus` failed: no herdr".into());
             assert_eq!(
-                app.footer(),
+                app.status_line(),
                 Some(format!("`tab.focus` failed: no herdr ⋅ {note}")),
                 "{name}"
             );
@@ -588,7 +593,11 @@ mod tests {
             let mut app = app_holding(&note);
             stage_target(&mut app);
             app.status = Some("herdr went away".into());
-            assert_eq!(app.footer().as_deref(), Some("herdr went away"), "{name}");
+            assert_eq!(
+                app.status_line().as_deref(),
+                Some("herdr went away"),
+                "{name}"
+            );
         }
     }
 

@@ -94,7 +94,7 @@ pub fn render(f: &mut Frame, app: &mut App) {
         ),
     };
 
-    let status = app.footer().as_deref().map(status::paragraph);
+    let status = app.status_line().as_deref().map(status::paragraph);
     let reserved = u16::from(header.is_some())
         + INPUT_ROWS
         + if matches!(app.stage, Stage::Prompt { .. }) {
