@@ -307,11 +307,28 @@ Two edges were settled by measuring 0.9.0 rather than reasoning about clap:
   trimming what is dispatched would rewrite a seeded `"  a  "` to `"a"` on a bare
   Enter. Only the blank check trims; an all-space name holds at the stage, since
   `LABEL` is required and the CLI would answer with usage on stderr.
-- **`--clear` is refused for a pane, and only there.** `pane rename --clear`
-  deletes the name and exits 0, so submitting it reads as a rename that did
-  nothing. Every other `-`-leading name (`-x`, `--unknown-flag`, `-`, `--`) is
-  stored verbatim by all three commands — the guard names the one real case
-  rather than rejecting a leading `-` on principle.
+- **`--clear` is refused for a pane and an agent, and only there.**
+  `pane rename --clear` deletes the name and exits 0, so submitting it reads as
+  a rename that did nothing. Every other `-`-leading name (`-x`,
+  `--unknown-flag`, `-`, `--`) is stored verbatim by the three commands above —
+  the guard names the one real case rather than rejecting a leading `-` on
+  principle.
+
+`Rename agent...` (#86) is a fourth, on `herdr agent rename <pane> <name>`, with
+the pane the palette was opened over as the target: `agent get` and `agent
+rename` resolve a pane id to the agent running in it. Measured on 0.9.5:
+
+- **A pane running no agent is offered the entry anyway.** The call exits 1 with
+  `agent_not_found` and changes nothing, which the palette shows as the
+  failure; hiding the entry would cost an `agent list` on every open.
+- **`agent rename --clear` removes the name and exits 0**, and an orchestrator
+  addresses its workers by that name, so it is refused as for a pane.
+- **herdr alone judges the name.** It takes a lowercase letter first, then
+  lowercase letters, digits, `-` and `_`, 1–32 characters, and answers
+  `invalid_agent_name` otherwise (a space, `-x` and `--` included); the palette
+  does not copy the rule. The input is seeded from the `name` of the agent's
+  `agent list` row — an agent row has no `label` — and empty when it has none.
+- **No `binding`.** herdr has no key and no `[keys]` action for it.
 
 ### A workspace, tab or pane name can be generated (#240, #243)
 

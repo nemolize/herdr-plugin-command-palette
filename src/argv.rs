@@ -5,6 +5,8 @@
 ///
 /// Measured on 0.9.0: `pane rename --clear` deletes the name and exits 0, while
 /// every other `-`-leading name is stored verbatim by all three commands.
+/// Measured on 0.9.5: `agent rename --clear` does the same, and every other
+/// `-`-leading name is refused by herdr's own name check.
 ///
 /// Matched on the subcommand pair rather than the first argument, so a leading
 /// global flag (`--session x pane rename …`) cannot walk past the guard and a
@@ -30,7 +32,7 @@ pub fn eaten_as_a_flag(args: &[String], text: &str) -> bool {
             }
         }
     }
-    matches!(verbs.as_slice(), ["pane", "rename"])
+    matches!(verbs.as_slice(), ["pane" | "agent", "rename"])
 }
 
 /// Fills one placeholder — `{}` with a chosen id, `{text}` with a typed name.
@@ -89,6 +91,14 @@ mod tests {
         assert!(
             !eaten_as_a_flag(&argv(&["pane", "send-text", "p1"]), "--clear"),
             "a sibling subcommand has no such flag"
+        );
+        assert!(
+            eaten_as_a_flag(&argv(&["agent", "rename", "p1"]), "--clear"),
+            "an agent name is cleared by the flag too"
+        );
+        assert!(
+            !eaten_as_a_flag(&argv(&["agent", "get", "p1"]), "--clear"),
+            "a sibling agent subcommand has no such flag"
         );
         assert!(!eaten_as_a_flag(&argv(&["tab", "rename", "t1"]), "--clear"));
         assert!(

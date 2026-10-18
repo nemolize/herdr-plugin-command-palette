@@ -216,10 +216,11 @@ mod tests {
                 continue;
             }
             let subject = e.args.first().expect("entries have args");
+            let context_id = if subject == "agent" { "pane" } else { subject };
             assert_eq!(
                 e.args.get(2).map(String::as_str),
-                Some(format!("{{{subject}}}").as_str()),
-                "{}: `{}` must name its subject with {{{subject}}}",
+                Some(format!("{{{context_id}}}").as_str()),
+                "{}: `{}` must name its subject with {{{context_id}}}",
                 e.id,
                 e.args.join(" ")
             );
@@ -340,6 +341,7 @@ mod tests {
             // 2 is what an entry must supply, not what the CLI demands: pane's
             // `[LABEL]...` is optional only because `--clear` shares the verb.
             (&["pane", "rename"], 2),
+            (&["agent", "rename"], 2),
             (&["tab", "create"], 0),
             (&["tab", "focus"], 1),
             (&["tab", "close"], 1),

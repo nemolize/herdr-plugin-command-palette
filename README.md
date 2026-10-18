@@ -82,10 +82,14 @@ one with uncommitted or untracked changes. `Esc` there backs out to the command
 list rather than closing the palette.
 
 Entries that need a name you must type — `Rename tab...`, `Rename workspace...`,
-`Rename pane...` — open an input instead of a list. They act on what you were
+`Rename pane...`, `Rename agent...` — open an input instead of a list. They act on what you were
 looking at when the palette opened, not on something you pick, and the input
 starts from that thing's current name so renaming is an edit rather than a
-retype. `New worktree...` asks for a branch name the same way and starts empty.
+retype. `Rename agent...` changes the name of the agent running in that pane
+(the one `herdr agent rename` sets), and says so from herdr when the pane runs
+none; herdr accepts lowercase letters, digits, `-` and `_`, 1–32 characters, and
+`--clear` is refused as it is for a pane. `New worktree...` asks for a branch
+name the same way and starts empty.
 `Enter` runs it, `Esc` backs out. A name may contain spaces; it reaches
 herdr as one argument.
 

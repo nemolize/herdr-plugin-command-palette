@@ -92,6 +92,29 @@ def wrong_action(verb: str, stdout: str, stderr: str) -> str | None:
     return f"herdr answered {answered!r}, not 'pane_{verb}'"
 
 
+def agent_name(entry_id: str, stdout: str) -> str | None:
+    """The name `herdr agent get` answered, or None when the agent has none —
+    `agent rename --clear` leaves the field out rather than empty."""
+    try:
+        agent = answer("agent get", stdout, "agent", dict)
+    except RuntimeError as e:
+        raise RuntimeError(f"{entry_id}: {e}") from None
+    name = agent.get("name")
+    return name if isinstance(name, str) else None
+
+
+def missing_rename(expected: str, before: str | None, after: str | None) -> str | None:
+    """Why the agent's name shows no effect of the entry, or None when it does.
+
+    herdr answers a rename well whatever it stored, so only the name read back
+    afterwards can tell one that worked from one that did nothing."""
+    if before == expected:
+        return f"the agent was already named {expected!r}, so the rename proves nothing"
+    if after == expected:
+        return None
+    return f"its name is {after!r} afterwards, not {expected!r}"
+
+
 RECT_FIELDS = ("x", "y", "width", "height")
 
 

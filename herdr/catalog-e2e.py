@@ -32,9 +32,11 @@ from pathlib import Path
 
 from catalog_placeholders import flag_before, resolved_args
 from catalog_verdicts import (
+    agent_name,
     effect_target,
     layout_rect,
     missing_effect,
+    missing_rename,
     unaccepted_response,
     wrong_action,
 )
@@ -51,6 +53,16 @@ def pane_rect(entry_id: str, pane: str, home: Path) -> dict:
             f"{proc.stderr.strip()}"
         )
     return layout_rect(entry_id, pane, proc.stdout)
+
+
+def read_agent_name(entry_id: str, pane: str, home: Path) -> str | None:
+    proc = herdr_fixture.herdr("agent", "get", pane, home=home, check=False)
+    if proc.returncode != 0:
+        raise RuntimeError(
+            f"{entry_id}: herdr agent get {pane} exited {proc.returncode}: "
+            f"{proc.stderr.strip()}"
+        )
+    return agent_name(entry_id, proc.stdout)
 
 
 def note_if_pin_disagrees_with_running_herdr(
@@ -229,6 +241,7 @@ def main() -> int:
                 home,
                 worktree=entry["args"][0] == "worktree",
                 closed=flag_before(entry["args"], "{}") == "--path",
+                agent=entry["args"][0] == "agent",
             )
         except RuntimeError as e:
             # Keep going: one flaky boot must not swallow every later entry's
@@ -243,6 +256,9 @@ def main() -> int:
             target = effect_target(entry["id"], args)
             verb, direction, pane = target or (None, None, None)
             before = pane_rect(entry["id"], pane, home) if target else None
+            renames_agent = args[:2] == ["agent", "rename"]
+            if renames_agent:
+                before = {"name": read_agent_name(entry["id"], args[2], home)}
             proc = herdr_fixture.herdr(*args, home=home, check=False)
             if proc.returncode != 0:
                 rejected.append((entry["id"], args, proc.returncode, proc.stderr.strip()))
@@ -265,6 +281,12 @@ def main() -> int:
                         )
                     except RuntimeError as e:
                         after, reason = {}, f"its layout could not be read after the entry ran: {e}"
+                elif renames_agent:
+                    try:
+                        after = {"name": read_agent_name(entry["id"], args[2], home)}
+                        reason = missing_rename(args[-1], before["name"], after["name"])
+                    except RuntimeError as e:
+                        after, reason = {}, f"its name could not be read after the entry ran: {e}"
                 if reason:
                     ineffective.append((entry["id"], args, reason, before, after))
                     print(f"FAIL {entry['id']}", file=sys.stderr)

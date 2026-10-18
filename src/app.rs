@@ -855,6 +855,37 @@ mod tests {
         assert!(app.status.is_some(), "the refusal is said, not silent");
     }
 
+    /// `agent rename --clear` deletes the name too, and a worker's orchestrator
+    /// addresses it by that name; any other name goes to herdr as one argument.
+    #[test]
+    fn an_agent_name_is_refused_as_a_flag_only_for_clear() {
+        let agent = |seed: &str| {
+            let mut c = cmd(
+                "agent.rename",
+                "Rename agent...",
+                &["agent", "rename", "w3Y:p1", "{text}"],
+                None,
+            );
+            c.prompt = Some("New agent name".into());
+            let mut app = app_with(vec![c.clone()]);
+            app.enter_prompt(c, seed.into());
+            app
+        };
+
+        let mut app = agent("--clear");
+        assert!(matches!(app.confirm(), Step::Continue));
+        assert!(app.status.is_some(), "the refusal is said, not silent");
+
+        for name in ["-x", "two words"] {
+            match agent(name).confirm() {
+                Step::Run(Outcome::Command { args, .. }) => {
+                    assert_eq!(args, vec!["agent", "rename", "w3Y:p1", name]);
+                }
+                _ => panic!("{name} goes to herdr, which judges it"),
+            }
+        }
+    }
+
     /// The guard is scoped to the one command that has the flag: `tab rename`
     /// stores `--clear` as an ordinary name (measured on 0.9.0).
     #[test]

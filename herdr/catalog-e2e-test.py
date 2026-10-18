@@ -24,9 +24,11 @@ import catalog_verdicts
 import herdr_fixture
 from catalog_placeholders import flag_before, resolved_args
 from catalog_verdicts import (
+    agent_name,
     effect_target,
     layout_rect,
     missing_effect,
+    missing_rename,
     unaccepted_response,
     wrong_action,
 )
@@ -240,6 +242,11 @@ case "$1 $2" in
   "worktree create") [ -n "$STUB_WORKTREE" ] && { echo "$STUB_WORKTREE"; exit 0; }
     echo '{"result":{"worktree":{"open_workspace_id":"w2","path":"/wt"}}}' ;;
   "worktree list") echo '{"result":{"source":{"repo_root":"/repo"}}}' ;;
+  "agent start") [ -n "$STUB_ARGV" ] && echo "$*" >> "$STUB_ARGV"; echo '{"result":{"type":"ok"}}' ;;
+  "agent get")
+    name=$STUB_AGENT_BEFORE; [ -f "$HOME/stub-acted" ] && name=$STUB_AGENT_AFTER
+    [ -z "$name" ] && { echo '{"result":{"agent":{"pane_id":"p1"}}}'; exit 0; }
+    printf '{"result":{"agent":{"pane_id":"p1","name":"%s"}}}\n' "$name" ;;
   "pane split") [ -n "$STUB_SPLIT" ] && { echo "$STUB_SPLIT"; exit 0; }
     echo '{"result":{"pane":{"pane_id":"p9"}}}' ;;
   "pane layout")
@@ -280,12 +287,45 @@ class WrongAction(unittest.TestCase):
                 )
 
 
+class AgentName(unittest.TestCase):
+    def test_reads_the_name(self):
+        self.assertEqual(
+            agent_name("agent.rename", '{"result":{"agent":{"name":"foo"}}}'), "foo"
+        )
+
+    def test_an_agent_with_no_name_has_none(self):
+        self.assertIsNone(agent_name("agent.rename", '{"result":{"agent":{"pane_id":"p1"}}}'))
+
+    def test_names_the_entry_when_the_answer_is_reshaped(self):
+        with self.assertRaisesRegex(RuntimeError, "agent.rename: herdr agent get answered without"):
+            agent_name("agent.rename", '{"result":{}}')
+
+
+class MissingRename(unittest.TestCase):
+    def test_accepts_the_name_asked_for(self):
+        self.assertIsNone(missing_rename("new", "old", "new"))
+        self.assertIsNone(missing_rename("new", None, "new"))
+
+    def test_rejects_a_name_left_as_it_was_or_cleared(self):
+        for after in ("old", None):
+            with self.subTest(after=after):
+                self.assertEqual(
+                    missing_rename("new", "old", after),
+                    f"its name is {after!r} afterwards, not 'new'",
+                )
+
+    def test_rejects_a_rename_that_could_not_have_changed_anything(self):
+        self.assertIn("proves nothing", missing_rename("new", "new", "new"))
+
+
 class VerdictsModule(unittest.TestCase):
     def test_catalog_e2e_uses_the_module_rather_than_its_own_copy(self):
         for name in (
+            "agent_name",
             "effect_target",
             "layout_rect",
             "missing_effect",
+            "missing_rename",
             "unaccepted_response",
             "wrong_action",
         ):
@@ -318,6 +358,12 @@ class ResolvedArgs(unittest.TestCase):
         self.assertEqual(
             self.resolve(["pane", "rename", "{pane}", "--tab", "{tab}", "{text}"]),
             ["pane", "rename", "p1", "--tab", "t1", "e2e renamed"],
+        )
+
+    def test_gives_an_agent_a_name_herdr_accepts(self):
+        self.assertEqual(
+            self.resolve(["agent", "rename", "{pane}", "{text}"]),
+            ["agent", "rename", "p1", "e2e-renamed"],
         )
 
     def test_gives_a_branch_name_no_space(self):
@@ -510,6 +556,41 @@ class MainVerdict(unittest.TestCase):
                     code, output = self.run_main('{"id":"cli:worktree","result":{"type":"ok"}}')
                 self.assertEqual(code, 0, output)
                 self.assertEqual(argv.read_text().splitlines(), ran)
+
+    AGENT_RENAME = '["agent", "rename", "{pane}", "{text}"]'
+    RENAMED = '{"id":"cli:agent:rename","result":{"type":"agent_info"}}'
+
+    def run_agent(self, before: str, after: str) -> tuple[int, str]:
+        self.use_entry("agent.rename", self.AGENT_RENAME)
+        env = {"STUB_AGENT_BEFORE": before, "STUB_AGENT_AFTER": after}
+        with mock.patch.dict(os.environ, env):
+            return self.run_main(self.RENAMED)
+
+    def test_passes_an_agent_rename_that_changes_the_name(self):
+        code, output = self.run_agent("e2e-agent", "e2e-renamed")
+        self.assertEqual(code, 0, output)
+
+    def test_fails_an_agent_rename_that_leaves_the_name_alone(self):
+        code, output = self.run_agent("e2e-agent", "e2e-agent")
+        self.assertEqual(code, 1, output)
+        self.assertIn("not 'e2e-renamed'", output)
+
+    def test_fails_an_agent_rename_that_clears_the_name(self):
+        code, output = self.run_agent("e2e-agent", "")
+        self.assertEqual(code, 1, output)
+        self.assertIn("None afterwards", output)
+
+    def test_hosts_an_agent_only_for_an_agent_entry(self):
+        for args, started in ((self.AGENT_RENAME, True), ('["pane", "close", "{pane}"]', False)):
+            with self.subTest(args=args):
+                self.use_entry("x.y", args)
+                argv = self.catalog.parent / "ran.argv"
+                argv.unlink(missing_ok=True)
+                env = {"STUB_ARGV": str(argv), "STUB_AGENT_BEFORE": "e2e-agent",
+                       "STUB_AGENT_AFTER": "e2e-renamed"}
+                with mock.patch.dict(os.environ, env):
+                    self.run_main(self.RENAMED)
+                self.assertEqual("agent start" in argv.read_text(), started)
 
     def test_passes_a_swap_that_moves_the_pane_the_named_way(self):
         self.use_entry("pane.swap.left", SWAP_LEFT)
