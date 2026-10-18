@@ -94,7 +94,7 @@ pub fn render(f: &mut Frame, app: &mut App) {
         ),
     };
 
-    let status = app.status.as_deref().map(status::paragraph);
+    let status = app.footer().as_deref().map(status::paragraph);
     let reserved = u16::from(header.is_some())
         + INPUT_ROWS
         + if matches!(app.stage, Stage::Prompt { .. }) {
@@ -1506,7 +1506,7 @@ mod render_tests {
         for width in [58, 51] {
             let mut app = app_with(vec![command("split.right", "Split pane: right", None)]);
             for note in &notes {
-                app.add_status(note.clone());
+                app.add_startup_note(note.clone());
             }
             let lines = draw(&mut app, width, 20);
             let footer = usize::from(20 - MAX_STATUS_ROWS);
@@ -1627,7 +1627,7 @@ mod render_tests {
     fn the_skipped_note_leaves_the_floor_its_two_candidates() {
         for width in [36, 30] {
             let mut app = app_with_skipped_entry();
-            app.add_status(crate::skipped_note(1));
+            app.add_startup_note(crate::skipped_note(1));
             let lines = draw(&mut app, width, MIN_ROWS);
             let listed = listed_commands(&lines);
             assert_eq!(listed, 2, "width {width}: {lines:#?}");

@@ -121,6 +121,7 @@ pub enum Outcome {
 pub struct App {
     pub stage: Stage,
     pub status: Option<String>,
+    startup_notes: Vec<String>,
     pub selection: Selection,
     candidates: Vec<Candidate>,
     frecency: Frecency,
@@ -133,6 +134,7 @@ impl App {
         let mut app = App {
             stage: Stage::Commands,
             status: None,
+            startup_notes: Vec::new(),
             selection: Selection::default(),
             candidates,
             frecency,
@@ -163,13 +165,25 @@ impl App {
         self.status = None;
     }
 
-    /// Adds a footer note after any already showing, so a later note never
-    /// hides an earlier one.
-    pub fn add_status(&mut self, note: String) {
-        self.status = Some(match self.status.take() {
-            Some(earlier) => format!("{earlier}{SEPARATOR}{note}"),
-            None => note,
-        });
+    /// Adds a startup note after any already held, so a later note never hides
+    /// an earlier one. Notes outlive `status`, which a stage change clears.
+    pub fn add_startup_note(&mut self, note: String) {
+        self.startup_notes.push(note);
+    }
+
+    /// What the footer says: on the command list the status, if any, then every
+    /// startup note; a stage shows its own status alone.
+    pub fn footer(&self) -> Option<String> {
+        let notes = matches!(self.stage, Stage::Commands)
+            .then_some(self.startup_notes.as_slice())
+            .unwrap_or_default();
+        let parts: Vec<&str> = self
+            .status
+            .iter()
+            .chain(notes)
+            .map(String::as_str)
+            .collect();
+        (!parts.is_empty()).then(|| parts.join(SEPARATOR))
     }
 
     /// Backs out to the command list. Returns false when already there, which
@@ -469,13 +483,113 @@ mod tests {
     }
 
     #[test]
-    fn a_later_footer_note_follows_an_earlier_one_rather_than_replacing_it() {
+    fn a_later_startup_note_follows_an_earlier_one_rather_than_replacing_it() {
         let mut app = app_with(vec![]);
-        app.add_status("first".into());
-        assert_eq!(app.status.as_deref(), Some("first"));
-        app.add_status("second".into());
-        app.add_status("third".into());
-        assert_eq!(app.status.as_deref(), Some("first ⋅ second ⋅ third"));
+        app.add_startup_note("first".into());
+        assert_eq!(app.footer().as_deref(), Some("first"));
+        app.add_startup_note("second".into());
+        app.add_startup_note("third".into());
+        assert_eq!(app.footer().as_deref(), Some("first ⋅ second ⋅ third"));
+    }
+
+    /// The four notes `main` adds at startup, as the real constructors build them.
+    fn startup_notes() -> [(&'static str, String); 4] {
+        let dir = std::env::temp_dir().join(format!("palette-app-notes-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join(crate::settings::FILE_NAME),
+            "icons = false\nbad = [\n",
+        )
+        .unwrap();
+        let (_, unusable) = crate::settings::load(Some(&dir));
+        [
+            ("outdated", crate::outdated_note("0.1.0", "0.8.2")),
+            ("skipped", crate::skipped_note(1)),
+            ("retired icon", crate::retired_icon_note()),
+            (
+                "unusable settings",
+                unusable.expect("a broken file is reported"),
+            ),
+        ]
+    }
+
+    fn focus_tab() -> Cmd {
+        cmd(
+            "tab.focus",
+            "Focus tab",
+            &["tab", "focus", "{}"],
+            Some("tab list"),
+        )
+    }
+
+    fn app_holding(note: &str) -> App {
+        let mut app = app_with(vec![focus_tab()]);
+        app.add_startup_note(note.to_string());
+        app
+    }
+
+    fn stage_target(app: &mut App) {
+        app.enter_targets(
+            focus_tab(),
+            vec![Target {
+                id: "w3Y:t1".into(),
+                label: "herdr".into(),
+            }],
+        );
+    }
+
+    #[test]
+    fn each_startup_note_survives_typing_a_query() {
+        for (name, note) in startup_notes() {
+            let mut app = app_holding(&note);
+            app.edit(Edit::Insert('t'));
+            assert_eq!(app.footer().as_deref(), Some(note.as_str()), "{name}");
+        }
+    }
+
+    #[test]
+    fn each_startup_note_returns_after_a_stage_is_left() {
+        for (name, note) in startup_notes() {
+            let mut app = app_holding(&note);
+            stage_target(&mut app);
+            assert_eq!(app.footer(), None, "{name}: a stage shows its own footer");
+            assert!(app.leave_stage());
+            assert_eq!(app.footer().as_deref(), Some(note.as_str()), "{name}");
+        }
+    }
+
+    #[test]
+    fn each_startup_note_stays_out_of_the_prompt_stage_and_returns() {
+        for (name, note) in startup_notes() {
+            let mut app = app_holding(&note);
+            app.enter_prompt(focus_tab(), String::new());
+            assert_eq!(app.footer(), None, "{name}");
+            assert!(app.leave_stage());
+            assert_eq!(app.footer().as_deref(), Some(note.as_str()), "{name}");
+        }
+    }
+
+    #[test]
+    fn a_command_list_error_stands_above_each_startup_note() {
+        for (name, note) in startup_notes() {
+            let mut app = app_holding(&note);
+            app.status = Some("`tab.focus` failed: no herdr".into());
+            assert_eq!(
+                app.footer(),
+                Some(format!("`tab.focus` failed: no herdr ⋅ {note}")),
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_stage_error_shows_without_the_startup_notes() {
+        for (name, note) in startup_notes() {
+            let mut app = app_holding(&note);
+            stage_target(&mut app);
+            app.status = Some("herdr went away".into());
+            assert_eq!(app.footer().as_deref(), Some("herdr went away"), "{name}");
+        }
     }
 
     #[test]

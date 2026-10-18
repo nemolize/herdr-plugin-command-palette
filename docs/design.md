@@ -490,6 +490,12 @@ keyboard-up rows, less the border and the cell or two a percentage loses, is
 about 8–10 rows inside, so a slightly larger font or keyboard would have made
 the palette refuse rather than merely tighten.
 
+The notes shown when the palette opens (an older herdr, skipped entries, a
+retired icon setting, an unusable settings file) are held apart from the status
+message. The command list shows them after the status, so an error stands above
+them rather than replacing them, and they come back whenever a stage is left;
+Targets and Prompt show only their own status (#115).
+
 A status message replacing the footer wraps to at most five rows, and to
 fewer when more would take the floor's two candidates; a longer one ends in `...`
 (#144). Herdr's errors are quoted whole, so without the cap one long error

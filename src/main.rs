@@ -188,20 +188,20 @@ fn run() -> Result<(), String> {
     // as a footer note rather than a refusal, because most entries still work.
     if let (Some(required), Some(actual)) = (checked_against.as_deref(), herdr.version()) {
         if catalog::is_older(&actual, required) == Some(true) {
-            app.add_status(outdated_note(&actual, required));
+            app.add_startup_note(outdated_note(&actual, required));
         }
     }
 
     if !rejected.is_empty() {
-        app.add_status(skipped_note(rejected.len()));
+        app.add_startup_note(skipped_note(rejected.len()));
     }
 
     if sets_retired_icon {
-        app.add_status(retired_icon_note());
+        app.add_startup_note(retired_icon_note());
     }
 
     if let Some(problem) = settings_problem {
-        app.add_status(problem);
+        app.add_startup_note(problem);
     }
 
     let mut screen = ui::Screen::enter()?;
