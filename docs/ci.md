@@ -207,9 +207,11 @@ Every action is pinned by full commit SHA. A tag is mutable, and a repo that
 audits its Rust dependencies should hold its own workflow supply chain to the
 same standard. `just zizmor` enforces it, so a floating tag, a branch
 reference, or a version comment that is missing or names the wrong release fails
-`Lint`. Renovate moves the pins (above); a pin changed by hand takes both the
-SHA of the release's tag and that tag as its comment, and `just zizmor` confirms
-they agree.
+`Lint`. The repository setting `sha_pinning_required` is on as well, so GitHub
+itself rejects a workflow run that references an action by tag or branch, which
+backs up `just zizmor` on the platform side. Renovate moves the pins (above); a
+pin changed by hand takes both the SHA of the release's tag and that tag as its
+comment, and `just zizmor` confirms they agree.
 
 ## Releases
 
