@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.12.0
+
+### Minor Changes
+
+- 63b0259: Add `Rename agent...`, which renames the agent running in the pane the palette was opened over, seeded with its current name; `--clear` is refused, and a pane running no agent shows herdr's `agent_not_found`
+
+### Patch Changes
+
+- 4b73671: A row's key is no longer drawn with a glyph missing when its title has a control character between a character and its variation selector
+- b085d65: Notes shown when the palette opens (herdr older than the catalog, skipped entries, a retired icon setting, an unusable settings file) now come back on the command list after you leave a stage, and an error on the list no longer replaces them
+
 ## 0.11.1
 
 ### Patch Changes
