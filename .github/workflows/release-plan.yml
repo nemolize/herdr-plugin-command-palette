@@ -15,7 +15,7 @@ concurrency:
 jobs:
   Version-PR:
     if: github.ref == 'refs/heads/main'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 10
     permissions:
       contents: write
@@ -44,7 +44,7 @@ jobs:
   # branch, never the version on main that a draft is for.
   Draft-Release:
     if: github.ref == 'refs/heads/main'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
     permissions:
       contents: write
