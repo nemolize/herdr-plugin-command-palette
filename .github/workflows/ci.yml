@@ -18,7 +18,7 @@ env:
 
 jobs:
   Lint:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 10
 
     steps:
@@ -56,7 +56,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
 
   Test:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 10
 
     steps:
@@ -91,7 +91,7 @@ jobs:
   # It also invokes the palette's open action twice there, since open-test's stubbed
   # collision envelope goes stale the same way (issue #133).
   E2ETests:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 15
 
     steps:
@@ -106,7 +106,7 @@ jobs:
       - run: just popup-collision-e2e
 
   Build:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 15
 
     steps:
