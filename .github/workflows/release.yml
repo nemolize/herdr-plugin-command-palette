@@ -157,7 +157,7 @@ jobs:
     # Runs on a dispatch too, so the checks needing no tag are rehearsed rather
     # than first executing in a release build.
     needs: Build
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 10
     permissions:
       contents: write
