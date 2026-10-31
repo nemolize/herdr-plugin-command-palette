@@ -32,7 +32,7 @@ jobs:
       - id: zizmor-version
         name: Read the zizmor version pinned in mise.toml
         run: python3 -c 'import tomllib; print("version=" + tomllib.load(open("mise.toml", "rb"))["tools"]["zizmor"])' >> "$GITHUB_OUTPUT"
-      - uses: taiki-e/install-action@5488ac5a951645ce95062214902ac4b6bc1a1037 # v2.87.32
+      - uses: taiki-e/install-action@86f7a0ffb25f40114606501a311ebcfaf882ea32 # v2.88.0
         with:
           tool: just@1.58.0, zizmor@${{ steps.zizmor-version.outputs.version }}
       # taiki-e/install-action has no actionlint; mise reads actionlint's version from mise.toml.
@@ -67,7 +67,7 @@ jobs:
         with:
           rustflags: ""
           cache-key: test
-      - uses: taiki-e/install-action@5488ac5a951645ce95062214902ac4b6bc1a1037 # v2.87.32
+      - uses: taiki-e/install-action@86f7a0ffb25f40114606501a311ebcfaf882ea32 # v2.88.0
         with:
           tool: just@1.58.0
       - run: just test
@@ -98,7 +98,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: taiki-e/install-action@5488ac5a951645ce95062214902ac4b6bc1a1037 # v2.87.32
+      - uses: taiki-e/install-action@86f7a0ffb25f40114606501a311ebcfaf882ea32 # v2.88.0
         with:
           tool: just@1.58.0
       - run: just fetch-herdr
@@ -117,7 +117,7 @@ jobs:
         with:
           rustflags: ""
           cache-key: build
-      - uses: taiki-e/install-action@5488ac5a951645ce95062214902ac4b6bc1a1037 # v2.87.32
+      - uses: taiki-e/install-action@86f7a0ffb25f40114606501a311ebcfaf882ea32 # v2.88.0
         with:
           tool: just@1.58.0
       # cargo test compiles the test profile only. This is the sole check that
