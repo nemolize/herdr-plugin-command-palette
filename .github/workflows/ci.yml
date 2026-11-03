@@ -36,7 +36,7 @@ jobs:
         with:
           tool: just@1.58.0, zizmor@${{ steps.zizmor-version.outputs.version }}
       # taiki-e/install-action has no actionlint; mise reads actionlint's version from mise.toml.
-      - uses: jdx/mise-action@6be3c7ed4c21d4f76b208d351d95aac273ebb76d # v5.2.4
+      - uses: jdx/mise-action@6612f0ef07ed2a736cd1e00a94a065522dd41195 # v5.2.5
         with:
           version: 2026.10.11
           install_args: aqua:rhysd/actionlint
